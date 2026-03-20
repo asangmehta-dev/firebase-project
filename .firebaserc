@@ -1,0 +1,12 @@
+{
+  "projects": {
+    "default": "deploymentportal-5ec3a"
+  },
+  "targets": {
+    "deploymentportal-5ec3a": {
+      "hosting": {
+        "deployment-portal-instrumental": ["deployment-portal-instrumental"]
+      }
+    }
+  }
+}
