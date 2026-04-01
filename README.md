@@ -1,3 +1,5 @@
+# Deployment Portal
+
 A React 18 web application for managing multi-party hardware deployment projects. Built for Instrumental to coordinate documentation, milestones, and program details across four stakeholder groups: Instrumental, Systems Integrator (SI), Customer, and Contract Manufacturer (CM).
 
 ---
@@ -104,7 +106,8 @@ npx firebase-tools target:apply hosting deployment-portal-instrumental deploymen
 
 | Role | Who | Access |
 |------|-----|--------|
-| Admin | All `@instrumental.com` accounts (auto-approved) | Full read/write, user management, all parties |
+| SuperAdmin | One designated user (`superAdmin: true` in DB) | All admin powers + can promote others to admin |
+| Admin | Explicitly granted by SuperAdmin | Full read/write, user management, all parties |
 | User — Instrumental | Manually approved, `partyId: instrumental` | Overview + Instrumental docs |
 | User — Customer | Manually approved, `partyId: customer` | Overview + Customer docs |
 | User — SI | Manually approved, `partyId: si` | SI docs only |
@@ -129,6 +132,8 @@ New users sign in with Google and land in a pending queue until an admin approve
 | v2.0.0 | Baseline — multi-party portal with milestones, documents, training, admin panel |
 | v2.1.0 | Firebase Hosting URL, multi-language UI, Instrumental/Customer dashboards, milestone % progress, inline editing |
 | v2.1.1 | Chronological milestone sort, drag-to-reorder for Program Details and Checklist Milestones |
+| v2.2.0 | Language dropdown moved to sidebar bottom, clickable party cards, item count fix, superAdmin role, @instrumental.com no longer auto-admin |
+| v2.2.1 | Fixed broken IIFE in overview party cards — non-admin users can only navigate to their own party |
 
 ---
 

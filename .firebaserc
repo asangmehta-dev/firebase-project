@@ -5,8 +5,11 @@
   "targets": {
     "deploymentportal-5ec3a": {
       "hosting": {
-        "deployment-portal-instrumental": ["deployment-portal-instrumental"]
+        "deployment-portal-instrumental": [
+          "deployment-portal-instrumental"
+        ]
       }
     }
-  }
+  },
+  "etags": {}
 }

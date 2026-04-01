@@ -63,6 +63,251 @@ const SEED_DOC_CATEGORIES = {
     { id: "cm_specs", name: "Process Specifications", accessLevel: "open", items: [] },
   ],
 };
+/* ═══ TRANSLATIONS ═══ */
+const TRANSLATIONS = {
+  es: {
+    "Deployment Portal": "Portal de Despliegue",
+    "Project": "Proyecto", "Language": "Idioma",
+    "Overview": "Resumen", "Admin Panel": "Panel de Administración",
+    "Manage Projects": "Gestionar Proyectos", "Sign Out": "Cerrar Sesión",
+    "Deployment overview": "Resumen de despliegue",
+    "Folders": "Carpetas", "Documents": "Documentos",
+    "Milestone Progress": "Progreso de Hitos",
+    "Add checklist items to track progress": "Añadir elementos para seguir el progreso",
+    "Stations": "Estaciones", "inspection stations for this project": "estaciones de inspección para este proyecto",
+    "Key Milestones": "Hitos Clave", "Customer View": "Vista del Cliente",
+    "Add milestones in Program Details to display here": "Añadir hitos en Detalles del Programa para mostrar aquí",
+    "📢 Site Status Banner": "📢 Banner de Estado del Sitio",
+    "No status message set.": "Sin mensaje de estado.",
+    "Cancel": "Cancelar", "Save": "Guardar", "Clear": "Limpiar", "✎ Edit": "✎ Editar",
+    "Hardware & MES Deployments": "Despliegues de Hardware y MES",
+    "Specifications & Integration Docs": "Especificaciones y Docs de Integración",
+    "Program Details & Timelines": "Detalles del Programa y Cronogramas",
+    "Training Documentation": "Documentación de Capacitación",
+    "Checklist Milestones": "Hitos de Lista de Verificación",
+    "CAD & Drawings": "CAD y Planos", "Agreements": "Acuerdos", "Pricing": "Precios",
+    "Legal Documents": "Documentos Legales", "Program Details": "Detalles del Programa",
+    "CAD & Specifications": "CAD y Especificaciones", "Process Specifications": "Especificaciones de Proceso",
+    "Restricted — contact admin for access": "Restringido — contacte al administrador",
+    "items": "elementos", "+ Add Folder": "+ Agregar Carpeta", "Folder Name": "Nombre de Carpeta",
+    "Access": "Acceso", "Open": "Abierto", "Restricted": "Restringido", "Create": "Crear",
+    "No documents yet.": "Sin documentos aún.", "Link": "Enlace",
+    "+ Add Link or PDF": "+ Agregar Enlace o PDF", "Delete Folder": "Eliminar Carpeta",
+    "Name": "Nombre", "URL (any format)": "URL (cualquier formato)",
+    "PDF URL (must be .pdf)": "URL PDF (debe ser .pdf)", "Document Language": "Idioma del Documento",
+    "Add": "Agregar", "Training": "Capacitación", "Enabled": "Habilitado", "Disabled": "Deshabilitado",
+    "N/A": "N/A", "Enable": "Habilitar", "+ Add Training Material": "+ Agregar Material de Capacitación",
+    "Title": "Título", "Select a project from the sidebar.": "Seleccione un proyecto de la barra lateral.",
+    "Access denied.": "Acceso denegado.", "Dashboard": "Panel",
+    "Specs, CAD, and business deal locked.": "Especificaciones, CAD y acuerdo comercial cerrados.",
+    "Ship hardware + software/ML. Includes FAT criteria.": "Envío de hardware + software/ML. Incluye criterios FAT.",
+    "OK to build at CM. SAT criteria.": "Aprobado para fabricar en CM. Criterios SAT.",
+    "Specifications finalized and signed off": "Especificaciones finalizadas y aprobadas",
+    "CAD files reviewed and approved": "Archivos CAD revisados y aprobados",
+    "Business deal / contract locked": "Acuerdo comercial / contrato cerrado",
+    "NDA and IP agreements executed": "Acuerdos NDA y PI ejecutados",
+    "Pricing and payment terms agreed": "Precios y términos de pago acordados",
+    "Stakeholder sign-off obtained": "Aprobación de partes interesadas obtenida",
+    "All hardware sourced and assembled": "Todo el hardware adquirido y ensamblado",
+    "Software / ML packaged and validated": "Software / ML empaquetado y validado",
+    "FAT criteria defined": "Criterios FAT definidos", "FAT executed and passed": "FAT ejecutado y aprobado",
+    "FAT report documented and signed": "Informe FAT documentado y firmado",
+    "Shipping logistics confirmed": "Logística de envío confirmada",
+    "SAT criteria defined": "Criterios SAT definidos", "SAT executed and passed": "SAT ejecutado y aprobado",
+    "SAT report documented and signed": "Informe SAT documentado y firmado",
+    "CM line readiness confirmed": "Preparación de línea CM confirmada",
+    "Hardware installed and calibrated": "Hardware instalado y calibrado",
+    "Operator training completed": "Capacitación de operadores completada",
+    "Add a checklist item...": "Agregar un elemento de lista...",
+    "+ Add Item": "+ Agregar Elemento", "Linked Resources": "Recursos Vinculados",
+    "+ Add Link": "+ Agregar Enlace", "Signatures": "Firmas", "+ Add Signature": "+ Agregar Firma",
+    "No materials yet.": "Sin materiales aún.",
+    "Training is disabled for this party. Toggle above to enable.": "Capacitación deshabilitada para este grupo. Active arriba para habilitar.",
+    "Training is not required.": "Capacitación no requerida.",
+  },
+  vi: {
+    "Deployment Portal": "Cổng Triển Khai",
+    "Project": "Dự án", "Language": "Ngôn ngữ",
+    "Overview": "Tổng quan", "Admin Panel": "Bảng Quản Trị",
+    "Manage Projects": "Quản Lý Dự Án", "Sign Out": "Đăng Xuất",
+    "Deployment overview": "Tổng quan triển khai",
+    "Folders": "Thư mục", "Documents": "Tài liệu",
+    "Milestone Progress": "Tiến độ Cột Mốc",
+    "Add checklist items to track progress": "Thêm mục kiểm tra để theo dõi tiến độ",
+    "Stations": "Trạm", "inspection stations for this project": "trạm kiểm tra cho dự án này",
+    "Key Milestones": "Cột Mốc Chính", "Customer View": "Xem của Khách hàng",
+    "Add milestones in Program Details to display here": "Thêm cột mốc vào Chi tiết Chương trình để hiển thị ở đây",
+    "📢 Site Status Banner": "📢 Thông Báo Trạng Thái Trang",
+    "No status message set.": "Chưa có thông báo trạng thái.",
+    "Cancel": "Hủy", "Save": "Lưu", "Clear": "Xóa", "✎ Edit": "✎ Chỉnh sửa",
+    "Hardware & MES Deployments": "Triển khai Phần cứng & MES",
+    "Specifications & Integration Docs": "Tài liệu Thông số & Tích hợp",
+    "Program Details & Timelines": "Chi tiết Chương trình & Tiến độ",
+    "Training Documentation": "Tài liệu Đào tạo",
+    "Checklist Milestones": "Cột Mốc Danh Sách Kiểm Tra",
+    "CAD & Drawings": "CAD & Bản vẽ", "Agreements": "Thỏa thuận", "Pricing": "Báo giá",
+    "Legal Documents": "Tài liệu Pháp lý", "Program Details": "Chi tiết Chương trình",
+    "CAD & Specifications": "CAD & Thông số kỹ thuật", "Process Specifications": "Thông số Quy trình",
+    "Restricted — contact admin for access": "Bị hạn chế — liên hệ quản trị viên để truy cập",
+    "items": "mục", "+ Add Folder": "+ Thêm Thư mục", "Folder Name": "Tên Thư mục",
+    "Access": "Quyền truy cập", "Open": "Mở", "Restricted": "Bị hạn chế", "Create": "Tạo",
+    "No documents yet.": "Chưa có tài liệu.", "Link": "Liên kết",
+    "+ Add Link or PDF": "+ Thêm Liên kết hoặc PDF", "Delete Folder": "Xóa Thư mục",
+    "Name": "Tên", "URL (any format)": "URL (bất kỳ định dạng nào)",
+    "PDF URL (must be .pdf)": "URL PDF (phải là .pdf)", "Document Language": "Ngôn ngữ Tài liệu",
+    "Add": "Thêm", "Training": "Đào tạo", "Enabled": "Đã bật", "Disabled": "Đã tắt",
+    "N/A": "N/A", "Enable": "Bật", "+ Add Training Material": "+ Thêm Tài liệu Đào tạo",
+    "Title": "Tiêu đề", "Select a project from the sidebar.": "Chọn một dự án từ thanh bên.",
+    "Access denied.": "Truy cập bị từ chối.", "Dashboard": "Bảng điều khiển",
+    "Specs, CAD, and business deal locked.": "Thông số, CAD và thỏa thuận kinh doanh đã được chốt.",
+    "Ship hardware + software/ML. Includes FAT criteria.": "Vận chuyển phần cứng + phần mềm/ML. Bao gồm tiêu chí FAT.",
+    "OK to build at CM. SAT criteria.": "Được phép sản xuất tại CM. Tiêu chí SAT.",
+    "Specifications finalized and signed off": "Thông số đã hoàn thiện và được ký duyệt",
+    "CAD files reviewed and approved": "Tệp CAD đã được xem xét và phê duyệt",
+    "Business deal / contract locked": "Hợp đồng / thỏa thuận kinh doanh đã chốt",
+    "NDA and IP agreements executed": "NDA và thỏa thuận IP đã ký kết",
+    "Pricing and payment terms agreed": "Đã thống nhất về giá và điều khoản thanh toán",
+    "Stakeholder sign-off obtained": "Đã có sự phê duyệt từ các bên liên quan",
+    "All hardware sourced and assembled": "Tất cả phần cứng đã được cung cấp và lắp ráp",
+    "Software / ML packaged and validated": "Phần mềm / ML đã được đóng gói và xác nhận",
+    "FAT criteria defined": "Tiêu chí FAT đã được xác định", "FAT executed and passed": "FAT đã thực hiện và vượt qua",
+    "FAT report documented and signed": "Báo cáo FAT đã được ghi lại và ký",
+    "Shipping logistics confirmed": "Hậu cần vận chuyển đã được xác nhận",
+    "SAT criteria defined": "Tiêu chí SAT đã được xác định", "SAT executed and passed": "SAT đã thực hiện và vượt qua",
+    "SAT report documented and signed": "Báo cáo SAT đã được ghi lại và ký",
+    "CM line readiness confirmed": "Sẵn sàng dây chuyền CM đã được xác nhận",
+    "Hardware installed and calibrated": "Phần cứng đã được lắp đặt và hiệu chỉnh",
+    "Operator training completed": "Đào tạo người vận hành đã hoàn thành",
+    "Add a checklist item...": "Thêm mục kiểm tra...",
+    "+ Add Item": "+ Thêm Mục", "Linked Resources": "Tài nguyên Liên kết",
+    "+ Add Link": "+ Thêm Liên kết", "Signatures": "Chữ ký", "+ Add Signature": "+ Thêm Chữ ký",
+    "No materials yet.": "Chưa có tài liệu.",
+    "Training is disabled for this party. Toggle above to enable.": "Đào tạo đã tắt cho nhóm này. Bật ở trên để kích hoạt.",
+    "Training is not required.": "Không cần đào tạo.",
+  },
+  "zh-tw": {
+    "Deployment Portal": "部署門戶",
+    "Project": "專案", "Language": "語言",
+    "Overview": "概覽", "Admin Panel": "管理面板",
+    "Manage Projects": "管理專案", "Sign Out": "登出",
+    "Deployment overview": "部署概覽",
+    "Folders": "資料夾", "Documents": "文件",
+    "Milestone Progress": "里程碑進度",
+    "Add checklist items to track progress": "新增清單項目以追蹤進度",
+    "Stations": "站點", "inspection stations for this project": "本專案的檢測站",
+    "Key Milestones": "關鍵里程碑", "Customer View": "客戶視角",
+    "Add milestones in Program Details to display here": "在計劃詳情中新增里程碑以在此顯示",
+    "📢 Site Status Banner": "📢 網站狀態橫幅",
+    "No status message set.": "未設置狀態訊息。",
+    "Cancel": "取消", "Save": "儲存", "Clear": "清除", "✎ Edit": "✎ 編輯",
+    "Hardware & MES Deployments": "硬體與 MES 部署",
+    "Specifications & Integration Docs": "規格與整合文件",
+    "Program Details & Timelines": "計劃詳情與時程",
+    "Training Documentation": "培訓文件",
+    "Checklist Milestones": "清單里程碑",
+    "CAD & Drawings": "CAD 與圖紙", "Agreements": "協議", "Pricing": "定價",
+    "Legal Documents": "法律文件", "Program Details": "計劃詳情",
+    "CAD & Specifications": "CAD 與規格", "Process Specifications": "流程規格",
+    "Restricted — contact admin for access": "受限 — 請聯絡管理員以獲取訪問權限",
+    "items": "項目", "+ Add Folder": "+ 新增資料夾", "Folder Name": "資料夾名稱",
+    "Access": "訪問", "Open": "開放", "Restricted": "受限", "Create": "建立",
+    "No documents yet.": "尚無文件。", "Link": "連結",
+    "+ Add Link or PDF": "+ 新增連結或 PDF", "Delete Folder": "刪除資料夾",
+    "Name": "名稱", "URL (any format)": "URL（任何格式）",
+    "PDF URL (must be .pdf)": "PDF URL（必須為 .pdf）", "Document Language": "文件語言",
+    "Add": "新增", "Training": "培訓", "Enabled": "已啟用", "Disabled": "已停用",
+    "N/A": "不適用", "Enable": "啟用", "+ Add Training Material": "+ 新增培訓材料",
+    "Title": "標題", "Select a project from the sidebar.": "從側邊欄選擇一個專案。",
+    "Access denied.": "訪問被拒絕。", "Dashboard": "儀表板",
+    "Specs, CAD, and business deal locked.": "規格、CAD 和商業協議已鎖定。",
+    "Ship hardware + software/ML. Includes FAT criteria.": "出貨硬體 + 軟體/ML。包含 FAT 標準。",
+    "OK to build at CM. SAT criteria.": "可在 CM 開始生產。SAT 標準。",
+    "Specifications finalized and signed off": "規格已完成並簽核",
+    "CAD files reviewed and approved": "CAD 檔案已審查並批准",
+    "Business deal / contract locked": "商業協議/合約已鎖定",
+    "NDA and IP agreements executed": "NDA 和 IP 協議已執行",
+    "Pricing and payment terms agreed": "價格和付款條件已議定",
+    "Stakeholder sign-off obtained": "已獲得利益相關者的簽核",
+    "All hardware sourced and assembled": "所有硬體已採購並組裝",
+    "Software / ML packaged and validated": "軟體 / ML 已打包並驗證",
+    "FAT criteria defined": "FAT 標準已定義", "FAT executed and passed": "FAT 已執行並通過",
+    "FAT report documented and signed": "FAT 報告已記錄並簽署",
+    "Shipping logistics confirmed": "物流安排已確認",
+    "SAT criteria defined": "SAT 標準已定義", "SAT executed and passed": "SAT 已執行並通過",
+    "SAT report documented and signed": "SAT 報告已記錄並簽署",
+    "CM line readiness confirmed": "CM 產線準備就緒已確認",
+    "Hardware installed and calibrated": "硬體已安裝並校準",
+    "Operator training completed": "操作員培訓已完成",
+    "Add a checklist item...": "新增清單項目...",
+    "+ Add Item": "+ 新增項目", "Linked Resources": "相關資源",
+    "+ Add Link": "+ 新增連結", "Signatures": "簽署", "+ Add Signature": "+ 新增簽署",
+    "No materials yet.": "尚無材料。",
+    "Training is disabled for this party. Toggle above to enable.": "已為此方停用培訓。點擊上方切換以啟用。",
+    "Training is not required.": "不需要培訓。",
+  },
+  "zh-cn": {
+    "Deployment Portal": "部署门户",
+    "Project": "项目", "Language": "语言",
+    "Overview": "概览", "Admin Panel": "管理面板",
+    "Manage Projects": "管理项目", "Sign Out": "退出登录",
+    "Deployment overview": "部署概览",
+    "Folders": "文件夹", "Documents": "文件",
+    "Milestone Progress": "里程碑进度",
+    "Add checklist items to track progress": "添加清单项目以跟踪进度",
+    "Stations": "站点", "inspection stations for this project": "本项目的检测站",
+    "Key Milestones": "关键里程碑", "Customer View": "客户视图",
+    "Add milestones in Program Details to display here": "在计划详情中添加里程碑以在此显示",
+    "📢 Site Status Banner": "📢 网站状态横幅",
+    "No status message set.": "未设置状态消息。",
+    "Cancel": "取消", "Save": "保存", "Clear": "清除", "✎ Edit": "✎ 编辑",
+    "Hardware & MES Deployments": "硬件与MES部署",
+    "Specifications & Integration Docs": "规格与集成文档",
+    "Program Details & Timelines": "计划详情与时间线",
+    "Training Documentation": "培训文档",
+    "Checklist Milestones": "清单里程碑",
+    "CAD & Drawings": "CAD与图纸", "Agreements": "协议", "Pricing": "定价",
+    "Legal Documents": "法律文件", "Program Details": "计划详情",
+    "CAD & Specifications": "CAD与规格", "Process Specifications": "流程规格",
+    "Restricted — contact admin for access": "受限 — 请联系管理员获取访问权限",
+    "items": "项目", "+ Add Folder": "+ 添加文件夹", "Folder Name": "文件夹名称",
+    "Access": "访问", "Open": "开放", "Restricted": "受限", "Create": "创建",
+    "No documents yet.": "暂无文件。", "Link": "链接",
+    "+ Add Link or PDF": "+ 添加链接或PDF", "Delete Folder": "删除文件夹",
+    "Name": "名称", "URL (any format)": "URL（任何格式）",
+    "PDF URL (must be .pdf)": "PDF URL（必须为 .pdf）", "Document Language": "文件语言",
+    "Add": "添加", "Training": "培训", "Enabled": "已启用", "Disabled": "已停用",
+    "N/A": "不适用", "Enable": "启用", "+ Add Training Material": "+ 添加培训材料",
+    "Title": "标题", "Select a project from the sidebar.": "从侧边栏选择一个项目。",
+    "Access denied.": "访问被拒绝。", "Dashboard": "仪表板",
+    "Specs, CAD, and business deal locked.": "规格、CAD和商业协议已锁定。",
+    "Ship hardware + software/ML. Includes FAT criteria.": "发货硬件+软件/ML。包含FAT标准。",
+    "OK to build at CM. SAT criteria.": "可在CM处开始生产。SAT标准。",
+    "Specifications finalized and signed off": "规格已最终确定并签批",
+    "CAD files reviewed and approved": "CAD文件已审查并批准",
+    "Business deal / contract locked": "商业协议/合同已锁定",
+    "NDA and IP agreements executed": "NDA和IP协议已签署",
+    "Pricing and payment terms agreed": "价格和付款条款已商定",
+    "Stakeholder sign-off obtained": "已获得利益相关者批准",
+    "All hardware sourced and assembled": "所有硬件已采购并组装",
+    "Software / ML packaged and validated": "软件/ML已打包并验证",
+    "FAT criteria defined": "FAT标准已定义", "FAT executed and passed": "FAT已执行并通过",
+    "FAT report documented and signed": "FAT报告已记录并签署",
+    "Shipping logistics confirmed": "物流安排已确认",
+    "SAT criteria defined": "SAT标准已定义", "SAT executed and passed": "SAT已执行并通过",
+    "SAT report documented and signed": "SAT报告已记录并签署",
+    "CM line readiness confirmed": "CM产线就绪已确认",
+    "Hardware installed and calibrated": "硬件已安装并校准",
+    "Operator training completed": "操作员培训已完成",
+    "Add a checklist item...": "添加清单项目...",
+    "+ Add Item": "+ 添加项目", "Linked Resources": "相关资源",
+    "+ Add Link": "+ 添加链接", "Signatures": "签署", "+ Add Signature": "+ 添加签署",
+    "No materials yet.": "暂无材料。",
+    "Training is disabled for this party. Toggle above to enable.": "已为此方停用培训。点击上方切换以启用。",
+    "Training is not required.": "不需要培训。",
+  },
+};
+const t = (key, lang = "en") => { if (!lang || lang === "en" || !key) return key; return TRANSLATIONS[lang]?.[key] ?? key; };
+
 const getDefault = () => ({ projects: SEED_PROJECTS, progress: {}, docData: {}, statusMessage: "" });
 
 /* ═══ HELPERS ═══ */
@@ -132,21 +377,19 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
   const admin = isInst(user);
   return (
     <aside style={S.side}>
-      <div style={S.sideHead}><span style={{ fontSize: 24, color: "#00C9A7" }}>◎</span><span style={S.sideTitle}>Deployment Portal</span></div>
+      <div style={S.sideHead}><span style={{ fontSize: 24, color: "#00C9A7" }}>◎</span><span style={S.sideTitle}>{t("Deployment Portal", lang)}</span></div>
       <div style={{ padding: "0 18px 12px" }}>
-        <label style={S.sideLabel}>Project</label>
+        <label style={S.sideLabel}>{t("Project", lang)}</label>
         <select style={S.projSelect} value={project?.id || ""} onChange={e => setProject(projects.find(p => p.id === e.target.value))}>
           {projects.length === 0 && <option value="">No projects</option>}
           {projects.map(p => <option key={p.id} value={p.id}>{p.name}{p.status === "deprecated" ? " (Past)" : ""}</option>)}
         </select>
       </div>
-      <div style={{ padding: "0 18px 12px" }}>
-        <label style={S.sideLabel}>Language</label>
-        <select style={S.projSelect} value={lang} onChange={e => { setLang(e.target.value); if (user?.id) dbWrite(`users/${user.id}/langPref`, e.target.value).catch(() => {}); }}>
-          {LANGUAGES.map(l => <option key={l.id} value={l.id}>{l.flag} {l.label}</option>)}
-        </select>
-      </div>
       <nav style={S.navList}>
+        {(user.partyId === "instrumental" || user.partyId === "customer" || user.role === "admin") && (<>
+          <button onClick={() => setView("dashboard")} style={{ ...S.navBtn, ...(view === "dashboard" ? { background: "rgba(255,255,255,.1)", color: "#F1F5F9", borderLeftColor: "#00C9A7" } : {}) }}>{"⊙ " + t("Overview", lang)}</button>
+          <div style={S.divider} />
+        </>)}
         {/* Party sections */}
         {Object.values(PARTY_DEFS).filter(pd => {
           if (!admin && pd.id !== user.partyId) return false;
@@ -159,8 +402,8 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
         {/* Admin only */}
         {admin && (<>
           <div style={S.divider} />
-          <button onClick={() => setView("admin")} style={{ ...S.navBtn, ...(view === "admin" ? { background: "rgba(255,255,255,.1)", color: "#F1F5F9" } : {}) }}>⊞ Admin Panel</button>
-          <button onClick={() => setView("manage")} style={{ ...S.navBtn, ...(view === "manage" ? { background: "rgba(255,255,255,.1)", color: "#F1F5F9" } : {}) }}>⊕ Manage Projects</button>
+          <button onClick={() => setView("admin")} style={{ ...S.navBtn, ...(view === "admin" ? { background: "rgba(255,255,255,.1)", color: "#F1F5F9" } : {}) }}>{"⊞ " + t("Admin Panel", lang)}</button>
+          <button onClick={() => setView("manage")} style={{ ...S.navBtn, ...(view === "manage" ? { background: "rgba(255,255,255,.1)", color: "#F1F5F9" } : {}) }}>{"⊕ " + t("Manage Projects", lang)}</button>
         </>)}
       </nav>
       <div style={S.sideFoot}>
@@ -168,14 +411,20 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
           {user.photoURL ? <img src={user.photoURL} style={{ width: 34, height: 34, borderRadius: 10 }} alt="" referrerPolicy="no-referrer" /> : <div style={{ ...S.ava, background: "#00C9A7" }}>{(user.name||"?")[0]}</div>}
           <div><div style={{ fontSize: 14, fontWeight: 600, color: "#F1F5F9", fontFamily: F }}>{user.name}</div><div style={{ fontSize: 11, color: "#94A3B8" }}>{user.role}</div></div>
         </div>
-        <button style={S.btnOut} onClick={onLogout}>Sign Out</button>
+        <div style={{ marginTop: 10 }}>
+          <label style={{ ...S.sideLabel, marginBottom: 4 }}>{t("Language", lang)}</label>
+          <select style={{ ...S.projSelect, fontSize: 12 }} value={lang} onChange={e => { setLang(e.target.value); if (user?.id) dbWrite(`users/${user.id}/langPref`, e.target.value).catch(() => {}); }}>
+            {LANGUAGES.map(l => <option key={l.id} value={l.id}>{l.flag} {l.label}</option>)}
+          </select>
+        </div>
+        <button style={{ ...S.btnOut, marginTop: 10 }} onClick={onLogout}>{t("Sign Out", lang)}</button>
       </div>
     </aside>
   );
 }
 
 /* ═══ DASHBOARD — party specific ═══ */
-function DashboardView({ user, project, state, setState }) {
+function DashboardView({ user, project, state, setState, lang = "en", setView }) {
   const admin = isInst(user);
   // Prompt for missing station count on existing projects
   const [editStations, setEditStations] = useState(null);
@@ -185,23 +434,23 @@ function DashboardView({ user, project, state, setState }) {
   const [editStatus, setEditStatus] = useState(false);
   const [statusDraft, setStatusDraft] = useState(state?.statusMessage || "");
 
-  if (!project) return <div style={S.page}><div style={S.empty}>Select a project from the sidebar.</div></div>;
+  if (!project) return <div style={S.page}><div style={S.empty}>{t("Select a project from the sidebar.", lang)}</div></div>;
 
   // Customer dashboard — station count + key milestones
   if (user.partyId === "customer" && !admin) {
-    const progMilestones = (state.docData?.[project.id]?._programDetails?.tasks || []).filter(t => t.type === "milestone");
+    const progMilestones = (state.docData?.[project.id]?._programDetails?.tasks || []).filter(t => t.type === "milestone").sort((a, b) => new Date(a.date) - new Date(b.date));
     return (
       <div style={S.page}>
-        <h2 style={S.h2}>{getPN(project, "customer")} Dashboard</h2>
+        <h2 style={S.h2}>{getPN(project, "customer")} {t("Dashboard", lang)}</h2>
         <p style={S.sub}>{project.name}</p>
         <div style={{ ...S.card, borderTop: "3px solid #F59E0B" }}>
-          <div style={{ fontSize: 14, color: "#64748B", fontFamily: F, marginBottom: 6 }}>Stations</div>
+          <div style={{ fontSize: 14, color: "#64748B", fontFamily: F, marginBottom: 6 }}>{t("Stations", lang)}</div>
           <div style={{ fontSize: 42, fontWeight: 800, color: "#0F172A", fontFamily: F }}>{project.stations || 0}</div>
-          <div style={{ fontSize: 13, color: "#94A3B8", fontFamily: F }}>inspection stations for this project</div>
+          <div style={{ fontSize: 13, color: "#94A3B8", fontFamily: F }}>{t("inspection stations for this project", lang)}</div>
         </div>
         {progMilestones.length > 0 && (
           <div style={{ ...S.card, marginTop: 12, borderTop: "3px solid #F59E0B" }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 10 }}>Key Milestones</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 10 }}>{t("Key Milestones", lang)}</div>
             {progMilestones.map(m => (
               <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "1px solid #F1F5F9" }}>
                 <span style={{ fontSize: 14, fontFamily: F, color: "#1E293B" }}>🏁 {m.name}</span>
@@ -221,21 +470,21 @@ function DashboardView({ user, project, state, setState }) {
       {admin && (
         <div style={{ ...S.card, marginBottom: 20, borderLeft: "3px solid #00C9A7", padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: "#00C9A7", fontFamily: F }}>📢 Site Status Banner</span>
-            <button style={S.btnEdit} onClick={() => setEditStatus(!editStatus)}>{editStatus ? "Cancel" : "✎ Edit"}</button>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "#00C9A7", fontFamily: F }}>{t("📢 Site Status Banner", lang)}</span>
+            <button style={S.btnEdit} onClick={() => setEditStatus(!editStatus)}>{editStatus ? t("Cancel", lang) : t("✎ Edit", lang)}</button>
           </div>
           {editStatus ? (
             <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
               <input style={{ ...S.inp, flex: 1, padding: "8px 12px", fontSize: 14 }} value={statusDraft} onChange={e => setStatusDraft(e.target.value)} placeholder="e.g. Under construction — going live April 2026" />
-              <button style={{ ...S.btnMain, width: "auto", padding: "8px 16px", fontSize: 13, marginTop: 0 }} onClick={() => { setState(prev => ({ ...prev, statusMessage: statusDraft })); setEditStatus(false); }}>Save</button>
-              <button style={{ ...S.btnDel, padding: "8px 12px" }} onClick={() => { setState(prev => ({ ...prev, statusMessage: "" })); setStatusDraft(""); setEditStatus(false); }}>Clear</button>
+              <button style={{ ...S.btnMain, width: "auto", padding: "8px 16px", fontSize: 13, marginTop: 0 }} onClick={() => { setState(prev => ({ ...prev, statusMessage: statusDraft })); setEditStatus(false); }}>{t("Save", lang)}</button>
+              <button style={{ ...S.btnDel, padding: "8px 12px" }} onClick={() => { setState(prev => ({ ...prev, statusMessage: "" })); setStatusDraft(""); setEditStatus(false); }}>{t("Clear", lang)}</button>
             </div>
-          ) : <p style={{ fontSize: 14, color: state?.statusMessage ? "#0F172A" : "#94A3B8", marginTop: 8, fontFamily: F, fontStyle: state?.statusMessage ? "normal" : "italic" }}>{state?.statusMessage || "No status message set."}</p>}
+          ) : <p style={{ fontSize: 14, color: state?.statusMessage ? "#0F172A" : "#94A3B8", marginTop: 8, fontFamily: F, fontStyle: state?.statusMessage ? "normal" : "italic" }}>{state?.statusMessage || t("No status message set.", lang)}</p>}
         </div>
       )}
 
       <h2 style={S.h2}>{project.name}</h2>
-      <p style={S.sub}>Deployment overview</p>
+      <p style={S.sub}>{t("Deployment overview", lang)}</p>
 
       {/* Station count per project (admin can edit) */}
       <div style={S.gridRow}>
@@ -247,18 +496,21 @@ function DashboardView({ user, project, state, setState }) {
           const checkedCount = allChecks.filter(ck => ck.checked).length;
           const totalCount = allChecks.length;
           const msPct = totalCount > 0 ? Math.round((checkedCount / totalCount) * 100) : null;
+          const canNav = admin || user.partyId === pd.id;
           return (
-            <div key={pd.id} style={{ ...S.card, flex: "1 1 200px", borderTop: `3px solid ${pd.accent}` }}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 8 }}>{getPN(project, pd.id)}</div>
-              <div style={S.miniStat}><span>Folders</span><strong>{cats.length}</strong></div>
-              <div style={S.miniStat}><span>Documents</span><strong>{totalItems || "—"}</strong></div>
-              {msPct !== null && (
+            <div key={pd.id} onClick={() => canNav && setView && setView(`docs_${pd.id}`)} style={{ ...S.card, flex: "1 1 200px", borderTop: `3px solid ${pd.accent}`, cursor: canNav ? "pointer" : "default", transition: "box-shadow .15s" }} onMouseEnter={e => { if (canNav) e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,.10)"; }} onMouseLeave={e => e.currentTarget.style.boxShadow=""}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: pd.accent, fontFamily: F, marginBottom: 8 }}>{getPN(project, pd.id)}{canNav ? " ↗" : ""}</div>
+              <div style={S.miniStat}><span>{t("Folders", lang)}</span><strong>{cats.length}</strong></div>
+              <div style={S.miniStat}><span>{t("Documents", lang)}</span><strong>{totalItems || "—"}</strong></div>
+              {pd.id === "instrumental" && (
                 <div style={{ marginTop: 10 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748B", fontFamily: F, marginBottom: 4 }}>
-                    <span>Milestone Progress</span>
-                    <strong style={{ color: pd.accent }}>{msPct}%</strong>
+                    <span>{t("Milestone Progress", lang)}</span>
+                    {totalCount > 0 ? <strong style={{ color: pd.accent }}>{msPct}%</strong> : <span style={{ color: "#CBD5E1" }}>—</span>}
                   </div>
-                  <Bar value={msPct} color={pd.accent} h={4} />
+                  {totalCount > 0
+                    ? <Bar value={msPct} color={pd.accent} h={4} />
+                    : <div style={{ fontSize: 11, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>{t("Add checklist items to track progress", lang)}</div>}
                 </div>
               )}
             </div>
@@ -274,18 +526,46 @@ function DashboardView({ user, project, state, setState }) {
             {editStations === project.id ? (
               <div style={{ display: "flex", gap: 8 }}>
                 <input type="number" style={{ ...S.inp, width: 100, padding: "6px 10px" }} value={stationVal} onChange={e => setStationVal(e.target.value)} placeholder="0" />
-                <button style={{ ...S.btnMain, width: "auto", padding: "6px 14px", fontSize: 13, marginTop: 0 }} onClick={() => { setState(prev => ({ ...prev, projects: (prev.projects||[]).map(p => p.id === project.id ? { ...p, stations: parseInt(stationVal)||0 } : p) })); setEditStations(null); }}>Save</button>
+                <button style={{ ...S.btnMain, width: "auto", padding: "6px 14px", fontSize: 13, marginTop: 0 }} onClick={() => { setState(prev => ({ ...prev, projects: (prev.projects||[]).map(p => p.id === project.id ? { ...p, stations: parseInt(stationVal)||0 } : p) })); setEditStations(null); }}>{t("Save", lang)}</button>
               </div>
-            ) : <button style={S.btnEdit} onClick={() => { setEditStations(project.id); setStationVal(project.stations || ""); }}>✎ Edit</button>}
+            ) : <button style={S.btnEdit} onClick={() => { setEditStations(project.id); setStationVal(project.stations || ""); }}>{t("✎ Edit", lang)}</button>}
           </div>
         </div>
       )}
+
+      {/* Customer View — always visible to instrumental/admin */}
+      {(() => {
+        const progMilestones = (state.docData?.[project.id]?._programDetails?.tasks || []).filter(t => t.type === "milestone").sort((a, b) => new Date(a.date) - new Date(b.date));
+        return (
+          <div style={{ marginTop: 24 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 12, paddingBottom: 8, borderBottom: "2px solid #F1F5F9" }}>{t("Customer View", lang)}</div>
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+              <div style={{ ...S.card, flex: "1 1 160px", borderTop: "3px solid #F59E0B" }}>
+                <div style={{ fontSize: 14, color: "#64748B", fontFamily: F, marginBottom: 6 }}>{t("Stations", lang)}</div>
+                <div style={{ fontSize: 42, fontWeight: 800, color: "#0F172A", fontFamily: F }}>{project.stations || 0}</div>
+                <div style={{ fontSize: 13, color: "#94A3B8", fontFamily: F }}>{t("inspection stations for this project", lang)}</div>
+              </div>
+              <div style={{ ...S.card, flex: "1 1 300px", borderTop: "3px solid #F59E0B" }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 10 }}>{t("Key Milestones", lang)}</div>
+                {progMilestones.length > 0
+                  ? progMilestones.map(m => (
+                    <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "1px solid #F1F5F9" }}>
+                      <span style={{ fontSize: 14, fontFamily: F, color: "#1E293B" }}>🏁 {m.name}</span>
+                      <span style={{ fontSize: 13, color: "#64748B", fontFamily: F }}>{fmtDay(m.date)}</span>
+                    </div>
+                  ))
+                  : <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>{t("Add milestones in Program Details to display here", lang)}</div>}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
 
 /* ═══ MILESTONE CARD (reused from existing) ═══ */
-function MilestoneCard({ milestone: ms, catId, isAdmin, projectId, onToggleCheck, onAddCheckItem, onDeleteCheckItem, onAddLink, onDeleteLink, onUpdateSignature, onToggleSignature, onAddSignature, onDeleteSignature, onUpdateDesc, onUpdateCheckLabel }) {
+function MilestoneCard({ milestone: ms, catId, isAdmin, projectId, onToggleCheck, onAddCheckItem, onDeleteCheckItem, onAddLink, onDeleteLink, onUpdateSignature, onToggleSignature, onAddSignature, onDeleteSignature, onUpdateDesc, onUpdateCheckLabel, lang = "en" }) {
   const [expanded, setExpanded] = useState(false);
   const [newCheck, setNewCheck] = useState("");
   const [newLinkName, setNewLinkName] = useState("");
@@ -316,7 +596,7 @@ function MilestoneCard({ milestone: ms, catId, isAdmin, projectId, onToggleCheck
           <input style={{ ...S.inp, flex: 1, fontSize: 13, padding: "4px 8px" }} value={descDraft} onChange={e => setDescDraft(e.target.value)} onBlur={() => { onUpdateDesc(catId, ms.id, descDraft); setEditingDesc(false); }} onKeyDown={e => { if (e.key === "Enter") { onUpdateDesc(catId, ms.id, descDraft); setEditingDesc(false); } if (e.key === "Escape") setEditingDesc(false); }} autoFocus />
         ) : (
           <>
-            <span style={{ fontSize: 13, color: "#64748B", fontFamily: F }}>{ms.description}</span>
+            <span style={{ fontSize: 13, color: "#64748B", fontFamily: F }}>{t(ms.description, lang)}</span>
             {isAdmin && <button style={{ fontSize: 10, color: "#94A3B8", border: "none", background: "none", cursor: "pointer", padding: "0 2px", lineHeight: 1 }} onClick={() => { setDescDraft(ms.description || ""); setEditingDesc(true); }}>✎</button>}
           </>
         )}
@@ -332,7 +612,7 @@ function MilestoneCard({ milestone: ms, catId, isAdmin, projectId, onToggleCheck
               {isAdmin && editingCk === ck.id ? (
                 <input style={{ ...S.inp, flex: 1, fontSize: 14, padding: "4px 8px" }} value={ckDraft} onChange={e => setCkDraft(e.target.value)} onBlur={() => { if (ckDraft.trim()) onUpdateCheckLabel(catId, ms.id, ck.id, ckDraft.trim()); setEditingCk(null); }} onKeyDown={e => { if (e.key === "Enter") { if (ckDraft.trim()) onUpdateCheckLabel(catId, ms.id, ck.id, ckDraft.trim()); setEditingCk(null); } if (e.key === "Escape") setEditingCk(null); }} autoFocus />
               ) : (
-                <span style={{ flex: 1, fontSize: 14, color: "#1E293B", fontFamily: F, textDecoration: ck.checked ? "line-through" : "none", opacity: ck.checked ? .6 : 1 }}>{ck.label}</span>
+                <span style={{ flex: 1, fontSize: 14, color: "#1E293B", fontFamily: F, textDecoration: ck.checked ? "line-through" : "none", opacity: ck.checked ? .6 : 1 }}>{t(ck.label, lang)}</span>
               )}
               {isAdmin && editingCk !== ck.id && <button style={{ fontSize: 10, color: "#94A3B8", border: "none", background: "none", cursor: "pointer", padding: "0 2px", lineHeight: 1 }} onClick={() => { setCkDraft(ck.label); setEditingCk(ck.id); }}>✎</button>}
               {isAdmin && editingCk !== ck.id && <button style={{ ...S.btnDel, padding: "2px 6px", fontSize: 10 }} onClick={() => onDeleteCheckItem(catId, ms.id, ck.id)}>✕</button>}
@@ -340,14 +620,14 @@ function MilestoneCard({ milestone: ms, catId, isAdmin, projectId, onToggleCheck
           ))}
           {isAdmin && (
             <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <input style={{ ...S.inp, flex: 1, padding: "8px 10px", fontSize: 13 }} value={newCheck} onChange={e => setNewCheck(e.target.value)} placeholder="Add checklist item…" onKeyDown={e => { if (e.key === "Enter" && newCheck.trim()) { onAddCheckItem(catId, ms.id, newCheck.trim()); setNewCheck(""); } }} />
+              <input style={{ ...S.inp, flex: 1, padding: "8px 10px", fontSize: 13 }} value={newCheck} onChange={e => setNewCheck(e.target.value)} placeholder={t("Add a checklist item...", lang)} onKeyDown={e => { if (e.key === "Enter" && newCheck.trim()) { onAddCheckItem(catId, ms.id, newCheck.trim()); setNewCheck(""); } }} />
               <button style={{ ...S.btnMain, width: "auto", padding: "8px 14px", fontSize: 12, marginTop: 0 }} onClick={() => { if (newCheck.trim()) { onAddCheckItem(catId, ms.id, newCheck.trim()); setNewCheck(""); } }}>+</button>
             </div>
           )}
 
           {/* Links */}
           <div style={{ marginTop: 14 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#64748B", fontFamily: F, marginBottom: 6 }}>Documents & Links</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#64748B", fontFamily: F, marginBottom: 6 }}>{t("Linked Resources", lang)}</div>
             {(ms.links || []).map(lk => (
               <div key={lk.id} style={S.docItemRow}>
                 <span>🔗</span>
@@ -366,7 +646,7 @@ function MilestoneCard({ milestone: ms, catId, isAdmin, projectId, onToggleCheck
 
           {/* Signatures */}
           <div style={{ marginTop: 14 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#64748B", fontFamily: F, marginBottom: 6 }}>Signatures</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#64748B", fontFamily: F, marginBottom: 6 }}>{t("Signatures", lang)}</div>
             {(ms.signatures || []).map(sig => (
               <div key={sig.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "1px solid #F8FAFC" }}>
                 <span style={{ fontSize: 13, color: sig.signed ? "#16A34A" : "#CBD5E1" }}>{sig.signed ? "✓" : "○"}</span>
@@ -377,7 +657,7 @@ function MilestoneCard({ milestone: ms, catId, isAdmin, projectId, onToggleCheck
               </div>
             ))}
             {isAdmin && (
-              <button style={{ ...S.btnAddItem, marginTop: 6, fontSize: 12 }} onClick={() => onAddSignature(catId, ms.id)}>+ Add Signature Line</button>
+              <button style={{ ...S.btnAddItem, marginTop: 6, fontSize: 12 }} onClick={() => onAddSignature(catId, ms.id)}>{t("+ Add Signature", lang)}</button>
             )}
           </div>
         </div>
@@ -505,6 +785,7 @@ function ProgramDetails({ project, state, setState, isAdmin }) {
   const prog = state.docData?.[pid]?._programDetails || { tasks: [], docs: [] };
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", type: "task", startDate: "", endDate: "", date: "" });
+  const [dragIdx, setDragIdx] = useState(null);
 
   const updateProg = (p) => { if (!pid) return; setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid] || {}), _programDetails: p } } })); };
 
@@ -545,7 +826,14 @@ function ProgramDetails({ project, state, setState, isAdmin }) {
       <div style={S.card}>
         {(prog.tasks || []).length === 0 && <p style={{ fontSize: 14, color: "#94A3B8", fontFamily: F }}>No tasks or milestones yet.</p>}
         {(prog.tasks || []).map((item, i) => (
-          <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: "1px solid #F1F5F9" }}>
+          <div key={item.id}
+            draggable={isAdmin}
+            onDragStart={() => setDragIdx(i)}
+            onDragOver={e => e.preventDefault()}
+            onDrop={() => { if (dragIdx === null || dragIdx === i) return; const r = [...prog.tasks]; const [m] = r.splice(dragIdx, 1); r.splice(i, 0, m); updateProg({ ...prog, tasks: r }); setDragIdx(null); }}
+            onDragEnd={() => setDragIdx(null)}
+            style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: "1px solid #F1F5F9", opacity: dragIdx === i ? 0.4 : 1, cursor: isAdmin ? "grab" : "default" }}>
+            {isAdmin && <span style={{ color: "#CBD5E1", fontSize: 14, cursor: "grab" }}>⠿</span>}
             <span style={{ fontSize: 14 }}>{item.type === "task" ? "📋" : "🏁"}</span>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 15, fontWeight: 600, color: "#0F172A", fontFamily: F }}>{item.name}</div>
@@ -589,9 +877,10 @@ function DocsView({ partyId, user, project, state, setState, lang }) {
   const [addingItem, setAddingItem] = useState(null);
   const [itemForm, setItemForm] = useState({ name: "", url: "", type: "link", lang: "en" });
   const [addingFolder, setAddingFolder] = useState(false);
+  const [msDragIdx, setMsDragIdx] = useState(null);
   const [folderForm, setFolderForm] = useState({ name: "", accessLevel: "open" });
   const admin = isInst(user);
-  const canEdit = admin; // only instrumental can edit
+  const canEdit = user.role === "admin"; // only explicit admins can edit
 
   const canAccess = (cat) => {
     if (cat.accessLevel !== "restricted") return true;
@@ -629,6 +918,7 @@ function DocsView({ partyId, user, project, state, setState, lang }) {
   const toggleSig = (catId, msId, sigId) => { const c = ensureCats(); updateCats(c.map(cat => { if (cat.id !== catId) return cat; return { ...cat, milestones: cat.milestones.map(ms => ms.id !== msId ? ms : { ...ms, signatures: (ms.signatures||[]).map(s => s.id !== sigId ? s : { ...s, signed: !s.signed, name: !s.signed ? user.name : "", signedAt: !s.signed ? new Date().toISOString() : null }) }) }; })); };
   const addSig = (catId, msId) => { const role = prompt("Signature role:"); if (!role) return; const c = ensureCats(); updateCats(c.map(cat => { if (cat.id !== catId) return cat; return { ...cat, milestones: cat.milestones.map(ms => ms.id !== msId ? ms : { ...ms, signatures: [...(ms.signatures||[]), { id: genId(), role, name: "", email: "", signed: false, signedAt: null }] }) }; })); };
   const delSig = (catId, msId, sigId) => { const c = ensureCats(); updateCats(c.map(cat => { if (cat.id !== catId) return cat; return { ...cat, milestones: cat.milestones.map(ms => ms.id !== msId ? ms : { ...ms, signatures: (ms.signatures||[]).filter(s => s.id !== sigId) }) }; })); };
+  const reorderMilestones = (catId, newMilestones) => { const c = ensureCats(); updateCats(c.map(cat => cat.id !== catId ? cat : { ...cat, milestones: newMilestones })); };
   const updateMsDesc = (catId, msId, desc) => { const c = ensureCats(); updateCats(c.map(cat => { if (cat.id !== catId || !cat.milestones) return cat; return { ...cat, milestones: cat.milestones.map(ms => ms.id !== msId ? ms : { ...ms, description: desc }) }; })); };
   const updateCheckLabel = (catId, msId, ckId, label) => { const c = ensureCats(); updateCats(c.map(cat => { if (cat.id !== catId) return cat; return { ...cat, milestones: cat.milestones.map(ms => ms.id !== msId ? ms : { ...ms, checklist: ms.checklist.map(ck => ck.id !== ckId ? ck : { ...ck, label }) }) }; })); };
 
@@ -638,19 +928,19 @@ function DocsView({ partyId, user, project, state, setState, lang }) {
       <p style={S.sub}>{project?.name || "Select a project"}</p>
 
       {/* Add folder (admin only) */}
-      {canEdit && pid && !addingFolder && <button style={{ ...S.btnAddItem, marginBottom: 16 }} onClick={() => setAddingFolder(true)}>+ Add Folder</button>}
+      {canEdit && pid && !addingFolder && <button style={{ ...S.btnAddItem, marginBottom: 16 }} onClick={() => setAddingFolder(true)}>{t("+ Add Folder", lang)}</button>}
       {canEdit && addingFolder && (
         <div style={{ ...S.card, marginBottom: 16, background: "#F8FAFC" }}>
-          <label style={S.lbl}>Folder Name</label>
+          <label style={S.lbl}>{t("Folder Name", lang)}</label>
           <input style={S.inp} value={folderForm.name} onChange={e => setFolderForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Specifications" />
-          <label style={S.lbl}>Access</label>
+          <label style={S.lbl}>{t("Access", lang)}</label>
           <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={() => setFolderForm(f => ({ ...f, accessLevel: "open" }))} style={{ ...S.typeBtn, ...(folderForm.accessLevel === "open" ? S.typeBtnActive : {}) }}>Open</button>
-            <button onClick={() => setFolderForm(f => ({ ...f, accessLevel: "restricted" }))} style={{ ...S.typeBtn, ...(folderForm.accessLevel === "restricted" ? { background: "#FEF2F2", borderColor: "#DC2626", color: "#DC2626" } : {}) }}>Restricted</button>
+            <button onClick={() => setFolderForm(f => ({ ...f, accessLevel: "open" }))} style={{ ...S.typeBtn, ...(folderForm.accessLevel === "open" ? S.typeBtnActive : {}) }}>{t("Open", lang)}</button>
+            <button onClick={() => setFolderForm(f => ({ ...f, accessLevel: "restricted" }))} style={{ ...S.typeBtn, ...(folderForm.accessLevel === "restricted" ? { background: "#FEF2F2", borderColor: "#DC2626", color: "#DC2626" } : {}) }}>{t("Restricted", lang)}</button>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-            <button style={{ ...S.btnMain, width: "auto", padding: "10px 20px", marginTop: 0 }} onClick={addFolder}>Create</button>
-            <button style={S.btnFlat} onClick={() => setAddingFolder(false)}>Cancel</button>
+            <button style={{ ...S.btnMain, width: "auto", padding: "10px 20px", marginTop: 0 }} onClick={addFolder}>{t("Create", lang)}</button>
+            <button style={S.btnFlat} onClick={() => setAddingFolder(false)}>{t("Cancel", lang)}</button>
           </div>
         </div>
       )}
@@ -669,17 +959,25 @@ function DocsView({ partyId, user, project, state, setState, lang }) {
             <button onClick={() => !locked && setExpanded(isExp ? null : cat.id)} style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", border: "none", background: "none", cursor: locked ? "not-allowed" : "pointer", textAlign: "left", padding: 0, fontFamily: F }}>
               <span style={{ fontSize: 15, color: pd.accent }}>{locked ? "🔒" : isChecklist ? "☑" : isProgram ? "📋" : "📁"}</span>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F }}>{cat.name}</div>
-                {locked && <div style={{ fontSize: 12, color: "#DC2626", fontFamily: F }}>Restricted — contact admin for access</div>}
+                <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F }}>{t(cat.name, lang)}</div>
+                {locked && <div style={{ fontSize: 12, color: "#DC2626", fontFamily: F }}>{t("Restricted — contact admin for access", lang)}</div>}
               </div>
-              {!locked && <span style={{ fontSize: 12, color: "#94A3B8" }}>{items.length} items</span>}
+              {!locked && <span style={{ fontSize: 12, color: "#94A3B8" }}>{isChecklist ? (cat.milestones?.length || 0) : isProgram ? (state.docData?.[pid]?._programDetails?.tasks?.length || prog?.tasks?.length || 0) : items.length} {t("items", lang)}</span>}
               {!locked && <span style={{ color: "#94A3B8" }}>{isExp ? "▾" : "▸"}</span>}
             </button>
 
             {isExp && !locked && isChecklist && cat.milestones && (
               <div style={{ marginTop: 14 }}>
-                {cat.milestones.map(ms => (
-                  <MilestoneCard key={ms.id} milestone={ms} catId={cat.id} isAdmin={canEdit} projectId={pid} onToggleCheck={toggleCheck} onAddCheckItem={addCheckItem} onDeleteCheckItem={delCheckItem} onAddLink={addMsLink} onDeleteLink={delMsLink} onUpdateSignature={() => {}} onToggleSignature={toggleSig} onAddSignature={addSig} onDeleteSignature={delSig} onUpdateDesc={updateMsDesc} onUpdateCheckLabel={updateCheckLabel} />
+                {cat.milestones.map((ms, msI) => (
+                  <div key={ms.id}
+                    draggable={canEdit}
+                    onDragStart={() => setMsDragIdx(msI)}
+                    onDragOver={e => e.preventDefault()}
+                    onDrop={() => { if (msDragIdx === null || msDragIdx === msI) return; const r = [...cat.milestones]; const [m] = r.splice(msDragIdx, 1); r.splice(msI, 0, m); reorderMilestones(cat.id, r); setMsDragIdx(null); }}
+                    onDragEnd={() => setMsDragIdx(null)}
+                    style={{ opacity: msDragIdx === msI ? 0.4 : 1, cursor: canEdit ? "grab" : "default" }}>
+                    <MilestoneCard milestone={ms} catId={cat.id} isAdmin={canEdit} projectId={pid} onToggleCheck={toggleCheck} onAddCheckItem={addCheckItem} onDeleteCheckItem={delCheckItem} onAddLink={addMsLink} onDeleteLink={delMsLink} onUpdateSignature={() => {}} onToggleSignature={toggleSig} onAddSignature={addSig} onDeleteSignature={delSig} onUpdateDesc={updateMsDesc} onUpdateCheckLabel={updateCheckLabel} lang={lang} />
+                  </div>
                 ))}
               </div>
             )}
@@ -692,7 +990,7 @@ function DocsView({ partyId, user, project, state, setState, lang }) {
 
             {isExp && !locked && !isChecklist && !isProgram && (
               <div style={{ marginTop: 14 }}>
-                {items.length === 0 && !canEdit && <p style={{ fontSize: 14, color: "#94A3B8", fontFamily: F }}>No documents yet.</p>}
+                {items.length === 0 && !canEdit && <p style={{ fontSize: 14, color: "#94A3B8", fontFamily: F }}>{t("No documents yet.", lang)}</p>}
                 {items.map(item => {
                   const il = LANGUAGES.find(l => l.id === item.lang) || LANGUAGES[0];
                   return (
@@ -700,7 +998,7 @@ function DocsView({ partyId, user, project, state, setState, lang }) {
                       <span style={{ fontSize: 14, color: item.type === "link" ? "#3B82F6" : "#A855F7" }}>{item.type === "link" ? "🔗" : "📄"}</span>
                       <div style={{ flex: 1 }}>
                         {item.url ? <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 15, fontWeight: 500, color: "#0284C7", textDecoration: "none", fontFamily: F }}>{item.name}</a> : <span style={{ fontSize: 15, fontFamily: F, color: "#1E293B" }}>{item.name}</span>}
-                        <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F }}>{item.type === "link" ? "Link" : "PDF"} · {item.addedBy} · {fmtDate(item.addedAt)}</div>
+                        <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F }}>{item.type === "link" ? t("Link", lang) : "PDF"} · {item.addedBy} · {fmtDate(item.addedAt)}</div>
                       </div>
                       <span style={{ padding: "2px 8px", borderRadius: 6, background: "#F1F5F9", fontSize: 11, fontWeight: 700, color: "#64748B" }}>{il.flag} {il.short}</span>
                       {canEdit && <button style={{ ...S.btnDel, padding: "3px 8px", fontSize: 11 }} onClick={() => delItem(cat.id, item.id)}>✕</button>}
@@ -715,23 +1013,23 @@ function DocsView({ partyId, user, project, state, setState, lang }) {
                         <button onClick={() => setItemForm(f => ({ ...f, type: "link" }))} style={{ ...S.typeBtn, ...(itemForm.type === "link" ? S.typeBtnActive : {}) }}>🔗 Link (any format)</button>
                         <button onClick={() => setItemForm(f => ({ ...f, type: "pdf" }))} style={{ ...S.typeBtn, ...(itemForm.type === "pdf" ? S.typeBtnActive : {}) }}>📄 PDF Document</button>
                       </div>
-                      <label style={S.lbl}>Name</label>
+                      <label style={S.lbl}>{t("Name", lang)}</label>
                       <input style={S.inp} value={itemForm.name} onChange={e => setItemForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Pin Inspection Spec v2.1" />
-                      <label style={S.lbl}>{itemForm.type === "link" ? "URL (any format)" : "PDF URL (must be .pdf)"}</label>
+                      <label style={S.lbl}>{itemForm.type === "link" ? t("URL (any format)", lang) : t("PDF URL (must be .pdf)", lang)}</label>
                       <input style={S.inp} value={itemForm.url} onChange={e => setItemForm(f => ({ ...f, url: e.target.value }))} placeholder={itemForm.type === "link" ? "https://docs.google.com/..." : "https://...file.pdf"} />
-                      <label style={S.lbl}>Document Language</label>
+                      <label style={S.lbl}>{t("Document Language", lang)}</label>
                       <select style={S.inp} value={itemForm.lang} onChange={e => setItemForm(f => ({ ...f, lang: e.target.value }))}>
                         {LANGUAGES.map(l => <option key={l.id} value={l.id}>{l.flag} {l.label}</option>)}
                       </select>
                       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                        <button style={{ ...S.btnMain, width: "auto", padding: "10px 18px", marginTop: 0 }} onClick={() => addItem(cat.id)}>Add</button>
-                        <button style={{ ...S.btnFlat, width: "auto" }} onClick={() => { setAddingItem(null); setItemForm({ name: "", url: "", type: "link", lang: "en" }); }}>Cancel</button>
+                        <button style={{ ...S.btnMain, width: "auto", padding: "10px 18px", marginTop: 0 }} onClick={() => addItem(cat.id)}>{t("Add", lang)}</button>
+                        <button style={{ ...S.btnFlat, width: "auto" }} onClick={() => { setAddingItem(null); setItemForm({ name: "", url: "", type: "link", lang: "en" }); }}>{t("Cancel", lang)}</button>
                       </div>
                     </div>
                   ) : (
                     <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                      <button style={S.btnAddItem} onClick={() => setAddingItem(cat.id)}>+ Add Link or PDF</button>
-                      <button style={{ ...S.btnDel, fontSize: 11, padding: "4px 10px" }} onClick={() => delFolder(cat.id)}>Delete Folder</button>
+                      <button style={S.btnAddItem} onClick={() => setAddingItem(cat.id)}>{t("+ Add Link or PDF", lang)}</button>
+                      <button style={{ ...S.btnDel, fontSize: 11, padding: "4px 10px" }} onClick={() => delFolder(cat.id)}>{t("Delete Folder", lang)}</button>
                     </div>
                   )}
                 </>)}
@@ -762,17 +1060,17 @@ function DocsView({ partyId, user, project, state, setState, lang }) {
         return (
           <div style={{ marginTop: 28 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-              <h3 style={S.h3}>Training</h3>
+              <h3 style={S.h3}>{t("Training", lang)}</h3>
               {canEdit && pid && (
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 13, color: "#64748B", fontFamily: F }}>{enabled ? "Enabled" : "Disabled"}</span>
+                  <span style={{ fontSize: 13, color: "#64748B", fontFamily: F }}>{enabled ? t("Enabled", lang) : t("Disabled", lang)}</span>
                   <div onClick={toggleT} style={{ width: 44, height: 24, borderRadius: 12, background: enabled ? "#00C9A7" : "#CBD5E1", cursor: "pointer", position: "relative", transition: "background .2s" }}>
                     <div style={{ width: 18, height: 18, borderRadius: 9, background: "#FFF", position: "absolute", top: 3, left: enabled ? 23 : 3, transition: "left .2s" }} />
                   </div>
                 </div>
               )}
             </div>
-            {!enabled && <div style={S.empty}>Training is {canEdit ? "disabled for this party. Toggle above to enable." : "not required."}</div>}
+            {!enabled && <div style={S.empty}>{canEdit ? t("Training is disabled for this party. Toggle above to enable.", lang) : t("Training is not required.", lang)}</div>}
             {enabled && (
               <div style={{ ...S.card, borderLeft: `3px solid ${pd.accent}` }}>
                 {["white", "blue", "black"].map(belt => {
@@ -784,8 +1082,8 @@ function DocsView({ partyId, user, project, state, setState, lang }) {
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                         <span>{bi.icon}</span>
                         <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F }}>{bi.name}</span>
-                        {dis && <Chip small color="#F1F5F9" fg="#94A3B8">N/A</Chip>}
-                        {canEdit && <button style={{ ...S.btnEdit, padding: "2px 8px", fontSize: 10, marginLeft: "auto" }} onClick={() => toggleBeltNA(belt)}>{dis ? "Enable" : "N/A"}</button>}
+                        {dis && <Chip small color="#F1F5F9" fg="#94A3B8">{t("N/A", lang)}</Chip>}
+                        {canEdit && <button style={{ ...S.btnEdit, padding: "2px 8px", fontSize: 10, marginLeft: "auto" }} onClick={() => toggleBeltNA(belt)}>{dis ? t("Enable", lang) : t("N/A", lang)}</button>}
                       </div>
                       {!dis && bl.map(lk => (
                         <div key={lk.id} style={{ ...S.docItemRow, marginLeft: 24 }}>
@@ -794,21 +1092,21 @@ function DocsView({ partyId, user, project, state, setState, lang }) {
                           {canEdit && <button style={{ ...S.btnDel, padding: "2px 6px", fontSize: 10 }} onClick={() => delTLink(lk.id)}>✕</button>}
                         </div>
                       ))}
-                      {!dis && bl.length === 0 && <p style={{ fontSize: 13, color: "#94A3B8", marginLeft: 24, fontFamily: F }}>No {bi.name} materials yet.</p>}
+                      {!dis && bl.length === 0 && <p style={{ fontSize: 13, color: "#94A3B8", marginLeft: 24, fontFamily: F }}>{t("No materials yet.", lang)}</p>}
                     </div>
                   );
                 })}
-                {canEdit && pid && !addTL && <button style={S.btnAddItem} onClick={() => setAddTL(true)}>+ Add Training Material</button>}
+                {canEdit && pid && !addTL && <button style={S.btnAddItem} onClick={() => setAddTL(true)}>{t("+ Add Training Material", lang)}</button>}
                 {canEdit && addTL && (
                   <div style={{ padding: 14, background: "#F8FAFC", borderRadius: 10, marginTop: 8 }}>
                     <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
                       {["white","blue","black"].map(b => <button key={b} onClick={() => setTlForm(f => ({...f, belt: b}))} style={{ ...S.typeBtn, ...(tlForm.belt === b ? S.typeBtnActive : {}) }}>{BELT_LEVELS[b].icon} {BELT_LEVELS[b].name}</button>)}
                     </div>
-                    <label style={S.lbl}>Title</label><input style={S.inp} value={tlForm.name} onChange={e => setTlForm(f => ({...f, name: e.target.value}))} placeholder="e.g. White Belt Module 1" />
+                    <label style={S.lbl}>{t("Title", lang)}</label><input style={S.inp} value={tlForm.name} onChange={e => setTlForm(f => ({...f, name: e.target.value}))} placeholder="e.g. White Belt Module 1" />
                     <label style={S.lbl}>URL</label><input style={S.inp} value={tlForm.url} onChange={e => setTlForm(f => ({...f, url: e.target.value}))} placeholder="https://..." />
                     <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                      <button style={{ ...S.btnMain, width: "auto", padding: "8px 16px", marginTop: 0 }} onClick={addTLink}>Add</button>
-                      <button style={{ ...S.btnFlat, width: "auto" }} onClick={() => setAddTL(false)}>Cancel</button>
+                      <button style={{ ...S.btnMain, width: "auto", padding: "8px 16px", marginTop: 0 }} onClick={addTLink}>{t("Add", lang)}</button>
+                      <button style={{ ...S.btnFlat, width: "auto" }} onClick={() => setAddTL(false)}>{t("Cancel", lang)}</button>
                     </div>
                   </div>
                 )}
@@ -822,7 +1120,7 @@ function DocsView({ partyId, user, project, state, setState, lang }) {
 }
 
 /* ═══ ADMIN VIEW — restricted access management, pending approvals for external users ═══ */
-function AdminView({ state, setState, allProjects, pendingUsers }) {
+function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) {
   const { users } = state;
   const [tab, setTab] = useState(pendingUsers?.length > 0 ? "pending" : "users");
   const [approveForm, setApproveForm] = useState({});
@@ -838,7 +1136,10 @@ function AdminView({ state, setState, allProjects, pendingUsers }) {
   const deny = async (pu) => { try { await dbWrite(`pendingUsers/${pu.id}`, null); } catch(e) { console.error(e); } };
   const removeUser = async (uid) => { try { await dbWrite(`users/${uid}`, null); setState(prev => ({ ...prev, users: (prev.users||[]).filter(u => u.id !== uid) })); } catch(e) { console.error(e); } };
   const promoteAdmin = async (uid) => {
-    if (!confirm("Make this user an admin? They'll have full access.")) return;
+    if (!currentUser?.superAdmin) { alert("Only the super admin can promote users to admin."); return; }
+    const target = (users||[]).find(u => u.id === uid);
+    if (!target?.email?.endsWith("@instrumental.com")) { alert("Only @instrumental.com users can be promoted to admin."); return; }
+    if (!confirm(`Make ${target.name} an admin? They'll have full edit access.`)) return;
     try { await dbWrite(`users/${uid}/role`, "admin"); await dbWrite(`users/${uid}/partyId`, "instrumental"); setState(prev => ({ ...prev, users: (prev.users||[]).map(u => u.id !== uid ? u : { ...u, role: "admin", partyId: "instrumental" }) })); } catch(e) { console.error(e); }
   };
   const addProject = (uid, pid) => {
@@ -1136,10 +1437,10 @@ export default function App() {
           await dbWrite(`users/${authUser.uid}`, nu);
           if (!cancelled) { setUser(nu); setPendingApproval(false); }
         } else if (isInstDomain) {
-          // Auto-approve instrumental users
+          // Auto-approve @instrumental.com users as instrumental party — admin must be explicitly granted
           const allProj = await dbRead("appState/projects") || [];
           const projIds = (Array.isArray(allProj) ? allProj : Object.values(allProj)).map(p => p.id);
-          const nu = { id: authUser.uid, name: authUser.displayName || email, email, photoURL: authUser.photoURL || null, role: "admin", partyId: "instrumental", projects: projIds, createdAt: new Date().toISOString() };
+          const nu = { id: authUser.uid, name: authUser.displayName || email, email, photoURL: authUser.photoURL || null, role: "user", partyId: "instrumental", projects: projIds, createdAt: new Date().toISOString() };
           await dbWrite(`users/${authUser.uid}`, nu);
           if (!cancelled) { setUser(nu); setPendingApproval(false); }
         } else {
@@ -1205,16 +1506,17 @@ export default function App() {
 
   const renderMain = () => {
     if (view === "dashboard" || (!view.startsWith("docs_") && view !== "admin" && view !== "manage")) {
-      return <DashboardView user={user} project={project} state={state} setState={save} />;
+      if (user.partyId !== "instrumental" && user.partyId !== "customer" && user.role !== "admin") return <div style={S.page}><div style={S.empty}>Access denied.</div></div>;
+      return <DashboardView user={user} project={project} state={state} setState={save} lang={lang} setView={setView} />;
     }
     if (view.startsWith("docs_")) {
       const pid = view.replace("docs_", "");
       if (!admin && pid !== user.partyId) return <div style={S.page}><div style={S.empty}>Access denied.</div></div>;
       return <DocsView partyId={pid} user={user} project={project} state={state} setState={save} lang={lang} />;
     }
-    if (view === "admin" && admin) return <AdminView state={state} setState={save} allProjects={Array.isArray(state.projects) ? state.projects : []} pendingUsers={pendingUsers} />;
+    if (view === "admin" && admin) return <AdminView state={state} setState={save} allProjects={Array.isArray(state.projects) ? state.projects : []} pendingUsers={pendingUsers} currentUser={user} />;
     if (view === "manage" && admin) return <ManageProjects state={state} setState={save} />;
-    return <DashboardView user={user} project={project} state={state} setState={save} />;
+    return <DashboardView user={user} project={project} state={state} setState={save} lang={lang} setView={setView} />;
   };
 
   const statusMsg = state.statusMessage || "";
