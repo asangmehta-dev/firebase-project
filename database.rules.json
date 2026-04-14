@@ -3,10 +3,23 @@
     ".read": false,
     ".write": false,
 
+    "_schemaVersion": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'"
+    },
+
+    "_backup": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'"
+    },
+
     "appState": {
       "projects": {
-        ".read": "auth != null",
-        ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'"
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')",
+        ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+        "$pid": {
+          ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental' || root.child('access').child($pid).hasChild(auth.uid))"
+        }
       },
       "progress": {
         "$uid": {
@@ -15,12 +28,19 @@
         }
       },
       "docData": {
-        ".read": "auth != null",
-        ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'"
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')",
+        "$pid": {
+          ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental' || root.child('access').child($pid).hasChild(auth.uid))"
+        }
       },
       "statusMessage": {
         ".read": "auth != null",
         ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'"
+      },
+      "demandCustomTypes": {
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')"
       }
     },
 
@@ -38,6 +58,21 @@
         ".write": "auth != null && ($uid === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'admin')",
         ".validate": "newData.hasChildren(['id', 'name', 'email']) || newData.val() === null"
       }
+    },
+
+    "access": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'"
+    },
+
+    "hubspotSync": {
+      ".read": "auth != null",
+      ".write": false
+    },
+
+    "hubspotPreview": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      ".write": false
     }
   }
 }

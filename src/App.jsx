@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { auth, db, googleProvider } from "./firebase";
+import { auth, db, functions, googleProvider } from "./firebase";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { ref, onValue, set } from "firebase/database";
+import { httpsCallable } from "firebase/functions";
+import { PIPELINES, STAGES, PIPELINE_LIST } from "./hubspotConfig";
 
 /* ═══ DB HELPERS ═══ */
 const dbRead = (p) => new Promise((r) => { onValue(ref(db, p), (s) => r(s.val()), { onlyOnce: true }); });
@@ -319,6 +321,22 @@ const getDocCats = (dd, pid, party) => dd?.[pid]?.[party] || SEED_DOC_CATEGORIES
 const getPN = (proj, pid) => proj?.partyNames?.[pid] || PARTY_DEFS[pid]?.defaultName || pid;
 const isInst = (u) => u?.partyId === "instrumental" || u?.role === "admin";
 const isVisible = (proj, pid) => { const n = (proj?.partyNames?.[pid] || "").trim().toLowerCase(); return n && n !== "n/a" && n !== "na" && n !== "-" && n !== "none"; };
+// Normalize projects from DB (may be array or object-keyed) into an array
+const projectsToArray = (v) => !v ? [] : (Array.isArray(v) ? v : Object.values(v));
+// Parse hardware field from HubSpot — could be number, numeric string, or descriptive string
+const parseHwCount = (v) => { if (v == null || v === "") return 0; if (typeof v === "number") return v; const m = String(v).match(/\d+/); return m ? parseInt(m[0]) : 0; };
+// Standard HubSpot-synced hardware fields → display labels
+const HUBSPOT_HW_FIELDS = [
+  { key: "cameras", label: "Cameras" },
+  { key: "lenses", label: "Lenses (Regular)" },
+  { key: "tcLense", label: "Lenses (TC)" },
+  { key: "ledControllers", label: "LED Light Controllers" },
+  { key: "standardFrames", label: "Station Frames (Standard)" },
+  { key: "largeFrames", label: "Station Frames (Large)" },
+  { key: "computers", label: "Station Computers" },
+  { key: "monitors", label: "Monitors" },
+  { key: "barcodeScanner", label: "Barcode Scanners" },
+];
 
 /* ═══ MICRO COMPONENTS ═══ */
 const Bar = ({ value, color = "#3B82F6", h = 6 }) => (
@@ -375,14 +393,23 @@ function PendingApproval({ authUser, onLogout }) {
 /* ═══ SIDEBAR — non-instrumental only sees their party + project + language ═══ */
 function Sidebar({ view, setView, user, project, projects, setProject, onLogout, lang, setLang }) {
   const admin = isInst(user);
+  // Admins/Instrumental see all non-HubSpot-inactive; external users only see active projects they're assigned to
+  const dropdownProjects = admin
+    ? projects.filter(p => p.status !== "inactive")
+    : projects.filter(p => p.status === "active");
   return (
     <aside style={S.side}>
       <div style={S.sideHead}><span style={{ fontSize: 24, color: "#00C9A7" }}>◎</span><span style={S.sideTitle}>{t("Deployment Portal", lang)}</span></div>
+      {admin && (
+        <div style={{ padding: "0 12px 6px" }}>
+          <button onClick={() => setView("projects_overview")} style={{ ...S.navBtn, ...(view === "projects_overview" ? { background: "rgba(0,201,167,.15)", color: "#00C9A7", borderLeftColor: "#00C9A7" } : {}) }}>🌐 Projects Overview</button>
+        </div>
+      )}
       <div style={{ padding: "0 18px 12px" }}>
         <label style={S.sideLabel}>{t("Project", lang)}</label>
-        <select style={S.projSelect} value={project?.id || ""} onChange={e => setProject(projects.find(p => p.id === e.target.value))}>
-          {projects.length === 0 && <option value="">No projects</option>}
-          {projects.map(p => <option key={p.id} value={p.id}>{p.name}{p.status === "deprecated" ? " (Past)" : ""}</option>)}
+        <select style={S.projSelect} value={project?.id || ""} onChange={e => setProject(dropdownProjects.find(p => p.id === e.target.value))}>
+          {dropdownProjects.length === 0 && <option value="">No projects</option>}
+          {dropdownProjects.map(p => <option key={p.id} value={p.id}>{p.name}{p.status === "deprecated" ? " (Past)" : ""}</option>)}
         </select>
       </div>
       <nav style={S.navList}>
@@ -560,6 +587,277 @@ function DashboardView({ user, project, state, setState, lang = "en", setView })
           </div>
         );
       })()}
+
+      {/* Hardware — HubSpot-synced (read-only) + Custom manual entries (Instrumental editable) */}
+      <ProjectHardwareSection project={project} state={state} setState={setState} user={user} />
+    </div>
+  );
+}
+
+/* ═══ PROJECT HARDWARE SECTION — HubSpot read-only + Custom editable ═══ */
+function ProjectHardwareSection({ project, state, setState, user }) {
+  const canEdit = isInst(user);
+  const customTypes = state.demandCustomTypes || {};
+  const hw = project.hardware || {};
+  const hsRows = HUBSPOT_HW_FIELDS.map(f => ({ ...f, value: hw[f.key], count: parseHwCount(hw[f.key]) })).filter(r => r.count > 0 || r.value);
+  const updateCustomCount = (typeId, val) => {
+    if (!canEdit) return;
+    const n = parseInt(val) || 0;
+    setState(prev => {
+      const types = { ...(prev.demandCustomTypes || {}) };
+      const t = { ...(types[typeId] || { label: "Custom", counts: {} }) };
+      t.counts = { ...(t.counts || {}) };
+      if (n > 0) t.counts[project.id] = n; else delete t.counts[project.id];
+      types[typeId] = t;
+      return { ...prev, demandCustomTypes: types };
+    });
+  };
+
+  return (
+    <div style={{ marginTop: 24 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 12, paddingBottom: 8, borderBottom: "2px solid #F1F5F9" }}>Hardware</div>
+
+      {/* HubSpot-synced, read-only */}
+      <div style={{ ...S.card, marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+          <Chip small color="#FFF4F0" fg="#FF7A59">Synced from HubSpot · Read-only</Chip>
+          <span style={{ fontSize: 12, color: "#94A3B8", fontFamily: F }}>To change values, edit in HubSpot directly.</span>
+        </div>
+        {hsRows.length === 0 ? (
+          <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>No hardware synced from HubSpot for this project yet.</div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+            {hsRows.map(r => (
+              <div key={r.key} style={{ padding: "10px 14px", background: "#F8FAFC", borderRadius: 8, border: "1px solid #F1F5F9" }}>
+                <div style={{ fontSize: 11, color: "#64748B", fontFamily: F, textTransform: "uppercase", letterSpacing: .5, fontWeight: 600 }}>{r.label}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#0F172A", fontFamily: F, marginTop: 2 }}>{r.count || "—"}</div>
+                {typeof r.value === "string" && r.value !== String(r.count) && <div style={{ fontSize: 11, color: "#94A3B8", fontFamily: F, marginTop: 2 }}>{r.value}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Custom manual entries — editable by any Instrumental user */}
+      <div style={S.card}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+          <Chip small color="#EEF2FF" fg="#6366F1">Custom / Manual</Chip>
+          <span style={{ fontSize: 12, color: "#94A3B8", fontFamily: F }}>
+            {canEdit ? "Set per-project counts for custom hardware types. Add new types on Projects Overview → Demand Plan." : "Custom hardware types set by Instrumental."}
+          </span>
+        </div>
+        {Object.keys(customTypes).length === 0 ? (
+          <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>No custom hardware types defined. Instrumental users can add them on the Projects Overview → Demand Plan.</div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+            {Object.entries(customTypes).map(([typeId, t]) => {
+              const projectCount = t.counts?.[project.id] || 0;
+              return (
+                <div key={typeId} style={{ padding: "10px 14px", background: "#F8FAFC", borderRadius: 8, border: "1px solid #F1F5F9" }}>
+                  <div style={{ fontSize: 11, color: "#64748B", fontFamily: F, textTransform: "uppercase", letterSpacing: .5, fontWeight: 600 }}>{t.label}</div>
+                  {canEdit ? (
+                    <input type="number" min="0" style={{ ...S.inp, marginTop: 4, padding: "6px 10px", fontSize: 16, fontWeight: 700 }} value={projectCount || ""} onChange={e => updateCustomCount(typeId, e.target.value)} placeholder="0" />
+                  ) : (
+                    <div style={{ fontSize: 18, fontWeight: 700, color: "#0F172A", fontFamily: F, marginTop: 2 }}>{projectCount || "—"}</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ═══ PROJECTS OVERVIEW — summary of ALL projects across pipelines ═══ */
+/* Note: distinct from per-project "Overview" dashboard. This aggregates every project. */
+function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
+  const allProjects = projectsToArray(state.projects);
+  const activeProjects = allProjects.filter(p => p.status === "active");
+  const [selPipeline, setSelPipeline] = useState(PIPELINE_LIST[0]?.id || "");
+  const canEditDemand = isInst(user); // Any Instrumental user can add custom demand types
+
+  // ─── Demand Plan: aggregate hardware across all ACTIVE projects ───
+  const customTypes = state.demandCustomTypes || {}; // { typeId: { label, counts: { projectId: n } } }
+  const hubspotTotals = HUBSPOT_HW_FIELDS.map(f => ({
+    label: f.label,
+    source: "HubSpot",
+    total: activeProjects.reduce((sum, p) => sum + parseHwCount(p.hardware?.[f.key]), 0),
+    perProject: activeProjects.map(p => ({ id: p.id, name: p.customer || p.name, count: parseHwCount(p.hardware?.[f.key]) })).filter(x => x.count > 0),
+  }));
+  const customTotals = Object.entries(customTypes).map(([id, t]) => ({
+    id,
+    label: t.label,
+    source: "Manual",
+    total: Object.entries(t.counts || {}).reduce((sum, [pid, n]) => {
+      // only count if project is still active
+      return activeProjects.some(p => p.id === pid) ? sum + (parseInt(n) || 0) : sum;
+    }, 0),
+  }));
+  const [newTypeLabel, setNewTypeLabel] = useState("");
+  const addCustomType = () => {
+    if (!newTypeLabel.trim() || !canEditDemand) return;
+    const id = genId();
+    setState(prev => ({ ...prev, demandCustomTypes: { ...(prev.demandCustomTypes||{}), [id]: { label: newTypeLabel.trim(), counts: {} } } }));
+    setNewTypeLabel("");
+  };
+  const removeCustomType = (id) => {
+    if (!canEditDemand || !confirm("Remove this custom hardware type from the demand plan?")) return;
+    setState(prev => { const next = { ...(prev.demandCustomTypes||{}) }; delete next[id]; return { ...prev, demandCustomTypes: next }; });
+  };
+
+  // ─── Per-pipeline bar chart: active project count per stage ───
+  const pipelineCharts = PIPELINE_LIST.map(pl => {
+    const stagesForPipeline = Object.entries(STAGES)
+      .filter(([, s]) => s.pipelineId === pl.id && !s.closed) // active stages only
+      .sort((a, b) => a[1].order - b[1].order);
+    const data = stagesForPipeline.map(([sid, s]) => ({
+      stageId: sid,
+      label: s.label,
+      count: activeProjects.filter(p => p.hubspotPipelineId === pl.id && p.hubspotStageId === sid).length,
+    }));
+    const maxCount = Math.max(1, ...data.map(d => d.count));
+    return { pipeline: pl, data, maxCount, total: data.reduce((s, d) => s + d.count, 0) };
+  });
+
+  // ─── Stage breakdown for selected pipeline (existing feature, active-only) ───
+  const pipelineStages = Object.entries(STAGES).filter(([, s]) => s.pipelineId === selPipeline).sort((a, b) => a[1].order - b[1].order);
+  const pipelineProjects = activeProjects.filter(p => p.hubspotPipelineId === selPipeline);
+  const byStage = {};
+  pipelineProjects.forEach(p => { const sid = p.hubspotStageId || "__none__"; (byStage[sid] = byStage[sid] || []).push(p); });
+  const activeStages = pipelineStages.filter(([, s]) => !s.closed);
+
+  const renderProjectRow = (proj) => (
+    <div key={proj.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid #F8FAFC" }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "#0F172A", fontFamily: F }}>{proj.customer || proj.name}</div>
+        {proj.si && proj.si !== "—" && proj.si !== "N/A" && <div style={{ fontSize: 12, color: "#64748B", fontFamily: F }}>SI: {proj.si}</div>}
+      </div>
+      {proj.isSI && <Chip small color="#EFF6FF" fg="#3B82F6">SI</Chip>}
+      {proj.stations > 0 && <span style={{ fontSize: 12, color: "#94A3B8", fontFamily: F }}>{proj.stations} stn</span>}
+    </div>
+  );
+
+  return (
+    <div style={S.page}>
+      <h2 style={S.h2}>Projects Overview</h2>
+      <p style={S.sub}>Summary of all HubSpot projects. <b>This page shows ACTIVE projects only</b> — closed/cancelled projects are excluded throughout.</p>
+      <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 999, background: "#ECFDF5", color: "#059669", fontSize: 12, fontWeight: 700, marginBottom: 24, fontFamily: F }}>
+        ● ACTIVE PROJECTS ONLY · {activeProjects.length} total
+      </div>
+
+      {activeProjects.length === 0 && (
+        <div style={S.empty}>No active projects. Sync from Admin Panel → HubSpot Sync, or create one in Manage Projects.</div>
+      )}
+
+      {activeProjects.length > 0 && (<>
+        {/* ═══ DEMAND PLAN ═══ */}
+        <h3 style={{ ...S.h3, marginTop: 8, marginBottom: 6 }}>Demand Plan (Active Projects)</h3>
+        <p style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginBottom: 14 }}>Aggregated hardware requirements across all active projects. HubSpot values are read-only — edit discrepancies in HubSpot directly. Instrumental users can add custom manual types below.</p>
+        <div style={{ ...S.card, marginBottom: 24, padding: 0, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: F }}>
+            <thead>
+              <tr>
+                <th style={{ ...S.th, width: "55%" }}>Hardware Type</th>
+                <th style={{ ...S.th, textAlign: "center", width: "20%" }}>Source</th>
+                <th style={{ ...S.th, textAlign: "right", width: "15%" }}>Total Needed</th>
+                <th style={{ ...S.th, width: "10%" }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {hubspotTotals.map(row => (
+                <tr key={row.label}>
+                  <td style={S.td}>{row.label}</td>
+                  <td style={{ ...S.td, textAlign: "center" }}><Chip small color="#FFF4F0" fg="#FF7A59">HubSpot</Chip></td>
+                  <td style={{ ...S.td, textAlign: "right", fontWeight: 700, color: "#0F172A", fontSize: 16 }}>{row.total}</td>
+                  <td style={S.td}></td>
+                </tr>
+              ))}
+              {customTotals.map(row => (
+                <tr key={row.id}>
+                  <td style={S.td}>{row.label}</td>
+                  <td style={{ ...S.td, textAlign: "center" }}><Chip small color="#EEF2FF" fg="#6366F1">Manual</Chip></td>
+                  <td style={{ ...S.td, textAlign: "right", fontWeight: 700, color: "#0F172A", fontSize: 16 }}>{row.total}</td>
+                  <td style={{ ...S.td, textAlign: "right" }}>
+                    {canEditDemand && <button style={{ ...S.btnDel, padding: "3px 8px", fontSize: 11 }} onClick={() => removeCustomType(row.id)}>✕</button>}
+                  </td>
+                </tr>
+              ))}
+              {customTotals.length === 0 && hubspotTotals.every(r => r.total === 0) && (
+                <tr><td colSpan={4} style={{ ...S.td, textAlign: "center", color: "#94A3B8", fontStyle: "italic" }}>No hardware data yet. Sync from HubSpot or add custom types below.</td></tr>
+              )}
+            </tbody>
+          </table>
+          {canEditDemand && (
+            <div style={{ padding: 14, borderTop: "1px solid #F1F5F9", background: "#F8FAFC", display: "flex", gap: 8 }}>
+              <input style={{ ...S.inp, flex: 1, marginTop: 0 }} value={newTypeLabel} onChange={e => setNewTypeLabel(e.target.value)} placeholder="Add custom hardware type (e.g. 'GPU Modules')" onKeyDown={e => e.key === "Enter" && addCustomType()} />
+              <button style={{ ...S.btnMain, width: "auto", padding: "10px 18px", marginTop: 0 }} onClick={addCustomType} disabled={!newTypeLabel.trim()}>+ Add Type</button>
+            </div>
+          )}
+        </div>
+
+        {/* ═══ PIPELINE BAR CHARTS ═══ */}
+        <h3 style={{ ...S.h3, marginBottom: 6 }}>Pipeline Stage Distribution (Active Projects)</h3>
+        <p style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginBottom: 14 }}>Active project count per stage, shown per pipeline. Closed/cancelled stages excluded.</p>
+        <div style={{ marginBottom: 24 }}>
+          {pipelineCharts.map(pc => (
+            <div key={pc.pipeline.id} style={{ ...S.card, marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: pc.total > 0 ? 14 : 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F }}>{pc.pipeline.label}</div>
+                <Chip small color={pc.total > 0 ? "#ECFDF5" : "#F1F5F9"} fg={pc.total > 0 ? "#059669" : "#94A3B8"}>{pc.total} active</Chip>
+              </div>
+              {pc.total > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {pc.data.map(d => (
+                    <div key={d.stageId} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ width: 200, fontSize: 12, color: "#475569", fontFamily: F, textAlign: "right", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={d.label}>{d.label}</div>
+                      <div style={{ flex: 1, height: 22, background: "#F1F5F9", borderRadius: 4, position: "relative" }}>
+                        <div style={{ height: "100%", width: `${(d.count / pc.maxCount) * 100}%`, background: d.count > 0 ? "#00C9A7" : "transparent", borderRadius: 4, transition: "width .4s ease" }} />
+                      </div>
+                      <div style={{ width: 36, textAlign: "right", fontSize: 13, fontWeight: 700, color: d.count > 0 ? "#0F172A" : "#CBD5E1", fontFamily: F }}>{d.count}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* ═══ STAGE BREAKDOWN (existing, active-only) ═══ */}
+        <h3 style={{ ...S.h3, marginBottom: 6 }}>Projects by Stage (Active Only)</h3>
+        <p style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginBottom: 14 }}>Detailed project list per pipeline stage. Select a pipeline to drill in.</p>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {PIPELINE_LIST.map(pl => {
+              const ct = activeProjects.filter(p => p.hubspotPipelineId === pl.id).length;
+              return (
+                <button key={pl.id} onClick={() => setSelPipeline(pl.id)} style={{ padding: "8px 16px", borderRadius: 10, border: `2px solid ${selPipeline === pl.id ? "#00C9A7" : "#E2E8F0"}`, background: selPipeline === pl.id ? "#ECFDF5" : "#FFF", color: selPipeline === pl.id ? "#059669" : "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: F }}>
+                  {pl.short}
+                  {ct > 0 && <span style={{ marginLeft: 6, background: "#00C9A7", color: "#FFF", borderRadius: 10, padding: "1px 6px", fontSize: 11 }}>{ct}</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        {pipelineProjects.length === 0 ? (
+          <div style={S.empty}>No active projects in this pipeline.</div>
+        ) : (
+          activeStages.map(([stageId, stage]) => {
+            const projs = byStage[stageId] || [];
+            return (
+              <div key={stageId} style={{ ...S.card, marginBottom: 10, borderLeft: "3px solid #00C9A7" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: projs.length > 0 ? 10 : 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F }}>{stage.label}</div>
+                  <Chip small color="#ECFDF5" fg="#059669">{projs.length} project{projs.length !== 1 ? "s" : ""}</Chip>
+                </div>
+                {projs.map(renderProjectRow)}
+                {projs.length === 0 && <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>No projects in this stage.</div>}
+              </div>
+            );
+          })
+        )}
+      </>)}
     </div>
   );
 }
@@ -880,7 +1178,7 @@ function DocsView({ partyId, user, project, state, setState, lang }) {
   const [msDragIdx, setMsDragIdx] = useState(null);
   const [folderForm, setFolderForm] = useState({ name: "", accessLevel: "open" });
   const admin = isInst(user);
-  const canEdit = user.role === "admin"; // only explicit admins can edit
+  const canEdit = isInst(user); // all Instrumental users (partyId: instrumental) + admins can edit
 
   const canAccess = (cat) => {
     if (cat.accessLevel !== "restricted") return true;
@@ -1125,16 +1423,74 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
   const [tab, setTab] = useState(pendingUsers?.length > 0 ? "pending" : "users");
   const [approveForm, setApproveForm] = useState({});
 
+  // HubSpot sync state
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
+  const [syncPreview, setSyncPreview] = useState(null);
+  const [syncStatus, setSyncStatus] = useState(null);
+  const [applyLoading, setApplyLoading] = useState(false);
+
+  useEffect(() => {
+    const unsub = onValue(ref(db, "hubspotSync/status"), s => setSyncStatus(s.val()), { onlyOnce: false });
+    return () => unsub();
+  }, []);
+
+  const runPreview = async () => {
+    setSyncLoading(true); setSyncMsg(""); setSyncPreview(null);
+    try {
+      const fn = httpsCallable(functions, "manualHubspotSync");
+      await fn({ commit: false });
+      // Preview data written to hubspotPreview/ — read it once
+      const snap = await new Promise(r => onValue(ref(db, "hubspotPreview"), r, { onlyOnce: true }));
+      const data = snap.val() || {};
+      const projects = Object.values(data);
+      setSyncPreview(projects);
+      setSyncMsg(`Preview complete: ${projects.length} projects found.`);
+    } catch(e) { setSyncMsg("Error: " + (e.message || String(e))); }
+    setSyncLoading(false);
+  };
+
+  const runApply = async () => {
+    if (!confirm(`Apply sync? This will update ${syncPreview?.length || 0} projects in the webapp.`)) return;
+    setApplyLoading(true); setSyncMsg("");
+    try {
+      const fn = httpsCallable(functions, "manualHubspotSync");
+      const res = await fn({ commit: true });
+      setSyncMsg(`✓ Sync applied: ${res.data?.newCount || 0} new, ${res.data?.updatedCount || 0} updated.`);
+      setSyncPreview(null);
+    } catch(e) { setSyncMsg("Error: " + (e.message || String(e))); }
+    setApplyLoading(false);
+  };
+
+  // Access map writes — for rule-level enforcement. Only needed for external (non-Instrumental, non-admin) users.
+  const needsAccessMap = (u) => u && u.role !== "admin" && u.partyId !== "instrumental";
+
   const approve = async (pu) => {
     const f = approveForm[pu.id] || {};
     if (!f.partyId) return;
     const selProj = Object.entries(f.projects || {}).filter(([,v]) => v).map(([k]) => k);
     if (selProj.length === 0) return;
     const nu = { id: pu.id, name: pu.name, email: pu.email, photoURL: pu.photoURL || null, role: "user", partyId: f.partyId, projects: selProj, createdAt: pu.requestedAt, approvedAt: new Date().toISOString() };
-    try { await dbWrite(`users/${pu.id}`, nu); await dbWrite(`pendingUsers/${pu.id}`, null); } catch(e) { console.error(e); }
+    try {
+      await dbWrite(`users/${pu.id}`, nu);
+      if (needsAccessMap(nu)) {
+        await Promise.all(selProj.map(pid => dbWrite(`access/${pid}/${pu.id}`, true)));
+      }
+      await dbWrite(`pendingUsers/${pu.id}`, null);
+    } catch(e) { console.error(e); }
   };
   const deny = async (pu) => { try { await dbWrite(`pendingUsers/${pu.id}`, null); } catch(e) { console.error(e); } };
-  const removeUser = async (uid) => { try { await dbWrite(`users/${uid}`, null); setState(prev => ({ ...prev, users: (prev.users||[]).filter(u => u.id !== uid) })); } catch(e) { console.error(e); } };
+  const removeUser = async (uid) => {
+    try {
+      // Clean up access map entries for this user before removing
+      const target = (users||[]).find(u => u.id === uid);
+      if (target && needsAccessMap(target)) {
+        await Promise.all((target.projects || []).map(pid => dbWrite(`access/${pid}/${uid}`, null)));
+      }
+      await dbWrite(`users/${uid}`, null);
+      setState(prev => ({ ...prev, users: (prev.users||[]).filter(u => u.id !== uid) }));
+    } catch(e) { console.error(e); }
+  };
   const promoteAdmin = async (uid) => {
     if (!currentUser?.superAdmin) { alert("Only the super admin can promote users to admin."); return; }
     const target = (users||[]).find(u => u.id === uid);
@@ -1147,11 +1503,14 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
     const np = [...(u.projects||[]), pid];
     setState(prev => ({ ...prev, users: (prev.users||[]).map(usr => usr.id !== uid ? usr : { ...usr, projects: np }) }));
     dbWrite(`users/${uid}/projects`, np).catch(console.error);
+    if (needsAccessMap(u)) dbWrite(`access/${pid}/${uid}`, true).catch(console.error);
   };
   const removeProject = (uid, pid) => {
-    const np = ((users||[]).find(u => u.id === uid)?.projects||[]).filter(p => p !== pid);
-    setState(prev => ({ ...prev, users: (prev.users||[]).map(u => u.id !== uid ? u : { ...u, projects: np }) }));
+    const u = (users||[]).find(u => u.id === uid);
+    const np = ((u?.projects)||[]).filter(p => p !== pid);
+    setState(prev => ({ ...prev, users: (prev.users||[]).map(usr => usr.id !== uid ? usr : { ...usr, projects: np }) }));
     dbWrite(`users/${uid}/projects`, np).catch(console.error);
+    if (needsAccessMap(u)) dbWrite(`access/${pid}/${uid}`, null).catch(console.error);
   };
 
   // Restricted access management
@@ -1164,14 +1523,15 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
   };
 
   const pending = pendingUsers || [];
+  const instUsers = (users||[]).filter(u => u.partyId === "instrumental" && u.role !== "admin");
+  const externals = (users||[]).filter(u => u.partyId !== "instrumental" && u.role !== "admin");
   const admins = (users||[]).filter(u => u.role === "admin");
-  const externals = (users||[]).filter(u => u.role !== "admin");
 
   return (
     <div style={S.page}>
       <h2 style={S.h2}>Admin Panel</h2>
       <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
-        {[{ id: "pending", label: `Pending${pending.length > 0 ? ` (${pending.length})` : ""}` }, { id: "users", label: "User Access" }, { id: "restricted", label: "Restricted Folders" }].map(t => (
+        {[{ id: "pending", label: `Pending${pending.length > 0 ? ` (${pending.length})` : ""}` }, { id: "users", label: "User Access" }, { id: "hubspot", label: "🔄 HubSpot Sync" }, { id: "restricted", label: "Restricted Folders" }].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{ ...S.tabBtn, ...(tab === t.id ? { background: "#00C9A7", color: "#FFF", borderColor: "#00C9A7" } : {}), ...(t.id === "pending" && pending.length > 0 ? { borderColor: "#F59E0B" } : {}) }}>{t.label}</button>
         ))}
       </div>
@@ -1193,8 +1553,8 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
                   <button key={p.id} onClick={() => setApproveForm(prev => ({ ...prev, [pu.id]: { ...prev[pu.id], partyId: p.id } }))} style={{ padding: "6px 14px", borderRadius: 8, border: `2px solid ${f.partyId === p.id ? p.accent : "#E2E8F0"}`, background: f.partyId === p.id ? `${p.accent}15` : "#FFF", color: f.partyId === p.id ? p.accent : "#94A3B8", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: F }}>{p.defaultName}</button>
                 ))}
               </div>
-              <label style={S.lbl}>Assign Projects</label>
-              {allProjects.filter(p => p.status !== "deprecated").map(proj => {
+              <label style={S.lbl}>Assign Projects (active only)</label>
+              {allProjects.filter(p => p.status === "active").map(proj => {
                 const ck = f.projects?.[proj.id] || false;
                 return (
                   <div key={proj.id} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "4px 0" }} onClick={() => setApproveForm(prev => ({ ...prev, [pu.id]: { ...prev[pu.id], projects: { ...(prev[pu.id]?.projects||{}), [proj.id]: !ck } } }))}>
@@ -1223,7 +1583,19 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
               <Chip color="#ECFDF5" fg="#059669" small>Admin</Chip>
             </div>
           ))}
-          <h3 style={{ ...S.h3, marginTop: 20, marginBottom: 10 }}>External Users</h3>
+
+          <h3 style={{ ...S.h3, marginTop: 24, marginBottom: 10 }}>Instrumental Users</h3>
+          {instUsers.length === 0 ? <div style={{ ...S.empty, marginBottom: 16 }}>No non-admin Instrumental users yet.</div> : instUsers.map(u => (
+            <div key={u.id} style={{ ...S.card, display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+              {u.photoURL ? <img src={u.photoURL} style={{ width: 32, height: 32, borderRadius: 8 }} alt="" referrerPolicy="no-referrer" /> : <div style={{ ...S.ava, background: "#00C9A7", width: 32, height: 32 }}>{(u.name||"?")[0]}</div>}
+              <div style={{ flex: 1 }}><div style={{ fontSize: 14, fontWeight: 600, color: "#0F172A", fontFamily: F }}>{u.name}</div><div style={{ fontSize: 12, color: "#64748B" }}>{u.email}</div></div>
+              <Chip small color="#ECFDF5" fg="#059669">Instrumental</Chip>
+              <button style={{ ...S.btnEdit, fontSize: 11 }} onClick={() => promoteAdmin(u.id)}>⬆ Admin</button>
+              <button style={{ ...S.btnDel, fontSize: 11 }} onClick={() => removeUser(u.id)}>Remove</button>
+            </div>
+          ))}
+
+          <h3 style={{ ...S.h3, marginTop: 24, marginBottom: 10 }}>External Users</h3>
           {externals.length === 0 ? <div style={S.empty}>No external users yet.</div> : externals.map(u => {
             const p = PARTY_DEFS[u.partyId];
             return (
@@ -1232,7 +1604,6 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
                   {u.photoURL ? <img src={u.photoURL} style={{ width: 32, height: 32, borderRadius: 8 }} alt="" referrerPolicy="no-referrer" /> : <div style={{ ...S.ava, background: p?.accent||"#94A3B8", width: 32, height: 32 }}>{(u.name||"?")[0]}</div>}
                   <div style={{ flex: 1 }}><div style={{ fontSize: 14, fontWeight: 600, color: "#0F172A", fontFamily: F }}>{u.name}</div><div style={{ fontSize: 12, color: "#64748B" }}>{u.email}</div></div>
                   <Chip small color={`${p?.accent}22`} fg={p?.accent}>{p?.defaultName}</Chip>
-                  <button style={{ ...S.btnEdit, fontSize: 11 }} onClick={() => promoteAdmin(u.id)}>⬆ Admin</button>
                   <button style={{ ...S.btnDel, fontSize: 11 }} onClick={() => removeUser(u.id)}>Remove</button>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
@@ -1240,12 +1611,61 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
                   {(u.projects||[]).map(pid => { const proj = allProjects.find(p => p.id === pid); return proj ? <span key={pid} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 6, background: "#F1F5F9", fontSize: 12, fontFamily: F }}>{proj.name}<span style={{ cursor: "pointer", color: "#DC2626", fontWeight: 700 }} onClick={() => removeProject(u.id, pid)}>✕</span></span> : null; })}
                   <select style={{ ...S.inp, width: 140, padding: "3px 6px", fontSize: 11 }} value="" onChange={e => e.target.value && addProject(u.id, e.target.value)}>
                     <option value="">+ Add</option>
-                    {allProjects.filter(p => !(u.projects||[]).includes(p.id)).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    {allProjects.filter(p => p.status === "active" && !(u.projects||[]).includes(p.id)).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </select>
                 </div>
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* HUBSPOT SYNC TAB */}
+      {tab === "hubspot" && (
+        <div>
+          <div style={{ ...S.card, marginBottom: 16, borderLeft: "3px solid #FF7A59" }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 8 }}>HubSpot Sync</div>
+            <p style={{ fontSize: 14, color: "#64748B", fontFamily: F, marginBottom: 12 }}>
+              Syncs all projects from all 6 HubSpot pipelines. Preview first, then confirm to apply changes to the webapp.
+              Auto-sync runs every Tuesday and Friday at 9am PDT.
+            </p>
+            {syncStatus && (
+              <div style={{ fontSize: 13, color: "#94A3B8", fontFamily: F, marginBottom: 12 }}>
+                Last sync: {syncStatus.lastSync ? new Date(syncStatus.lastSync).toLocaleString() : "Never"} ·{" "}
+                {syncStatus.count != null ? `${syncStatus.count} projects` : ""}{" "}
+                {syncStatus.error ? <span style={{ color: "#DC2626" }}>Error: {syncStatus.error}</span> : ""}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button style={{ ...S.btnMain, width: "auto", padding: "10px 20px", marginTop: 0, opacity: syncLoading ? .5 : 1, background: "#FF7A59" }} onClick={runPreview} disabled={syncLoading}>
+                {syncLoading ? "Running preview…" : "▶ Run Preview Sync"}
+              </button>
+              {syncPreview && (
+                <button style={{ ...S.btnMain, width: "auto", padding: "10px 20px", marginTop: 0, opacity: applyLoading ? .5 : 1 }} onClick={runApply} disabled={applyLoading}>
+                  {applyLoading ? "Applying…" : "✓ Confirm & Apply"}
+                </button>
+              )}
+            </div>
+            {syncMsg && <p style={{ fontSize: 14, color: syncMsg.startsWith("Error") ? "#DC2626" : "#059669", marginTop: 12, fontFamily: F }}>{syncMsg}</p>}
+          </div>
+
+          {syncPreview && (
+            <div style={S.card}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 12 }}>Preview — {syncPreview.length} projects</div>
+              {syncPreview.slice(0, 50).map(p => (
+                <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid #F1F5F9" }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "#0F172A", fontFamily: F }}>{p.customer || p.name}</div>
+                    <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F }}>{p.name}</div>
+                  </div>
+                  <Chip small color={p.status === "inactive" ? "#FEF3C7" : "#ECFDF5"} fg={p.status === "inactive" ? "#D97706" : "#059669"}>{p.status}</Chip>
+                  {p.isSI && <Chip small color="#EFF6FF" fg="#3B82F6">SI</Chip>}
+                  <span style={{ fontSize: 12, color: "#94A3B8", fontFamily: F }}>{PIPELINES[p.hubspotPipelineId]?.short || p.hubspotPipelineId}</span>
+                </div>
+              ))}
+              {syncPreview.length > 50 && <p style={{ fontSize: 13, color: "#94A3B8", marginTop: 8, fontFamily: F }}>…and {syncPreview.length - 50} more</p>}
+            </div>
+          )}
         </div>
       )}
 
@@ -1321,6 +1741,14 @@ function ManageProjects({ state, setState }) {
             <Chip color={isPast ? "#FEF3C7" : "#ECFDF5"} fg={isPast ? "#D97706" : "#059669"}>{isPast ? "Past" : "Active"}</Chip>
             <button style={S.btnEdit} onClick={() => toggleStatus(proj.id)}>{isPast ? "↑ Reactivate" : "↓ Archive"}</button>
             {!isPast && <button style={S.btnEdit} onClick={() => setEditingNames(ed ? null : proj.id)}>{ed ? "✓ Done" : "✎ Edit"}</button>}
+            {!isPast && <button style={{ ...S.btnEdit, borderColor: "#00C9A7", color: "#00C9A7" }} onClick={async () => {
+              if (!confirm(`Apply checklist template to "${proj.name}"? This will add checklist folders if not already present.`)) return;
+              try {
+                const fn = httpsCallable(functions, "applyChecklistTemplate");
+                await fn({ projectId: proj.id });
+                alert("Checklist template applied.");
+              } catch(e) { alert("Error: " + (e.message || String(e))); }
+            }}>☑ Apply Checklist</button>}
           </div>
         </div>
         {isPast && proj.docLink && <div style={{ marginTop: 6 }}><span style={{ fontSize: 12, color: "#64748B" }}>📁 </span><a href={proj.docLink} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: "#0284C7", fontFamily: F }}>{proj.docLink}</a></div>}
@@ -1429,17 +1857,21 @@ export default function App() {
 
         if (isFirst) {
           const { projects, progress, docData } = getDefault();
+          // Store projects as object keyed by ID (v3.1.0 schema)
+          const projectsObj = {};
+          projects.forEach(p => { if (p?.id) projectsObj[p.id] = p; });
           const nu = { id: authUser.uid, name: authUser.displayName || email, email, photoURL: authUser.photoURL || null, role: "admin", partyId: "instrumental", projects: projects.map(p => p.id), createdAt: new Date().toISOString() };
-          await dbWrite("appState/projects", projects);
+          await dbWrite("appState/projects", projectsObj);
           await dbWrite("appState/progress", progress);
           await dbWrite("appState/docData", docData);
           await dbWrite("appState/statusMessage", "");
           await dbWrite(`users/${authUser.uid}`, nu);
+          await dbWrite("_schemaVersion", "v3.1.0");
           if (!cancelled) { setUser(nu); setPendingApproval(false); }
         } else if (isInstDomain) {
           // Auto-approve @instrumental.com users as instrumental party — admin must be explicitly granted
-          const allProj = await dbRead("appState/projects") || [];
-          const projIds = (Array.isArray(allProj) ? allProj : Object.values(allProj)).map(p => p.id);
+          const allProj = await dbRead("appState/projects") || {};
+          const projIds = projectsToArray(allProj).map(p => p.id);
           const nu = { id: authUser.uid, name: authUser.displayName || email, email, photoURL: authUser.photoURL || null, role: "user", partyId: "instrumental", projects: projIds, createdAt: new Date().toISOString() };
           await dbWrite(`users/${authUser.uid}`, nu);
           if (!cancelled) { setUser(nu); setPendingApproval(false); }
@@ -1454,32 +1886,110 @@ export default function App() {
     return () => { cancelled = true; };
   }, [authUser]);
 
-  // 3. DB listeners
+  // 3. DB listeners — access scoped by role. Admin/Instrumental listen on parent; externals listen per-project.
   useEffect(() => {
     if (!user) return;
     const unsubs = [];
-    unsubs.push(onValue(ref(db, "appState/projects"), (s) => { const v = s.val(); if (v) setState(prev => ({ ...prev, projects: Array.isArray(v) ? v : Object.values(v) })); }, (e) => console.error(e)));
-    unsubs.push(onValue(ref(db, "appState/docData"), (s) => { setState(prev => ({ ...prev, docData: s.val() || {} })); }, (e) => console.error(e)));
+    const isAdminOrInst = user.role === "admin" || user.partyId === "instrumental";
+
+    if (isAdminOrInst) {
+      // Full reads — rules permit Admin/Instrumental to read parent paths
+      unsubs.push(onValue(ref(db, "appState/projects"), (s) => { const v = s.val(); setState(prev => ({ ...prev, projects: projectsToArray(v) })); }, (e) => console.error(e)));
+      unsubs.push(onValue(ref(db, "appState/docData"), (s) => { setState(prev => ({ ...prev, docData: s.val() || {} })); }, (e) => console.error(e)));
+    } else {
+      // External users — listen only to assigned projects/docData. Parent reads are blocked by rules.
+      const assignedIds = user.projects || [];
+      if (assignedIds.length === 0) {
+        setState(prev => ({ ...prev, projects: [], docData: {} }));
+      }
+      assignedIds.forEach(pid => {
+        unsubs.push(onValue(ref(db, `appState/projects/${pid}`), (s) => {
+          const v = s.val();
+          setState(prev => {
+            const current = projectsToArray(prev.projects).filter(p => p.id !== pid);
+            return { ...prev, projects: v ? [...current, v] : current };
+          });
+        }, (e) => console.error(e)));
+        unsubs.push(onValue(ref(db, `appState/docData/${pid}`), (s) => {
+          const v = s.val() || {};
+          setState(prev => ({ ...prev, docData: { ...(prev.docData||{}), [pid]: v } }));
+        }, (e) => console.error(e)));
+      });
+    }
+
     if (user.role === "admin") {
       unsubs.push(onValue(ref(db, "appState/progress"), (s) => { setState(prev => ({ ...prev, progress: s.val() || {} })); }, (e) => console.error(e)));
     } else {
       unsubs.push(onValue(ref(db, `appState/progress/${user.id}`), (s) => { setState(prev => ({ ...prev, progress: { ...(prev.progress||{}), [user.id]: s.val() || {} } })); }, (e) => console.error(e)));
     }
     unsubs.push(onValue(ref(db, "appState/statusMessage"), (s) => { setState(prev => ({ ...prev, statusMessage: s.val() || "" })); }, (e) => console.error(e)));
-    unsubs.push(onValue(ref(db, "users"), (s) => { const v = s.val(); if (v) setState(prev => ({ ...prev, users: Object.values(v) })); }));
-    if (user.role === "admin") { unsubs.push(onValue(ref(db, "pendingUsers"), (s) => { const v = s.val(); setPendingUsers(v ? Object.values(v) : []); })); }
+    if (isAdminOrInst) {
+      unsubs.push(onValue(ref(db, "appState/demandCustomTypes"), (s) => { setState(prev => ({ ...prev, demandCustomTypes: s.val() || {} })); }, (e) => console.error(e)));
+    }
+    unsubs.push(onValue(ref(db, "users"), (s) => { const v = s.val(); if (v) setState(prev => ({ ...prev, users: Object.values(v) })); }, (e) => console.error(e)));
+    if (user.role === "admin") { unsubs.push(onValue(ref(db, "pendingUsers"), (s) => { const v = s.val(); setPendingUsers(v ? Object.values(v) : []); }, (e) => console.error(e))); }
     setLoaded(true);
     return () => unsubs.forEach(u => { try { u(); } catch(e) {} });
   }, [user]);
 
-  // Save
+  // 3a. v3.1.0 one-time migration — runs on admin login. Converts projects array→object, populates access/ map.
+  useEffect(() => {
+    if (!user || user.role !== "admin") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const schemaVer = await dbRead("_schemaVersion");
+        if (schemaVer === "v3.1.0" || cancelled) return;
+        const raw = await dbRead("appState/projects");
+        const isArrayLike = Array.isArray(raw) || (raw && typeof raw === "object" && Object.keys(raw).every(k => /^\d+$/.test(k)));
+        if (isArrayLike && raw) {
+          const arr = projectsToArray(raw);
+          const obj = {};
+          arr.forEach(p => { if (p && p.id) obj[p.id] = p; });
+          // Back up before rewriting — gives a rollback path
+          await dbWrite("_backup/pre_v3_1_0_projects", { projects: raw, backedUpAt: new Date().toISOString() });
+          await dbWrite("appState/projects", obj);
+          console.log("[migration] projects array → object, count:", Object.keys(obj).length);
+        }
+        // Populate access/ map from existing user.projects lists (external users only)
+        const usersMap = await dbRead("users") || {};
+        const accessMap = {};
+        Object.values(usersMap).forEach(u => {
+          if (!u?.id) return;
+          if (u.role === "admin" || u.partyId === "instrumental") return; // implicit access via rules
+          (u.projects || []).forEach(pid => {
+            if (!pid) return;
+            if (!accessMap[pid]) accessMap[pid] = {};
+            accessMap[pid][u.id] = true;
+          });
+        });
+        if (Object.keys(accessMap).length > 0) {
+          await dbWrite("access", accessMap);
+          console.log("[migration] access/ map populated for", Object.keys(accessMap).length, "projects");
+        }
+        await dbWrite("_schemaVersion", "v3.1.0");
+        console.log("[migration] v3.1.0 complete");
+      } catch (e) {
+        console.error("[migration] failed:", e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  // Save — projects are stored in DB as object keyed by ID (enables per-project rules). In-memory stays as array.
   const save = useCallback((updater) => {
     setState(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
-      if (next.projects !== prev.projects) dbWrite("appState/projects", next.projects).catch(console.error);
+      if (next.projects !== prev.projects) {
+        const arr = projectsToArray(next.projects);
+        const obj = {};
+        arr.forEach(p => { if (p && p.id) obj[p.id] = p; });
+        dbWrite("appState/projects", obj).catch(console.error);
+      }
       if (next.docData !== prev.docData) dbWrite("appState/docData", next.docData).catch(console.error);
       if (next.progress !== prev.progress) dbWrite("appState/progress", next.progress).catch(console.error);
       if (next.statusMessage !== prev.statusMessage) dbWrite("appState/statusMessage", next.statusMessage).catch(console.error);
+      if (next.demandCustomTypes !== prev.demandCustomTypes) dbWrite("appState/demandCustomTypes", next.demandCustomTypes || null).catch(console.error);
       if (next.users !== prev.users && Array.isArray(next.users)) next.users.forEach(u => { if (u.id) dbWrite(`users/${u.id}`, u).catch(console.error); });
       return next;
     });
@@ -1501,20 +2011,26 @@ export default function App() {
   if (pendingApproval) return <PendingApproval authUser={authUser} onLogout={onLogout} />;
   if (!user || !loaded) return <div style={S.loginWrap}><div><p style={{ color: "#94A3B8", fontFamily: F }}>Loading your data…</p><p style={{ color: "#94A3B8", fontSize: 13, marginTop: 8 }}>Signed in as {authUser.email}</p></div></div>;
 
-  const userProjects = (Array.isArray(state.projects) ? state.projects : []).filter(p => user.role === "admin" || (user.projects||[]).includes(p.id));
+  const projectsArr = Array.isArray(state.projects) ? state.projects : (state.projects ? Object.values(state.projects) : []);
+  const userProjects = projectsArr.filter(p => user.role === "admin" || (user.projects||[]).includes(p.id));
   const admin = isInst(user);
+  // Project access gate — ensure current project is in user's allowed list (defense against state tampering)
+  const hasProjectAccess = !project || user.role === "admin" || user.partyId === "instrumental" || (user.projects||[]).includes(project.id);
 
   const renderMain = () => {
+    if (view === "projects_overview" && admin) return <ProjectsOverviewView state={state} setState={save} user={user} lang={lang} />;
     if (view === "dashboard" || (!view.startsWith("docs_") && view !== "admin" && view !== "manage")) {
       if (user.partyId !== "instrumental" && user.partyId !== "customer" && user.role !== "admin") return <div style={S.page}><div style={S.empty}>Access denied.</div></div>;
+      if (!hasProjectAccess) return <div style={S.page}><div style={S.empty}>Access denied — you are not assigned to this project.</div></div>;
       return <DashboardView user={user} project={project} state={state} setState={save} lang={lang} setView={setView} />;
     }
     if (view.startsWith("docs_")) {
       const pid = view.replace("docs_", "");
       if (!admin && pid !== user.partyId) return <div style={S.page}><div style={S.empty}>Access denied.</div></div>;
+      if (!hasProjectAccess) return <div style={S.page}><div style={S.empty}>Access denied — you are not assigned to this project.</div></div>;
       return <DocsView partyId={pid} user={user} project={project} state={state} setState={save} lang={lang} />;
     }
-    if (view === "admin" && admin) return <AdminView state={state} setState={save} allProjects={Array.isArray(state.projects) ? state.projects : []} pendingUsers={pendingUsers} currentUser={user} />;
+    if (view === "admin" && admin) return <AdminView state={state} setState={save} allProjects={projectsArr} pendingUsers={pendingUsers} currentUser={user} />;
     if (view === "manage" && admin) return <ManageProjects state={state} setState={save} />;
     return <DashboardView user={user} project={project} state={state} setState={save} lang={lang} setView={setView} />;
   };
