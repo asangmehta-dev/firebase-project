@@ -1,6 +1,7 @@
-/* ═══ CHECKLIST TEMPLATES — generated from CSV files ═══ */
+/* ═══ CHECKLIST TEMPLATES — v3.2.0 ═══ */
+/* Item fields: label, checked, na (not applicable), ownership, startDate, projectedDate, actualDate, sopLink */
 
-const g = (id, label) => ({ id, label, checked: false });
+const g = (id, label, ownership = "") => ({ id, label, checked: false, na: false, ownership, startDate: null, projectedDate: null, actualDate: null, sopLink: null });
 
 const INTERNAL_CHECKLIST = {
   id: "inst_internal_checklist",
@@ -9,52 +10,51 @@ const INTERNAL_CHECKLIST = {
   type: "checklist",
   items: [],
   milestones: [
-    { id: "int_ms_1", name: "1. Design & CAD Release", description: "Finalize CAD, BOM, and cross-functional review.", color: "#00C9A7", checklist: [
-      g("int_1_1",   "CAD Finalized"),
-      g("int_1_1_1", "CAD GD&T — critical dimensions highlighted as CTQs"),
-      g("int_1_1_2", "CAD drawing packet available in PDF format"),
-      g("int_1_1_3", "Acceptable tolerances and clear definitions for critical specs (e.g. working distance)"),
-      g("int_1_2",   "Mounting interfaces validated for station and line compatibility"),
-      g("int_1_3",   "BOM finalized and approved"),
-      g("int_1_4",   "Scoping document released"),
-      g("int_1_5",   "Cross-functional internal review of scope (SA + CSE + TPM) completed"),
+    { id: "int_ms_1", name: "1. Scope, Design & CAD Release", description: "Finalize CAD, BOM, and cross-functional review.", color: "#00C9A7", gating: true, checklist: [
+      g("int_1_1",   "CAD Finalized", "SA, HDE"),
+      g("int_1_1_1", "CAD GD&T — critical dimensions highlighted as CTQs", "SA, HDE"),
+      g("int_1_1_2", "CAD drawing packet available in PDF format", "SA, HDE"),
+      g("int_1_1_3", "Acceptable tolerances and clear definitions for critical specs (e.g. working distance)", "SA, HDE"),
+      g("int_1_2",   "Mounting interfaces validated for station and line compatibility", "HDE"),
+      g("int_1_3",   "BOM finalized and approved", "HDE"),
+      g("int_1_4",   "Scoping document released", "SA"),
+      g("int_1_5",   "Internal Kickoff (SA + CSE + TPM) completed", "SA, CSE, TPM"),
     ], links: [], signatures: [] },
-    { id: "int_ms_2", name: "2. Machine Shop / Fabrication Readiness", description: "Prepare fabrication docs and confirm lead times.", color: "#3B82F6", checklist: [
-      g("int_2_1", "CAD and drawing shared with machine shop"),
-      g("int_2_2", "Lead times confirmed (timeline with deployment / material availability confirmed)"),
-      g("int_2_3", "Assembly instructions documented (if non-trivial)"),
-      g("int_2_4", "Factory dimensional validation POC and procedure documented to ensure design compliance"),
+    { id: "int_ms_2", name: "2. Machine Shop / Fabrication Readiness", description: "Prepare fabrication docs and confirm lead times.", color: "#3B82F6", gating: true, gatedBy: "1. Scope, Design & CAD Release", checklist: [
+      g("int_2_1", "CAD and drawing shared with machine shop", "HDE"),
+      g("int_2_2", "Lead times confirmed (timeline with deployment / material availability confirmed)", "HDE, TPM"),
+      g("int_2_3", "Assembly instructions documented (if non-trivial)", "HDE"),
+      g("int_2_4", "Factory dimensional validation POC and procedure documented to ensure design compliance", "HDE"),
     ], links: [], signatures: [] },
-    { id: "int_ms_3", name: "3. Custom Parts & Procurement", description: "Identify, order, and track all parts.", color: "#F59E0B", checklist: [
-      g("int_3_1", "All parts identified as either MTO/OTS (Made to Order / Off the Shelf)"),
-      g("int_3_2", "Long lead items flagged, tracked, and ordered in advance if necessary"),
-      g("int_3_3", "Spare parts identified and ordered"),
-      g("int_3_4", "All parts in house to be assembled and ready for shipment"),
-      g("int_3_5", "Lead times for MTOs confirmed"),
+    { id: "int_ms_3", name: "3. Custom Parts, Procurement & Hardware Fabrication", description: "Identify, order, and track all parts.", color: "#F59E0B", gating: true, checklist: [
+      g("int_3_2", "Long lead items flagged, tracked, and ordered in advance if necessary", "TPM"),
+      g("int_3_3", "Spare parts identified and ordered", "TPM"),
+      g("int_3_4", "All parts in house to be assembled and ready for shipment", "TPM"),
+      g("int_3_5", "Lead times for MTOs confirmed", "TPM"),
+      g("int_3_6", "Any pre-shipment fabrication in office, if necessary", "TPM"),
     ], links: [], signatures: [] },
-    { id: "int_ms_4", name: "4. System Integration Readiness", description: "Validate compute, network, power, and cable requirements.", color: "#A855F7", checklist: [
-      g("int_4_1", "Compute hardware sized for workload"),
-      g("int_4_2", "Network requirements defined"),
-      g("int_4_3", "Power requirements defined"),
-      g("int_4_4", "Cable length requirements validated vs real layout"),
-      g("int_4_5", "All required cables/adapters included in BOM"),
-      g("int_4_6", "Extra hardware scoped and prepped in advance of shipment"),
+    { id: "int_ms_4", name: "4. System, Software, Data & MES Integration Readiness", description: "Validate compute, network, power, and integration requirements.", color: "#A855F7", gating: true, checklist: [
+      g("int_4_1", "Confirm hardware compute, power, and internet requirements", "TPM, FDE"),
+      g("int_4_2", "Extra hardware scoped and prepped in advance of shipment", "TPM, FDE"),
+      g("int_4_3", "Unit tracking / barcode logic verified", "TPM, FDE"),
+      g("int_4_4", "Data storage + access confirmed", "TPM, FDE"),
+      g("int_4_5", "Offline fallback plan defined (if network drops)", "TPM, FDE"),
     ], links: [], signatures: [] },
-    { id: "int_ms_5", name: "5. Software & Data Readiness, FAT", description: "Validate software, data, and FAT readiness.", color: "#0284C7", checklist: [
-      g("int_5_1", "Unit tracking / barcode logic verified"),
-      g("int_5_2", "Data storage + access confirmed"),
-      g("int_5_3", "Offline fallback plan defined (if network drops)"),
+    { id: "int_ms_5", name: "5. Deployment Planning & Shipment", description: "Define location, schedule, logistics, and documentation.", color: "#0284C7", gating: true, checklist: [
+      g("int_6_1", "Exact station location defined and documented clearly", "TPM"),
+      g("int_6_2", "Create Webapp project and fill Station SOP, fixture details", "TPM"),
+      g("int_6_3", "Installation procedure documented", "TPM"),
+      g("int_6_4", "Daily deployment schedule established", "TPM"),
+      g("int_6_5", "Dry run or simulation completed (if possible)", "TPM"),
+      g("int_6_6", "Shipment and logistics from IN to final customer site", "TPM"),
+      g("int_6_8", "Instrumental documentation and traceability (e.g. Hubspot, Shipment form, deployment form) completed prior to shipment", "TPM"),
     ], links: [], signatures: [] },
-    { id: "int_ms_6", name: "6. Deployment Planning", description: "Define location, schedule, and dry run.", color: "#DC2626", checklist: [
-      g("int_6_1", "Exact station location defined and documented clearly"),
-      g("int_6_2", "Installation procedure documented"),
-      g("int_6_3", "Daily deployment schedule established"),
-      g("int_6_4", "Dry run or simulation completed (if possible)"),
-    ], links: [], signatures: [] },
-    { id: "int_ms_7", name: "7. Internal Sign Off", description: "TPM, SA, and CSE formal approvals.", color: "#64748B", checklist: [
-      g("int_7_1", "TPM Approval"),
-      g("int_7_2", "SA Approval"),
-      g("int_7_3", "CSE Approval"),
+    { id: "int_ms_6", name: "6. Internal Sign Off Prior to Deployment", description: "Lead TPM + Manager aligned on deployment readiness. Formal approvals.", color: "#64748B", gating: true, checklist: [
+      g("int_7_1", "Shipment & logistics dates confirmed to meet customer / CM site production need by with established and aligned schedule", "All"),
+      g("int_7_1a", "Lead TPM + Manager (Santiago) aligned on deployment readiness and success prior to shipment and/or travel", "TPM"),
+      g("int_7_2", "TPM Approval", "TPM"),
+      g("int_7_3", "SA Approval", "SA"),
+      g("int_7_4", "CSE Approval", "CSE"),
     ], links: [], signatures: [
       { id: "int_sig_tpm", role: "TPM", name: "", email: "", signed: false, signedAt: null },
       { id: "int_sig_sa",  role: "SA",  name: "", email: "", signed: false, signedAt: null },
@@ -70,82 +70,89 @@ const EXTERNAL_CHECKLIST = {
   type: "checklist",
   items: [],
   milestones: [
-    { id: "ext_ms_1", name: "1. Security & Onsite Readiness", description: "Clearances, entry logistics, and onsite requirements.", color: "#00C9A7", checklist: [
-      g("ext_1_1",   "Obtained/provided all necessary documentation for security and internet clearance"),
-      g("ext_1_1_1", "Tools check in"),
-      g("ext_1_1_2", "Ease and location of factory entry / exit"),
-      g("ext_1_1_3", "Prior knowledge of food availability"),
-      g("ext_1_1_4", "Customer / CM oversight necessity of IN employees"),
+    { id: "ext_ms_0", name: "0. Internal KO (from Internal Checklist)", description: "Obtain Order Fan and align scope with customer.", color: "#64748B", gating: true, checklist: [
+      g("ext_0_1", "Obtain and distribute OF (Order Fan)", "AE, SA"),
+      g("ext_0_2", "Internal KO with scope, coverage, and success criteria aligned with customer", "AE, SA"),
     ], links: [], signatures: [] },
-    { id: "ext_ms_2", name: "2. Line Access & Production Readiness", description: "Alignment, downtime, and safety approvals.", color: "#3B82F6", checklist: [
-      g("ext_2_1",   "Customer + CM alignment meeting"),
-      g("ext_2_1_1", "Supervisors, leads, and operators aware of deployment timing"),
-      g("ext_2_1_2", "Necessary personnel involved in alignment / kick-off meeting"),
-      g("ext_2_1_3", "Clear dates, actions, and owners for open items with follow-up cadence"),
-      g("ext_2_1_4", "Business value to CM shared"),
-      g("ext_2_2",   "Production line scheduled downtime confirmed"),
-      g("ext_2_2_1", "Line will be fully stopped during installation"),
-      g("ext_2_2_2", "Shift schedule and ability to work after hours"),
-      g("ext_2_3",   "Safety approvals cleared (lockout/tagout if needed)"),
-      g("ext_2_4",   "PPE requirements conveyed"),
-      g("ext_2_4_1", "Customer / Instrumental to provide PPE"),
-      g("ext_2_4_2", "Understanding requirements: eye glasses, steel-toed shoes, coat, ear coverings"),
-      g("ext_2_5",   "Physical access to station location guaranteed"),
+    { id: "ext_ms_1", name: "1. External KO", description: "External kickoff with customer, CM, and stakeholders.", color: "#00C9A7", gating: true, gatedBy: "Internal KO", checklist: [
+      g("ext_1_1",   "External KO (alignment meeting) with customer", "TPM, SA"),
+      g("ext_1_1_1", "Supervisors, leads, and operators aware of deployment timing", "TPM, SA"),
+      g("ext_1_1_2", "Necessary personnel involved in alignment / kick-off meeting", "TPM, SA"),
+      g("ext_1_1_3", "Clear dates, actions, and owners for open items with defined cadence for follow up", "TPM, SA"),
+      g("ext_1_1_4", "Separate external kickoff between TPM team and CM — business value shared, requirements communicated", "TPM"),
+      g("ext_1_2",   "MES Questionnaire sent to CM / Customer to confirm MES requirements", "TPM"),
+      g("ext_1_3",   "Follow-up email to CM on network, space, power requirements", "TPM"),
+      g("ext_1_4",   "Confirm power, internet, space, and network requirements with CM", "TPM"),
     ], links: [], signatures: [] },
-    { id: "ext_ms_3", name: "3. Station Location & Layout", description: "Confirm install location, layout, and mounting.", color: "#F59E0B", checklist: [
-      g("ext_3_1",   "Installation location confirmed and documented"),
-      g("ext_3_2",   "Installation location cleared and evidence provided"),
-      g("ext_3_3",   "Conveyed distance from power source, ethernet port, and production intent location"),
-      g("ext_3_3_1", "Power source distance confirmed"),
-      g("ext_3_3_2", "Ethernet port distance confirmed"),
-      g("ext_3_3_3", "Installation vs production intent location representativeness confirmed"),
-      g("ext_3_4",   "Mounting surface available and compatible"),
-      g("ext_3_5",   "Space constraints reviewed (no interference with operators)"),
-      g("ext_3_6",   "Line process flow compatible"),
+    { id: "ext_ms_2", name: "2. Line Access, Security Onsite & Production Readiness", description: "Clearances, safety, PPE, and physical access.", color: "#3B82F6", gating: true, gatedBy: "External KO, Internal KO", checklist: [
+      g("ext_2_1",   "Production line scheduled downtime confirmed during deployment period", "TPM, FDE"),
+      g("ext_2_1_1", "Line will be fully stopped during installation", "TPM, FDE"),
+      g("ext_2_1_2", "Shift schedule and ability to work after hours", "TPM, FDE"),
+      g("ext_2_2",   "Safety approvals cleared (lockout/tagout if needed)", "TPM, FDE"),
+      g("ext_2_3",   "PPE requirements conveyed", "TPM, FDE"),
+      g("ext_2_3_1", "Customer / Instrumental to provide PPE", "TPM, FDE"),
+      g("ext_2_3_2", "Understanding requirements: eye glasses, steel-toed shoes, coat, ear coverings", "TPM, FDE"),
+      g("ext_2_4",   "Physical access to station location guaranteed", "TPM, FDE"),
+      g("ext_2_5",   "Obtained/provided all necessary documentation for security and internet clearance", "TPM, FDE"),
+      g("ext_2_5_1", "Tools check in", "TPM, FDE"),
+      g("ext_2_5_2", "Ease and location of factory entry / exit", "TPM, FDE"),
+      g("ext_2_5_3", "Prior knowledge of food availability", "TPM, FDE"),
+      g("ext_2_5_4", "Customer / CM oversight necessity of IN employees", "TPM, FDE"),
+      g("ext_2_5_5", "Separate email thread / meeting for onsite readiness items", "TPM, FDE"),
     ], links: [], signatures: [] },
-    { id: "ext_ms_4", name: "4. Network & IT Requirements", description: "Internet, IP, firewall, and cable requirements.", color: "#A855F7", checklist: [
-      g("ext_4_1",     "Internet access need confirmed"),
-      g("ext_4_1_1",   "Yes → Confirm connectivity available"),
-      g("ext_4_1_1_1", "Confirm ability to bring adapters in case of internet down"),
-      g("ext_4_1_2",   "No → Confirm offline workflow"),
-      g("ext_4_2",     "Required IP addresses provided to customer IT and Instrumental TPM / FDE"),
-      g("ext_4_3",     "Firewall rules configured (whitelisting Instrumental endpoints)"),
-      g("ext_4_4",     "Ethernet ports active and tested"),
-      g("ext_4_5",     "Network speed sufficient for high-res image transfer"),
-      g("ext_4_6",     "Correct cable type available (CAT6 or higher) or escalated to Instrumental TPM"),
-      g("ext_4_7",     "Cable length sufficient for actual layout"),
+    { id: "ext_ms_3", name: "3. Station Location & Layout", description: "Confirm install location, layout, and mounting.", color: "#F59E0B", gating: true, gatedBy: "External KO, Internal KO", checklist: [
+      g("ext_3_1",   "Installation location confirmed and documented, ideally within overall factory layout", "TPM, FDE"),
+      g("ext_3_2",   "Installation location cleared and evidence provided", "TPM, FDE"),
+      g("ext_3_3",   "Conveyed distance from the following (if possible have electrical and layout drawing):", "TPM, FDE"),
+      g("ext_3_3_1", "Power source", "TPM, FDE"),
+      g("ext_3_3_2", "Ethernet port", "TPM, FDE"),
+      g("ext_3_3_3", "Installation vs production intent location representativeness", "TPM, FDE"),
+      g("ext_3_4",   "Mounting surface available and compatible", "TPM, FDE"),
+      g("ext_3_5",   "Space constraints reviewed (no interference with operators)", "TPM, FDE"),
+      g("ext_3_6",   "Line process flow compatible", "TPM, FDE"),
     ], links: [], signatures: [] },
-    { id: "ext_ms_5", name: "5. Equipment Handling & Logistics", description: "Delivery, storage, and tooling.", color: "#0284C7", checklist: [
-      g("ext_5_1", "Equipment delivered and stored safely"),
-      g("ext_5_2", "Designated workspace to store and use equipment / tools"),
-      g("ext_5_3", "Access for moving equipment to line confirmed"),
-      g("ext_5_4", "Required tools available onsite (or brought by team)"),
-      g("ext_5_5", "Local support contact identified"),
-      g("ext_5_6", "Test sample ready to be used for setup and inspection"),
+    { id: "ext_ms_4", name: "4. Network, MES, & IT", description: "Internet, IP, firewall, and cable requirements.", color: "#A855F7", gatedBy: "External KO, Internal KO", checklist: [
+      g("ext_4_1",   "Internet access need", "TPM"),
+      g("ext_4_1_1", "Confirm connectivity available", "TPM"),
+      g("ext_4_2",   "Required IP addresses provided to customer IT and Instrumental TPM / FDE, network setup meets IN requirements", "TPM"),
+      g("ext_4_3",   "Firewall rules configured (whitelisting Instrumental endpoints)", "TPM"),
+      g("ext_4_4",   "Ethernet ports active and tested", "TPM"),
+      g("ext_4_5",   "Network speed sufficient for high-res image transfer", "TPM"),
+      g("ext_4_6",   "Correct cable type available (CAT6 or higher) or escalated to Instrumental TPM", "TPM"),
+      g("ext_4_7",   "Cable length sufficient for actual layout (avoid short cable issue)", "TPM"),
     ], links: [], signatures: [] },
-    { id: "ext_ms_6", name: "6. Validation & Production Integration (SAT)", description: "Golden units, defect samples, and acceptance criteria.", color: "#DC2626", checklist: [
-      g("ext_6_1", "Golden units available for validation"),
-      g("ext_6_2", "Known defect samples available"),
-      g("ext_6_3", "Cycle time expectations defined"),
-      g("ext_6_4", "Acceptance criteria and type (SAT vs FAT) agreed and quantitatively defined"),
+    { id: "ext_ms_5", name: "5. Equipment Handling & Logistics", description: "Delivery, storage, and tooling.", color: "#0284C7", gating: true, gatedBy: "External KO, Internal KO, Line Access, Station Location & Layout", checklist: [
+      g("ext_5_1", "Equipment delivered and stored safely", "TPM"),
+      g("ext_5_2", "Designated workspace to store and use equipment / tools", "TPM"),
+      g("ext_5_3", "Access for moving equipment to line confirmed", "TPM"),
+      g("ext_5_4", "Required tools available onsite (or brought by team)", "TPM"),
+      g("ext_5_5", "Local support contact identified", "TPM"),
+      g("ext_5_6", "Test sample ready to be used for setup and inspection", "TPM"),
     ], links: [], signatures: [] },
-    { id: "ext_ms_7", name: "7. Coordination & Communication", description: "Stakeholder matrix and escalation paths.", color: "#64748B", checklist: [
-      g("ext_7_1",   "External stakeholder matrix clearly assigned"),
-      g("ext_7_1_1", "CM: Key POC, IT POC, Process Engineer, PM, Manager"),
-      g("ext_7_1_2", "Customer: Assigned POC, assigned manager"),
-      g("ext_7_2",   "Escalation path defined by type of issue and level"),
-      g("ext_7_2_1", "Level 1 = CM Point of contact"),
-      g("ext_7_2_2", "Level 2 = Customer Point of contact"),
-      g("ext_7_2_3", "Level 3 = CM management"),
-      g("ext_7_2_4", "Level 4 = Customer management"),
-      g("ext_7_3",   "Language / shift coordination considered (if global site)"),
+    { id: "ext_ms_6", name: "6. Validation & Production Integration (SAT)", description: "Golden units, defect samples, and acceptance criteria.", color: "#DC2626", gatedBy: "External KO, Internal KO, Line Access, Station Location & Layout", checklist: [
+      g("ext_6_1", "Test unit(s) available for validation", "FDE, TPM"),
+      g("ext_6_2", "Known defect samples available (red rabbits)", "FDE, TPM"),
+      g("ext_6_3", "Acceptance criteria and type (SAT vs FAT) agreed and quantitatively defined (what = 'working')", "FDE, TPM"),
+      g("ext_6_4", "MES Validation 4 core capabilities & Sign-off", "FDE, TPM"),
     ], links: [], signatures: [] },
-    { id: "ext_ms_8", name: "8. Final Pre-Deployment Confirmation", description: "Line, infrastructure, IT, and personnel all ready.", color: "#059669", checklist: [
-      g("ext_8_1", "Line ready"),
-      g("ext_8_2", "Infrastructure ready"),
-      g("ext_8_3", "IT ready"),
-      g("ext_8_4", "Personnel ready"),
-      g("ext_8_5", "Anticipating risks and proactive mitigation prior to onsite presence"),
+    { id: "ext_ms_7", name: "7. Coordination & Communication post External KO", description: "Stakeholder matrix and escalation paths.", color: "#64748B", gating: true, gatedBy: "External KO, Internal KO", checklist: [
+      g("ext_7_1",   "External stakeholder matrix clearly assigned", "TPM"),
+      g("ext_7_1_1", "CM: Key POC, IT POC, Process Engineer, PM, Manager", "TPM"),
+      g("ext_7_1_2", "Customer: Assigned POC, assigned manager", "TPM"),
+      g("ext_7_2",   "Post SOP escalation path defined by type of issue and level of escalation for onsite prep", "TPM"),
+      g("ext_7_2_1", "Level 1 = CM Point of contact", "TPM"),
+      g("ext_7_2_2", "Level 2 = Customer Point of contact", "TPM"),
+      g("ext_7_2_3", "Level 3 = CM management", "TPM"),
+      g("ext_7_2_4", "Level 4 = Customer management", "TPM"),
+      g("ext_7_3",   "Language / shift coordination considered (if global site)", "TPM"),
+    ], links: [], signatures: [] },
+    { id: "ext_ms_8", name: "8. Final Pre-Deployment Confirmation (day-of)", description: "Line, infrastructure, IT, and personnel all ready.", color: "#059669", gatedBy: "External KO, Internal KO, Line Access, Station Location & Layout", checklist: [
+      g("ext_8_1", "Line ready", "TPM"),
+      g("ext_8_2", "Infrastructure and hardware ready", "TPM"),
+      g("ext_8_3", "IT ready", "TPM"),
+      g("ext_8_4", "Personnel ready", "TPM"),
+      g("ext_8_5", "Anticipating risks and proactive mitigation prior to onsite presence", "TPM"),
+      g("ext_8_6", "Shipment & logistics dates confirmed to meet customer / CM site production need by with established and aligned schedule", "TPM"),
     ], links: [], signatures: [] },
   ],
 };
@@ -366,20 +373,36 @@ const SI_CHECKLIST = {
   ],
 };
 
-function buildInstrumentalCategories(isSI) {
-  const base = [
-    { id: "inst_hw", name: "Hardware & MES Deployments", accessLevel: "open", items: [] },
-    { id: "inst_specs", name: "Specifications & Integration Docs", accessLevel: "open", items: [] },
-    { id: "inst_program", name: "Program Details & Timelines", accessLevel: "open", items: [], type: "program" },
-    { id: "inst_training_docs", name: "Training Documentation", accessLevel: "open", items: [] },
+/* ═══ v3.2.0 PROJECT CATEGORIES — unified (no party separation) ═══ */
+
+function buildProjectDetails(isSI) {
+  const folders = [
+    { id: "pd_hw", name: "Hardware & MES Deployments", accessLevel: "open", items: [] },
+    { id: "pd_specs", name: "Design Specifications & Integration Docs", accessLevel: "open", items: [] },
+    { id: "pd_program", name: "Program Details & Timelines", accessLevel: "open", items: [], type: "program" },
+    { id: "pd_cad", name: "CAD & Drawings", accessLevel: "open", items: [] },
   ];
+  // Checklist: SI projects get SI checklist; standard projects get Internal + External
   if (isSI) {
-    base.push({ ...SI_CHECKLIST });
+    folders.push(JSON.parse(JSON.stringify(SI_CHECKLIST)));
   } else {
-    base.push({ ...INTERNAL_CHECKLIST });
-    base.push({ ...EXTERNAL_CHECKLIST });
+    folders.push(JSON.parse(JSON.stringify(INTERNAL_CHECKLIST)));
+    folders.push(JSON.parse(JSON.stringify(EXTERNAL_CHECKLIST)));
   }
-  return base;
+  return folders;
 }
 
-module.exports = { buildInstrumentalCategories, INTERNAL_CHECKLIST, EXTERNAL_CHECKLIST, SI_CHECKLIST };
+function buildCommercialFolders() {
+  return [
+    { id: "comm_agreements", name: "Agreements", accessLevel: "restricted", items: [] },
+    { id: "comm_pricing", name: "Pricing Details", accessLevel: "restricted", items: [] },
+    { id: "comm_legal", name: "Legal", accessLevel: "restricted", items: [] },
+  ];
+}
+
+// Legacy compat — still exported for Cloud Function sync
+function buildInstrumentalCategories(isSI) {
+  return buildProjectDetails(isSI);
+}
+
+module.exports = { buildInstrumentalCategories, buildProjectDetails, buildCommercialFolders, INTERNAL_CHECKLIST, EXTERNAL_CHECKLIST, SI_CHECKLIST };

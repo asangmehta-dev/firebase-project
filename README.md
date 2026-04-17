@@ -1,6 +1,6 @@
 # Deployment Portal
 
-**Version:** v3.1.0
+**Version:** v3.2.0
 
 A React 18 web application serving as a consolidated PMO-style frontend UI for the Customer Experience team to track and proactively manage risks/issues with CMs and customers. Speaks directly to HubSpot to provide real-time information on all projects in the deployment and sales pipeline. Coordinates documentation, milestones, and program details across four stakeholder groups: Instrumental, Systems Integrator (SI), Customer, and Contract Manufacturer (CM).
 
@@ -18,7 +18,7 @@ The goal of this Webapp is to have a consolidated "PMO" Style frontend UI that t
 
 ## Features
 
-- **Multi-party access control** — Role-based views for Instrumental, SI, Customer, and CM parties
+- **Unified project structure** — Project Details, Commercial (restricted), and Training sections per project (v3.2.0 — replaces old 4-party system)
 - **Project overview dashboard** — Per-party folder/document counts and milestone progress bars
 - **Checklist milestones** — OK2Contract, OK2Ship, OK2Build with checklists, signatures, and linked resources
 - **Program Details** — Task and milestone timeline with drag-to-reorder
@@ -174,18 +174,19 @@ New users sign in with Google and land in a pending queue until an admin approve
 | v2.2.0 | Language dropdown moved to sidebar bottom, clickable party cards, item count fix, superAdmin role, @instrumental.com no longer auto-admin |
 | v2.2.1 | Fixed broken IIFE in overview party cards — non-admin users can only navigate to their own party |
 | v3.0.0 | HubSpot CRM sync (6 pipelines, auto Tue/Fri 9am + manual), Projects Overview tab, checklist templates (Internal/External/SI), codename decoding, admin panel HubSpot sync UI, Instrumental/External user split |
-| v3.1.0 | **DB-level access control** (projects stored as object-keyed, per-project read rules, `access/` map); UI access control fix (non-Instrumental users restricted to assigned active projects only); **Demand Plan** table on Projects Overview aggregating hardware across active projects with custom type support; **per-pipeline bar charts** on Projects Overview (active projects only); per-project hardware section (HubSpot read-only + custom manual entries editable by any Instrumental user); clear "Active Projects Only" badges throughout Projects Overview |
+| v3.1.0 | DB-level access control, Demand Plan, per-pipeline bar charts, per-project hardware section |
+| v3.2.0 | **Remove 4-party system** (Instrumental/SI/Customer/CM → unified Project Details/Commercial/Training); new checklist template from deployment PDF (Internal + External + SI toggle, with ownership/dates/SOP fields/N/A); **Commercial tab** (restricted, admin-granted access for all non-admin users including Instrumental); **Training** rework (per-project toggle, per-user belt assignment, materials by belt); searchable project dropdown; simplified external user model (no more partyId); all externals get simplified dashboard |
 
 ---
 
 ## Documentation
 
-- [HOW_TO_USE_GUIDE_3.1.0.md](HOW_TO_USE_GUIDE_3.1.0.md) — End-user guide for the Instrumental team (admins and users)
-- [SECURITY_REVIEW_3.1.0.md](SECURITY_REVIEW_3.1.0.md) — Full security assessment (current)
-- [REBUILD_3.1.0.md](REBUILD_3.1.0.md) — Step-by-step guide to rebuilding the project from scratch
+- [HOW_TO_USE_GUIDE_3.2.0.md](HOW_TO_USE_GUIDE_3.2.0.md) — End-user guide (current)
+- [SECURITY_REVIEW_3.2.0.md](SECURITY_REVIEW_3.2.0.md) — Full security assessment (current)
+- [REBUILD_3.2.0.md](REBUILD_3.2.0.md) — Step-by-step guide to rebuilding the project from scratch
 
 ---
 
 ## Security
 
-See [SECURITY_REVIEW_3.1.0.md](SECURITY_REVIEW_3.1.0.md) for the current security assessment. Prior versions: [SECURITY_REVIEW_3.0.0.md](SECURITY_REVIEW_3.0.0.md), [SECURITY_REVIEW.pdf](SECURITY_REVIEW.pdf).
+See [SECURITY_REVIEW_3.2.0.md](SECURITY_REVIEW_3.2.0.md) for the current security assessment.

@@ -1,7 +1,7 @@
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const fetch = require("node-fetch");
-const { buildInstrumentalCategories } = require("./checklists");
+const { buildProjectDetails, buildCommercialFolders } = require("./checklists");
 
 admin.initializeApp();
 const db = admin.database();
@@ -278,9 +278,9 @@ async function runSync(token, commit) {
     merged.forEach(p => { if (p && p.id) mergedObj[p.id] = p; });
     await db.ref("appState/projects").set(mergedObj);
     // Ensure schema version is set so the app-side migration can skip
-    await db.ref("_schemaVersion").set("v3.1.0");
+    await db.ref("_schemaVersion").set("v3.2.0");
 
-    // Create checklist templates for new projects
+    // Create project templates for new projects (v3.2.0 unified structure)
     const docDataSnap = await db.ref("appState/docData").once("value");
     const docData = docDataSnap.val() || {};
 
@@ -289,8 +289,11 @@ async function runSync(token, commit) {
       if (!docData[pid]) {
         docData[pid] = {};
       }
-      if (!docData[pid].instrumental) {
-        docData[pid].instrumental = buildInstrumentalCategories(np.isSI);
+      if (!docData[pid].projectDetails) {
+        docData[pid].projectDetails = buildProjectDetails(np.isSI);
+      }
+      if (!docData[pid].commercial) {
+        docData[pid].commercial = buildCommercialFolders();
       }
     }
 
@@ -309,20 +312,26 @@ async function runSync(token, commit) {
   }
 }
 
-/* ═══ APPLY CHECKLIST TEMPLATE to existing project ═══ */
+/* ═══ APPLY CHECKLIST TEMPLATE to existing project (v3.2.0 unified structure) ═══ */
 async function applyChecklistToProject(projectId, isSI) {
-  const snap = await db.ref(`appState/docData/${projectId}/instrumental`).once("value");
+  const snap = await db.ref(`appState/docData/${projectId}/projectDetails`).once("value");
   const existing = snap.val() || [];
   const existingArr = Array.isArray(existing) ? existing : Object.values(existing);
 
   const hasChecklist = existingArr.some(c => c.type === "checklist");
   if (hasChecklist) return { skipped: true, reason: "Checklist already exists" };
 
-  const newCats = buildInstrumentalCategories(isSI);
+  const newCats = buildProjectDetails(isSI);
   // Preserve existing non-checklist categories, add checklists
   const checklistCats = newCats.filter(c => c.type === "checklist");
   const merged = [...existingArr, ...checklistCats];
-  await db.ref(`appState/docData/${projectId}/instrumental`).set(merged);
+  await db.ref(`appState/docData/${projectId}/projectDetails`).set(merged);
+
+  // Also ensure commercial folders exist
+  const commSnap = await db.ref(`appState/docData/${projectId}/commercial`).once("value");
+  if (!commSnap.val()) {
+    await db.ref(`appState/docData/${projectId}/commercial`).set(buildCommercialFolders());
+  }
   return { success: true };
 }
 

@@ -10,12 +10,6 @@ const dbRead = (p) => new Promise((r) => { onValue(ref(db, p), (s) => r(s.val())
 const dbWrite = (p, d) => set(ref(db, p), d);
 
 /* ═══ CONSTANTS ═══ */
-const PARTY_DEFS = {
-  instrumental: { id: "instrumental", icon: "◉", accent: "#00C9A7", defaultName: "Instrumental" },
-  si: { id: "si", icon: "◈", accent: "#3B82F6", defaultName: "Systems Integrator" },
-  customer: { id: "customer", icon: "◆", accent: "#F59E0B", defaultName: "Customer" },
-  cm: { id: "cm", icon: "◇", accent: "#A855F7", defaultName: "Contract Manufacturer" },
-};
 const BELT_LEVELS = { white: { name: "White Belt", color: "#64748B", icon: "○" }, blue: { name: "Blue Belt", color: "#3B82F6", icon: "◐" }, black: { name: "Black Belt", color: "#1E293B", icon: "●" } };
 const LANGUAGES = [
   { id: "en", label: "English (US)", flag: "🇺🇸", short: "EN" },
@@ -26,45 +20,21 @@ const LANGUAGES = [
 ];
 const HW_TYPES = ["Camera", "Lens", "Station Computer"];
 const SEED_PROJECTS = [
-  { id: "proj_nvidia_1", name: "NVIDIA — HGX B200 Inspection", customer: "NVIDIA", si: "Anda Technologies", cm: "Foxconn", status: "active", stations: 0, partyNames: { instrumental: "Instrumental", si: "Anda Technologies", customer: "NVIDIA", cm: "Foxconn" } },
-  { id: "proj_aws_1", name: "AWS — Trainium Board QC", customer: "AWS", si: "New Power", cm: "Quanta", status: "active", stations: 0, partyNames: { instrumental: "Instrumental", si: "New Power", customer: "AWS", cm: "Quanta" } },
+  { id: "proj_nvidia_1", name: "NVIDIA — HGX B200 Inspection", customer: "NVIDIA", status: "active", stations: 0, isSI: true },
+  { id: "proj_aws_1", name: "AWS — Trainium Board QC", customer: "AWS", status: "active", stations: 0, isSI: false },
 ];
-const SEED_DOC_CATEGORIES = {
-  instrumental: [
-    { id: "inst_hw", name: "Hardware & MES Deployments", accessLevel: "open", items: [] },
-    { id: "inst_specs", name: "Specifications & Integration Docs", accessLevel: "open", items: [] },
-    { id: "inst_program", name: "Program Details & Timelines", accessLevel: "open", items: [], type: "program" },
-    { id: "inst_training_docs", name: "Training Documentation", accessLevel: "open", items: [] },
-    { id: "inst_milestones", name: "Checklist Milestones", accessLevel: "open", type: "checklist",
-      milestones: [
-        { id: "ms_ok2contract", name: "OK2Contract", description: "Specs, CAD, and business deal locked.", color: "#00C9A7",
-          checklist: [ { id: "ck_c1", label: "Specifications finalized and signed off", checked: false }, { id: "ck_c2", label: "CAD files reviewed and approved", checked: false }, { id: "ck_c3", label: "Business deal / contract locked", checked: false }, { id: "ck_c4", label: "NDA and IP agreements executed", checked: false }, { id: "ck_c5", label: "Pricing and payment terms agreed", checked: false }, { id: "ck_c6", label: "Stakeholder sign-off obtained", checked: false } ],
-          links: [], signatures: [ { id: "sig_c1", role: "Program Manager", name: "", email: "", signed: false, signedAt: null }, { id: "sig_c2", role: "Customer Engineering Lead", name: "", email: "", signed: false, signedAt: null }, { id: "sig_c3", role: "SI Project Manager", name: "", email: "", signed: false, signedAt: null } ] },
-        { id: "ms_ok2ship", name: "OK2Ship", description: "Ship hardware + software/ML. Includes FAT criteria.", color: "#3B82F6",
-          checklist: [ { id: "ck_s1", label: "All hardware sourced and assembled", checked: false }, { id: "ck_s2", label: "Software / ML packaged and validated", checked: false }, { id: "ck_s3", label: "FAT criteria defined", checked: false }, { id: "ck_s4", label: "FAT executed and passed", checked: false }, { id: "ck_s5", label: "FAT report documented and signed", checked: false }, { id: "ck_s6", label: "Shipping logistics confirmed", checked: false } ],
-          links: [], signatures: [ { id: "sig_s1", role: "Hardware Lead", name: "", email: "", signed: false, signedAt: null }, { id: "sig_s2", role: "SI Engineering Lead", name: "", email: "", signed: false, signedAt: null }, { id: "sig_s3", role: "QA / FAT Lead", name: "", email: "", signed: false, signedAt: null } ] },
-        { id: "ms_ok2build", name: "OK2Build", description: "OK to build at CM. SAT criteria.", color: "#F59E0B",
-          checklist: [ { id: "ck_b1", label: "SAT criteria defined", checked: false }, { id: "ck_b2", label: "SAT executed and passed", checked: false }, { id: "ck_b3", label: "SAT report documented and signed", checked: false }, { id: "ck_b4", label: "CM line readiness confirmed", checked: false }, { id: "ck_b5", label: "Hardware installed and calibrated", checked: false }, { id: "ck_b6", label: "Operator training completed", checked: false } ],
-          links: [], signatures: [ { id: "sig_b1", role: "Deployment Lead", name: "", email: "", signed: false, signedAt: null }, { id: "sig_b2", role: "CM Site Manager", name: "", email: "", signed: false, signedAt: null }, { id: "sig_b3", role: "QA / SAT Lead", name: "", email: "", signed: false, signedAt: null } ] },
-      ], items: [] },
-  ],
-  si: [
-    { id: "si_specs", name: "Specifications & Integration Docs", accessLevel: "open", items: [] },
-    { id: "si_cad", name: "CAD & Drawings", accessLevel: "open", items: [] },
-    { id: "si_agreement", name: "Agreements", accessLevel: "restricted", items: [] },
-    { id: "si_pricing", name: "Pricing", accessLevel: "restricted", items: [] },
-  ],
-  customer: [
-    { id: "cust_agreements", name: "Agreements", accessLevel: "open", items: [] },
-    { id: "cust_specs", name: "Specifications & Integration Docs", accessLevel: "open", items: [] },
-    { id: "cust_legal", name: "Legal Documents", accessLevel: "restricted", items: [] },
-    { id: "cust_program", name: "Program Details", accessLevel: "open", items: [], type: "program" },
-  ],
-  cm: [
-    { id: "cm_cad", name: "CAD & Specifications", accessLevel: "open", items: [] },
-    { id: "cm_specs", name: "Process Specifications", accessLevel: "open", items: [] },
-  ],
-};
+/* v3.2.0: Default project-details folders (applied to new projects). Checklist templates come from Cloud Functions. */
+const DEFAULT_PROJECT_DETAILS = [
+  { id: "pd_hw", name: "Hardware & MES Deployments", accessLevel: "open", items: [] },
+  { id: "pd_specs", name: "Design Specifications & Integration Docs", accessLevel: "open", items: [] },
+  { id: "pd_program", name: "Program Details & Timelines", accessLevel: "open", items: [], type: "program" },
+  { id: "pd_cad", name: "CAD & Drawings", accessLevel: "open", items: [] },
+];
+const DEFAULT_COMMERCIAL = [
+  { id: "comm_agreements", name: "Agreements", accessLevel: "restricted", items: [] },
+  { id: "comm_pricing", name: "Pricing Details", accessLevel: "restricted", items: [] },
+  { id: "comm_legal", name: "Legal", accessLevel: "restricted", items: [] },
+];
 /* ═══ TRANSLATIONS ═══ */
 const TRANSLATIONS = {
   es: {
@@ -317,10 +287,10 @@ const F = "'Times New Roman', Georgia, serif";
 const fmtDate = (iso) => { if (!iso) return "—"; return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); };
 const fmtDay = (iso) => { if (!iso) return "—"; return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
 const genId = () => `id_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-const getDocCats = (dd, pid, party) => dd?.[pid]?.[party] || SEED_DOC_CATEGORIES[party] || [];
-const getPN = (proj, pid) => proj?.partyNames?.[pid] || PARTY_DEFS[pid]?.defaultName || pid;
-const isInst = (u) => u?.partyId === "instrumental" || u?.role === "admin";
-const isVisible = (proj, pid) => { const n = (proj?.partyNames?.[pid] || "").trim().toLowerCase(); return n && n !== "n/a" && n !== "na" && n !== "-" && n !== "none"; };
+const getProjectDetails = (dd, pid) => dd?.[pid]?.projectDetails || DEFAULT_PROJECT_DETAILS;
+const getCommercial = (dd, pid) => dd?.[pid]?.commercial || DEFAULT_COMMERCIAL;
+const isInst = (u) => u?.role === "admin" || (u?.email || "").endsWith("@instrumental.com");
+const isExternal = (u) => u && u.role !== "admin" && !(u.email || "").endsWith("@instrumental.com");
 // Normalize projects from DB (may be array or object-keyed) into an array
 const projectsToArray = (v) => !v ? [] : (Array.isArray(v) ? v : Object.values(v));
 // Parse hardware field from HubSpot — could be number, numeric string, or descriptive string
@@ -390,47 +360,48 @@ function PendingApproval({ authUser, onLogout }) {
   );
 }
 
-/* ═══ SIDEBAR — non-instrumental only sees their party + project + language ═══ */
-function Sidebar({ view, setView, user, project, projects, setProject, onLogout, lang, setLang }) {
+/* ═══ SIDEBAR — v3.2.0: unified sections (no party tabs) ═══ */
+function Sidebar({ view, setView, user, project, projects, setProject, onLogout, lang, setLang, hasCommercialAccess }) {
   const admin = isInst(user);
-  // Admins/Instrumental see all non-HubSpot-inactive; external users only see active projects they're assigned to
-  const dropdownProjects = admin
-    ? projects.filter(p => p.status !== "inactive")
-    : projects.filter(p => p.status === "active");
+  const dropdownProjects = admin ? projects.filter(p => p.status !== "inactive") : projects.filter(p => p.status === "active");
+  const [projSearch, setProjSearch] = useState("");
+  const filteredProjects = projSearch.trim() ? dropdownProjects.filter(p => p.name.toLowerCase().includes(projSearch.trim().toLowerCase())) : dropdownProjects;
+  const navActive = (v) => view === v ? { background: "rgba(255,255,255,.1)", color: "#F1F5F9", borderLeftColor: "#00C9A7" } : {};
   return (
     <aside style={S.side}>
       <div style={S.sideHead}><span style={{ fontSize: 24, color: "#00C9A7" }}>◎</span><span style={S.sideTitle}>{t("Deployment Portal", lang)}</span></div>
+      {/* All Projects Overview — large font, admin/instrumental only */}
       {admin && (
         <div style={{ padding: "0 12px 6px" }}>
-          <button onClick={() => setView("projects_overview")} style={{ ...S.navBtn, ...(view === "projects_overview" ? { background: "rgba(0,201,167,.15)", color: "#00C9A7", borderLeftColor: "#00C9A7" } : {}) }}>🌐 Projects Overview</button>
+          <button onClick={() => setView("projects_overview")} style={{ ...S.navBtn, fontSize: 20, fontWeight: 800, padding: "16px 16px", ...(view === "projects_overview" ? { background: "rgba(0,201,167,.15)", color: "#00C9A7", borderLeftColor: "#00C9A7" } : {}) }}>🌐 All Projects Overview</button>
         </div>
       )}
+      {/* Project dropdown with search */}
       <div style={{ padding: "0 18px 12px" }}>
         <label style={S.sideLabel}>{t("Project", lang)}</label>
-        <select style={S.projSelect} value={project?.id || ""} onChange={e => setProject(dropdownProjects.find(p => p.id === e.target.value))}>
-          {dropdownProjects.length === 0 && <option value="">No projects</option>}
-          {dropdownProjects.map(p => <option key={p.id} value={p.id}>{p.name}{p.status === "deprecated" ? " (Past)" : ""}</option>)}
+        <input style={{ ...S.projSelect, marginBottom: 6, padding: "8px 12px", fontSize: 12 }} placeholder="Search projects..." value={projSearch} onChange={e => setProjSearch(e.target.value)} />
+        <select style={S.projSelect} value={project?.id || ""} onChange={e => { setProject(filteredProjects.find(p => p.id === e.target.value) || dropdownProjects.find(p => p.id === e.target.value)); setProjSearch(""); }}>
+          {filteredProjects.length === 0 && <option value="">No projects{projSearch ? " matching search" : ""}</option>}
+          {filteredProjects.map(p => <option key={p.id} value={p.id}>{p.name}{p.status === "deprecated" ? " (Past)" : ""}</option>)}
         </select>
       </div>
       <nav style={S.navList}>
-        {(user.partyId === "instrumental" || user.partyId === "customer" || user.role === "admin") && (<>
-          <button onClick={() => setView("dashboard")} style={{ ...S.navBtn, ...(view === "dashboard" ? { background: "rgba(255,255,255,.1)", color: "#F1F5F9", borderLeftColor: "#00C9A7" } : {}) }}>{"⊙ " + t("Overview", lang)}</button>
-          <div style={S.divider} />
-        </>)}
-        {/* Party sections */}
-        {Object.values(PARTY_DEFS).filter(pd => {
-          if (!admin && pd.id !== user.partyId) return false;
-          return project ? isVisible(project, pd.id) : true;
-        }).map(pd => (
-          <button key={pd.id} onClick={() => setView(`docs_${pd.id}`)} style={{ ...S.navBtn, ...(view === `docs_${pd.id}` ? { background: "rgba(255,255,255,.1)", color: "#F1F5F9", borderLeftColor: pd.accent } : {}) }}>
-            <span>{pd.icon}</span> <span>{getPN(project, pd.id)}</span>
-          </button>
-        ))}
+        {/* Overview — slightly bigger font */}
+        <button onClick={() => setView("dashboard")} style={{ ...S.navBtn, fontSize: 17, fontWeight: 600, ...navActive("dashboard") }}>{"⊙ " + t("Overview", lang)}</button>
+        <div style={S.divider} />
+        {/* Project Details */}
+        <button onClick={() => setView("project_details")} style={{ ...S.navBtn, ...navActive("project_details") }}>📋 Project Details</button>
+        {/* Commercial — restricted indicator */}
+        <button onClick={() => setView("commercial")} style={{ ...S.navBtn, ...navActive("commercial"), color: view === "commercial" ? "#F1F5F9" : hasCommercialAccess ? "#94A3B8" : "#64748B" }}>
+          {hasCommercialAccess ? "📂" : "🔒"} Commercial
+        </button>
+        {/* Training */}
+        <button onClick={() => setView("training")} style={{ ...S.navBtn, ...navActive("training") }}>🎓 Training</button>
         {/* Admin only */}
         {admin && (<>
           <div style={S.divider} />
-          <button onClick={() => setView("admin")} style={{ ...S.navBtn, ...(view === "admin" ? { background: "rgba(255,255,255,.1)", color: "#F1F5F9" } : {}) }}>{"⊞ " + t("Admin Panel", lang)}</button>
-          <button onClick={() => setView("manage")} style={{ ...S.navBtn, ...(view === "manage" ? { background: "rgba(255,255,255,.1)", color: "#F1F5F9" } : {}) }}>{"⊕ " + t("Manage Projects", lang)}</button>
+          <button onClick={() => setView("admin")} style={{ ...S.navBtn, ...navActive("admin") }}>{"⊞ " + t("Admin Panel", lang)}</button>
+          <button onClick={() => setView("manage")} style={{ ...S.navBtn, ...navActive("manage") }}>{"⊕ " + t("Manage Projects", lang)}</button>
         </>)}
       </nav>
       <div style={S.sideFoot}>
@@ -450,26 +421,24 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
   );
 }
 
-/* ═══ DASHBOARD — party specific ═══ */
+/* ═══ DASHBOARD — v3.2.0: simplified for externals, full for instrumental ═══ */
 function DashboardView({ user, project, state, setState, lang = "en", setView }) {
   const admin = isInst(user);
-  // Prompt for missing station count on existing projects
   const [editStations, setEditStations] = useState(null);
   const [stationVal, setStationVal] = useState("");
-
-  // Status banner editor (admin)
   const [editStatus, setEditStatus] = useState(false);
   const [statusDraft, setStatusDraft] = useState(state?.statusMessage || "");
 
   if (!project) return <div style={S.page}><div style={S.empty}>{t("Select a project from the sidebar.", lang)}</div></div>;
 
-  // Customer dashboard — station count + key milestones
-  if (user.partyId === "customer" && !admin) {
-    const progMilestones = (state.docData?.[project.id]?._programDetails?.tasks || []).filter(t => t.type === "milestone").sort((a, b) => new Date(a.date) - new Date(b.date));
+  const progMilestones = (state.docData?.[project.id]?._programDetails?.tasks || []).filter(t => t.type === "milestone").sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  // External users — simplified dashboard (station count + milestones)
+  if (isExternal(user)) {
     return (
       <div style={S.page}>
-        <h2 style={S.h2}>{getPN(project, "customer")} {t("Dashboard", lang)}</h2>
-        <p style={S.sub}>{project.name}</p>
+        <h2 style={S.h2}>{project.name}</h2>
+        <p style={S.sub}>{t("Deployment overview", lang)}</p>
         <div style={{ ...S.card, borderTop: "3px solid #F59E0B" }}>
           <div style={{ fontSize: 14, color: "#64748B", fontFamily: F, marginBottom: 6 }}>{t("Stations", lang)}</div>
           <div style={{ fontSize: 42, fontWeight: 800, color: "#0F172A", fontFamily: F }}>{project.stations || 0}</div>
@@ -490,59 +459,62 @@ function DashboardView({ user, project, state, setState, lang = "en", setView })
     );
   }
 
-  // Instrumental / admin dashboard — sees all parties
+  // Instrumental / admin dashboard — section summary cards
+  const pdCats = getProjectDetails(state.docData, project.id);
+  const pdItems = pdCats.reduce((a, c) => a + (c.items?.length || 0), 0);
+  const allChecks = pdCats.filter(c => c.type === "checklist").flatMap(c => c.milestones || []).flatMap(ms => ms.checklist || []);
+  const checkedCount = allChecks.filter(ck => ck.checked && !ck.na).length;
+  const activeCount = allChecks.filter(ck => !ck.na).length;
+  const msPct = activeCount > 0 ? Math.round((checkedCount / activeCount) * 100) : null;
+  const trainingData = state.docData?.[project.id]?._training || {};
+  const trainingEnabled = trainingData.enabled || false;
+
   return (
     <div style={S.page}>
       {/* Status banner editor */}
       {admin && (
         <div style={{ ...S.card, marginBottom: 20, borderLeft: "3px solid #00C9A7", padding: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: "#00C9A7", fontFamily: F }}>{t("📢 Site Status Banner", lang)}</span>
-            <button style={S.btnEdit} onClick={() => setEditStatus(!editStatus)}>{editStatus ? t("Cancel", lang) : t("✎ Edit", lang)}</button>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "#00C9A7", fontFamily: F }}>📢 Site Status Banner</span>
+            <button style={S.btnEdit} onClick={() => setEditStatus(!editStatus)}>{editStatus ? "Cancel" : "✎ Edit"}</button>
           </div>
           {editStatus ? (
             <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
               <input style={{ ...S.inp, flex: 1, padding: "8px 12px", fontSize: 14 }} value={statusDraft} onChange={e => setStatusDraft(e.target.value)} placeholder="e.g. Under construction — going live April 2026" />
-              <button style={{ ...S.btnMain, width: "auto", padding: "8px 16px", fontSize: 13, marginTop: 0 }} onClick={() => { setState(prev => ({ ...prev, statusMessage: statusDraft })); setEditStatus(false); }}>{t("Save", lang)}</button>
-              <button style={{ ...S.btnDel, padding: "8px 12px" }} onClick={() => { setState(prev => ({ ...prev, statusMessage: "" })); setStatusDraft(""); setEditStatus(false); }}>{t("Clear", lang)}</button>
+              <button style={{ ...S.btnMain, width: "auto", padding: "8px 16px", fontSize: 13, marginTop: 0 }} onClick={() => { setState(prev => ({ ...prev, statusMessage: statusDraft })); setEditStatus(false); }}>Save</button>
+              <button style={{ ...S.btnDel, padding: "8px 12px" }} onClick={() => { setState(prev => ({ ...prev, statusMessage: "" })); setStatusDraft(""); setEditStatus(false); }}>Clear</button>
             </div>
-          ) : <p style={{ fontSize: 14, color: state?.statusMessage ? "#0F172A" : "#94A3B8", marginTop: 8, fontFamily: F, fontStyle: state?.statusMessage ? "normal" : "italic" }}>{state?.statusMessage || t("No status message set.", lang)}</p>}
+          ) : <p style={{ fontSize: 14, color: state?.statusMessage ? "#0F172A" : "#94A3B8", marginTop: 8, fontFamily: F, fontStyle: state?.statusMessage ? "normal" : "italic" }}>{state?.statusMessage || "No status message set."}</p>}
         </div>
       )}
 
       <h2 style={S.h2}>{project.name}</h2>
-      <p style={S.sub}>{t("Deployment overview", lang)}</p>
+      <p style={S.sub}>Deployment overview</p>
 
-      {/* Station count per project (admin can edit) */}
+      {/* Section summary cards */}
       <div style={S.gridRow}>
-        {Object.values(PARTY_DEFS).filter(pd => isVisible(project, pd.id)).map(pd => {
-          const cats = getDocCats(state.docData, project.id, pd.id);
-          const totalItems = cats.reduce((a, c) => a + (c.items?.length || 0), 0);
-          const milestoneCat = cats.find(c => c.type === "checklist");
-          const allChecks = milestoneCat?.milestones?.flatMap(ms => ms.checklist) || [];
-          const checkedCount = allChecks.filter(ck => ck.checked).length;
-          const totalCount = allChecks.length;
-          const msPct = totalCount > 0 ? Math.round((checkedCount / totalCount) * 100) : null;
-          const canNav = admin || user.partyId === pd.id;
-          return (
-            <div key={pd.id} onClick={() => canNav && setView && setView(`docs_${pd.id}`)} style={{ ...S.card, flex: "1 1 200px", borderTop: `3px solid ${pd.accent}`, cursor: canNav ? "pointer" : "default", transition: "box-shadow .15s" }} onMouseEnter={e => { if (canNav) e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,.10)"; }} onMouseLeave={e => e.currentTarget.style.boxShadow=""}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: pd.accent, fontFamily: F, marginBottom: 8 }}>{getPN(project, pd.id)}{canNav ? " ↗" : ""}</div>
-              <div style={S.miniStat}><span>{t("Folders", lang)}</span><strong>{cats.length}</strong></div>
-              <div style={S.miniStat}><span>{t("Documents", lang)}</span><strong>{totalItems || "—"}</strong></div>
-              {pd.id === "instrumental" && (
-                <div style={{ marginTop: 10 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748B", fontFamily: F, marginBottom: 4 }}>
-                    <span>{t("Milestone Progress", lang)}</span>
-                    {totalCount > 0 ? <strong style={{ color: pd.accent }}>{msPct}%</strong> : <span style={{ color: "#CBD5E1" }}>—</span>}
-                  </div>
-                  {totalCount > 0
-                    ? <Bar value={msPct} color={pd.accent} h={4} />
-                    : <div style={{ fontSize: 11, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>{t("Add checklist items to track progress", lang)}</div>}
-                </div>
-              )}
+        <div onClick={() => setView("project_details")} style={{ ...S.card, flex: "1 1 240px", borderTop: "3px solid #00C9A7", cursor: "pointer", transition: "box-shadow .15s" }} onMouseEnter={e => e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,.10)"} onMouseLeave={e => e.currentTarget.style.boxShadow=""}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#00C9A7", fontFamily: F, marginBottom: 8 }}>📋 Project Details ↗</div>
+          <div style={S.miniStat}><span>Folders</span><strong>{pdCats.length}</strong></div>
+          <div style={S.miniStat}><span>Documents</span><strong>{pdItems || "—"}</strong></div>
+          {activeCount > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748B", fontFamily: F, marginBottom: 4 }}>
+                <span>Checklist Progress</span><strong style={{ color: "#00C9A7" }}>{msPct}%</strong>
+              </div>
+              <Bar value={msPct} color="#00C9A7" h={4} />
             </div>
-          );
-        })}
+          )}
+        </div>
+        <div onClick={() => setView("commercial")} style={{ ...S.card, flex: "1 1 200px", borderTop: "3px solid #F59E0B", cursor: "pointer", transition: "box-shadow .15s" }} onMouseEnter={e => e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,.10)"} onMouseLeave={e => e.currentTarget.style.boxShadow=""}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#F59E0B", fontFamily: F, marginBottom: 8 }}>🔒 Commercial ↗</div>
+          <div style={{ fontSize: 13, color: "#94A3B8", fontFamily: F }}>Agreements, Pricing, Legal</div>
+          <div style={{ fontSize: 12, color: "#CBD5E1", fontStyle: "italic", fontFamily: F, marginTop: 6 }}>Restricted — admin grant required</div>
+        </div>
+        <div onClick={() => setView("training")} style={{ ...S.card, flex: "1 1 200px", borderTop: "3px solid #3B82F6", cursor: "pointer", transition: "box-shadow .15s" }} onMouseEnter={e => e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,.10)"} onMouseLeave={e => e.currentTarget.style.boxShadow=""}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#3B82F6", fontFamily: F, marginBottom: 8 }}>🎓 Training ↗</div>
+          <Chip small color={trainingEnabled ? "#ECFDF5" : "#F1F5F9"} fg={trainingEnabled ? "#059669" : "#94A3B8"}>{trainingEnabled ? "Enabled" : "Disabled"}</Chip>
+        </div>
       </div>
 
       {/* Station count editor */}
@@ -553,42 +525,37 @@ function DashboardView({ user, project, state, setState, lang = "en", setView })
             {editStations === project.id ? (
               <div style={{ display: "flex", gap: 8 }}>
                 <input type="number" style={{ ...S.inp, width: 100, padding: "6px 10px" }} value={stationVal} onChange={e => setStationVal(e.target.value)} placeholder="0" />
-                <button style={{ ...S.btnMain, width: "auto", padding: "6px 14px", fontSize: 13, marginTop: 0 }} onClick={() => { setState(prev => ({ ...prev, projects: (prev.projects||[]).map(p => p.id === project.id ? { ...p, stations: parseInt(stationVal)||0 } : p) })); setEditStations(null); }}>{t("Save", lang)}</button>
+                <button style={{ ...S.btnMain, width: "auto", padding: "6px 14px", fontSize: 13, marginTop: 0 }} onClick={() => { setState(prev => ({ ...prev, projects: (prev.projects||[]).map(p => p.id === project.id ? { ...p, stations: parseInt(stationVal)||0 } : p) })); setEditStations(null); }}>Save</button>
               </div>
-            ) : <button style={S.btnEdit} onClick={() => { setEditStations(project.id); setStationVal(project.stations || ""); }}>{t("✎ Edit", lang)}</button>}
+            ) : <button style={S.btnEdit} onClick={() => { setEditStations(project.id); setStationVal(project.stations || ""); }}>✎ Edit</button>}
           </div>
         </div>
       )}
 
-      {/* Customer View — always visible to instrumental/admin */}
-      {(() => {
-        const progMilestones = (state.docData?.[project.id]?._programDetails?.tasks || []).filter(t => t.type === "milestone").sort((a, b) => new Date(a.date) - new Date(b.date));
-        return (
-          <div style={{ marginTop: 24 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 12, paddingBottom: 8, borderBottom: "2px solid #F1F5F9" }}>{t("Customer View", lang)}</div>
-            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-              <div style={{ ...S.card, flex: "1 1 160px", borderTop: "3px solid #F59E0B" }}>
-                <div style={{ fontSize: 14, color: "#64748B", fontFamily: F, marginBottom: 6 }}>{t("Stations", lang)}</div>
-                <div style={{ fontSize: 42, fontWeight: 800, color: "#0F172A", fontFamily: F }}>{project.stations || 0}</div>
-                <div style={{ fontSize: 13, color: "#94A3B8", fontFamily: F }}>{t("inspection stations for this project", lang)}</div>
-              </div>
-              <div style={{ ...S.card, flex: "1 1 300px", borderTop: "3px solid #F59E0B" }}>
-                <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 10 }}>{t("Key Milestones", lang)}</div>
-                {progMilestones.length > 0
-                  ? progMilestones.map(m => (
-                    <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "1px solid #F1F5F9" }}>
-                      <span style={{ fontSize: 14, fontFamily: F, color: "#1E293B" }}>🏁 {m.name}</span>
-                      <span style={{ fontSize: 13, color: "#64748B", fontFamily: F }}>{fmtDay(m.date)}</span>
-                    </div>
-                  ))
-                  : <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>{t("Add milestones in Program Details to display here", lang)}</div>}
-              </div>
-            </div>
+      {/* External view preview — station count + milestones */}
+      <div style={{ marginTop: 24 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 12, paddingBottom: 8, borderBottom: "2px solid #F1F5F9" }}>External User View</div>
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <div style={{ ...S.card, flex: "1 1 160px", borderTop: "3px solid #F59E0B" }}>
+            <div style={{ fontSize: 14, color: "#64748B", fontFamily: F, marginBottom: 6 }}>Stations</div>
+            <div style={{ fontSize: 42, fontWeight: 800, color: "#0F172A", fontFamily: F }}>{project.stations || 0}</div>
+            <div style={{ fontSize: 13, color: "#94A3B8", fontFamily: F }}>inspection stations for this project</div>
           </div>
-        );
-      })()}
+          <div style={{ ...S.card, flex: "1 1 300px", borderTop: "3px solid #F59E0B" }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 10 }}>Key Milestones</div>
+            {progMilestones.length > 0
+              ? progMilestones.map(m => (
+                <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "1px solid #F1F5F9" }}>
+                  <span style={{ fontSize: 14, fontFamily: F, color: "#1E293B" }}>🏁 {m.name}</span>
+                  <span style={{ fontSize: 13, color: "#64748B", fontFamily: F }}>{fmtDay(m.date)}</span>
+                </div>
+              ))
+              : <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>Add milestones in Program Details to display here</div>}
+          </div>
+        </div>
+      </div>
 
-      {/* Hardware — HubSpot-synced (read-only) + Custom manual entries (Instrumental editable) */}
+      {/* Hardware — HubSpot-synced (read-only) + Custom manual entries */}
       <ProjectHardwareSection project={project} state={state} setState={setState} user={user} />
     </div>
   );
@@ -666,6 +633,470 @@ function ProjectHardwareSection({ project, state, setState, user }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ═══ PROJECT DETAILS VIEW — v3.2.0 unified folders (replaces party-based DocsView) ═══ */
+function ProjectDetailsView({ user, project, state, setState, lang = "en" }) {
+  const canEdit = isInst(user);
+  const pid = project?.id;
+  const cats = getProjectDetails(state.docData, pid);
+  const [addingFolder, setAddingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [addingItem, setAddingItem] = useState(null);
+  const [itemForm, setItemForm] = useState({ name: "", url: "", type: "link", lang: "en" });
+
+  if (!project) return <div style={S.page}><div style={S.empty}>Select a project from the sidebar.</div></div>;
+
+  const updateCats = (newCats) => setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), projectDetails: newCats } } }));
+  const addFolder = () => { if (!newFolderName.trim()) return; updateCats([...cats, { id: genId(), name: newFolderName.trim(), accessLevel: "open", items: [] }]); setNewFolderName(""); setAddingFolder(false); };
+  const delFolder = (catId) => { if (!confirm("Delete this folder?")) return; updateCats(cats.filter(c => c.id !== catId)); };
+  const addItem = (catId) => {
+    if (!itemForm.name.trim()) return;
+    const item = { id: genId(), name: itemForm.name.trim(), url: itemForm.url.trim(), type: itemForm.type, lang: itemForm.lang, addedBy: user.name, addedAt: new Date().toISOString() };
+    updateCats(cats.map(c => c.id !== catId ? c : { ...c, items: [...(c.items||[]), item] }));
+    setItemForm({ name: "", url: "", type: "link", lang: "en" }); setAddingItem(null);
+  };
+  const delItem = (catId, itemId) => updateCats(cats.map(c => c.id !== catId ? c : { ...c, items: (c.items||[]).filter(i => i.id !== itemId) }));
+
+  return (
+    <div style={S.page}>
+      <h2 style={S.h2}>Project Details</h2>
+      <p style={S.sub}>{project.name} — documents, specs, checklists, and drawings.</p>
+
+      {cats.map(cat => {
+        if (cat.type === "checklist") return <ChecklistSection key={cat.id} cat={cat} cats={cats} updateCats={updateCats} user={user} canEdit={canEdit} pid={pid} lang={lang} />;
+        if (cat.type === "program") return <ProgramDetailsSection key={cat.id} cat={cat} pid={pid} state={state} setState={setState} user={user} canEdit={canEdit} lang={lang} />;
+        return (
+          <div key={cat.id} style={{ ...S.card, marginBottom: 12, borderLeft: "3px solid #00C9A7" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F }}>{cat.name}</div>
+              <Chip small color="#ECFDF5" fg="#059669">{(cat.items||[]).length} items</Chip>
+            </div>
+            {(cat.items||[]).map(item => (
+              <div key={item.id} style={S.docItemRow}>
+                <span style={{ fontSize: 14, color: item.type === "link" ? "#3B82F6" : "#A855F7" }}>{item.type === "link" ? "🔗" : "📄"}</span>
+                <div style={{ flex: 1 }}>
+                  {item.url ? <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 15, fontWeight: 500, color: "#0284C7", textDecoration: "none", fontFamily: F }}>{item.name}</a> : <span style={{ fontSize: 15, fontFamily: F }}>{item.name}</span>}
+                  <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F }}>{item.addedBy} · {fmtDate(item.addedAt)}</div>
+                </div>
+                {canEdit && <button style={{ ...S.btnDel, padding: "3px 8px", fontSize: 11 }} onClick={() => delItem(cat.id, item.id)}>✕</button>}
+              </div>
+            ))}
+            {(cat.items||[]).length === 0 && <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>No documents yet.</div>}
+            {canEdit && pid && (
+              addingItem === cat.id ? (
+                <div style={{ marginTop: 12, padding: 14, background: "#F8FAFC", borderRadius: 10 }}>
+                  <label style={S.lbl}>Name</label>
+                  <input style={S.inp} value={itemForm.name} onChange={e => setItemForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Pin Inspection Spec v2.1" />
+                  <label style={S.lbl}>URL</label>
+                  <input style={S.inp} value={itemForm.url} onChange={e => setItemForm(f => ({ ...f, url: e.target.value }))} placeholder="https://..." />
+                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                    <button style={{ ...S.btnMain, width: "auto", padding: "10px 18px", marginTop: 0 }} onClick={() => addItem(cat.id)}>Add</button>
+                    <button style={{ ...S.btnFlat, width: "auto" }} onClick={() => { setAddingItem(null); setItemForm({ name: "", url: "", type: "link", lang: "en" }); }}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <button style={S.btnAddItem} onClick={() => setAddingItem(cat.id)}>+ Add Link or PDF</button>
+                  <button style={{ ...S.btnDel, fontSize: 11, padding: "4px 10px" }} onClick={() => delFolder(cat.id)}>Delete Folder</button>
+                </div>
+              )
+            )}
+          </div>
+        );
+      })}
+
+      {/* Hardware tracking + Validation subsections */}
+      <HardwareTrackingSection project={project} state={state} setState={setState} user={user} canEdit={canEdit} />
+      <ValidationSection project={project} state={state} setState={setState} user={user} canEdit={canEdit} />
+
+      {canEdit && !addingFolder && (
+        <button style={{ ...S.btnAddItem, marginTop: 16 }} onClick={() => setAddingFolder(true)}>+ Add Folder</button>
+      )}
+      {canEdit && addingFolder && (
+        <div style={{ ...S.card, marginTop: 16 }}>
+          <label style={S.lbl}>Folder Name</label>
+          <input style={S.inp} value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="e.g. Site Photos" />
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <button style={{ ...S.btnMain, width: "auto", padding: "10px 18px", marginTop: 0 }} onClick={addFolder}>Create</button>
+            <button style={{ ...S.btnFlat, width: "auto" }} onClick={() => setAddingFolder(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Checklist Section — renders milestone groups with the v3.2.0 item schema */
+function ChecklistSection({ cat, cats, updateCats, user, canEdit, pid, lang }) {
+  const [expanded, setExpanded] = useState({});
+  const toggleExpand = (msId) => setExpanded(prev => ({ ...prev, [msId]: !prev[msId] }));
+
+  const updateMilestone = (msId, updater) => {
+    updateCats(cats.map(c => c.id !== cat.id ? c : { ...c, milestones: (c.milestones||[]).map(ms => ms.id !== msId ? ms : updater(ms)) }));
+  };
+  const toggleCheck = (msId, ckId) => updateMilestone(msId, ms => ({ ...ms, checklist: ms.checklist.map(ck => ck.id !== ckId ? ck : { ...ck, checked: !ck.checked }) }));
+  const toggleNA = (msId, ckId) => updateMilestone(msId, ms => ({ ...ms, checklist: ms.checklist.map(ck => ck.id !== ckId ? ck : { ...ck, na: !ck.na, checked: ck.na ? ck.checked : false }) }));
+  const updateField = (msId, ckId, field, val) => updateMilestone(msId, ms => ({ ...ms, checklist: ms.checklist.map(ck => ck.id !== ckId ? ck : { ...ck, [field]: val }) }));
+  const addItem = (msId, label) => updateMilestone(msId, ms => ({ ...ms, checklist: [...ms.checklist, { id: genId(), label, checked: false, na: false, ownership: "", startDate: null, projectedDate: null, actualDate: null, sopLink: null }] }));
+
+  return (
+    <div style={{ ...S.card, marginBottom: 12, borderLeft: "3px solid #6366F1" }}>
+      <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 12 }}>{cat.name}</div>
+      {(cat.milestones||[]).map(ms => {
+        const activeChecks = ms.checklist.filter(ck => !ck.na);
+        const doneCount = activeChecks.filter(ck => ck.checked).length;
+        const pct = activeChecks.length > 0 ? Math.round((doneCount / activeChecks.length) * 100) : 0;
+        const isOpen = expanded[ms.id];
+        return (
+          <div key={ms.id} style={{ marginBottom: 10, background: "#F8FAFC", borderRadius: 12, border: "1px solid #F1F5F9", overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", cursor: "pointer" }} onClick={() => toggleExpand(ms.id)}>
+              <div style={{ width: 8, height: 8, borderRadius: 4, background: ms.color || "#00C9A7" }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A", fontFamily: F }}>{ms.name}</div>
+                {ms.description && <div style={{ fontSize: 12, color: "#64748B", fontFamily: F }}>{ms.description}</div>}
+                {ms.gatedBy && <div style={{ fontSize: 11, color: "#94A3B8", fontFamily: F }}>Gated by: {ms.gatedBy}</div>}
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: pct === 100 ? "#059669" : "#64748B", fontFamily: F }}>{doneCount}/{activeChecks.length} ({pct}%)</div>
+              <Bar value={pct} color={ms.color || "#00C9A7"} h={4} />
+              <span style={{ fontSize: 12, color: "#94A3B8" }}>{isOpen ? "▼" : "▶"}</span>
+            </div>
+            {isOpen && (
+              <div style={{ padding: "0 16px 12px" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, fontFamily: F }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...S.th, fontSize: 10, padding: "6px 4px", width: 30 }}></th>
+                      <th style={{ ...S.th, fontSize: 10, padding: "6px 4px" }}>Item</th>
+                      <th style={{ ...S.th, fontSize: 10, padding: "6px 4px", width: 80 }}>Owner</th>
+                      <th style={{ ...S.th, fontSize: 10, padding: "6px 4px", width: 90 }}>Proj. Date</th>
+                      <th style={{ ...S.th, fontSize: 10, padding: "6px 4px", width: 90 }}>Actual</th>
+                      <th style={{ ...S.th, fontSize: 10, padding: "6px 4px", width: 50 }}>SOP</th>
+                      <th style={{ ...S.th, fontSize: 10, padding: "6px 4px", width: 40 }}>N/A</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ms.checklist.map(ck => (
+                      <tr key={ck.id} style={{ opacity: ck.na ? 0.4 : 1, textDecoration: ck.na ? "line-through" : "none" }}>
+                        <td style={{ ...S.td, padding: "6px 4px", textAlign: "center" }}>
+                          <div onClick={() => !ck.na && (canEdit || isInst(user)) && toggleCheck(ms.id, ck.id)} style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${ck.checked ? "#00C9A7" : "#CBD5E1"}`, background: ck.checked ? "#00C9A7" : "#FFF", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#FFF", fontWeight: 800, cursor: ck.na ? "default" : "pointer" }}>{ck.checked ? "✓" : ""}</div>
+                        </td>
+                        <td style={{ ...S.td, padding: "6px 4px", fontSize: 13 }}>{ck.label}</td>
+                        <td style={{ ...S.td, padding: "6px 4px" }}>
+                          {canEdit ? <input style={{ ...S.inp, padding: "2px 4px", fontSize: 11, width: "100%" }} value={ck.ownership || ""} onChange={e => updateField(ms.id, ck.id, "ownership", e.target.value)} /> : <span style={{ fontSize: 11 }}>{ck.ownership || "—"}</span>}
+                        </td>
+                        <td style={{ ...S.td, padding: "6px 4px" }}>
+                          {canEdit ? <input type="date" style={{ ...S.inp, padding: "2px 4px", fontSize: 11, width: "100%" }} value={ck.projectedDate || ""} onChange={e => updateField(ms.id, ck.id, "projectedDate", e.target.value)} /> : <span style={{ fontSize: 11 }}>{ck.projectedDate || "—"}</span>}
+                        </td>
+                        <td style={{ ...S.td, padding: "6px 4px" }}>
+                          {canEdit ? <input type="date" style={{ ...S.inp, padding: "2px 4px", fontSize: 11, width: "100%" }} value={ck.actualDate || ""} onChange={e => updateField(ms.id, ck.id, "actualDate", e.target.value)} /> : <span style={{ fontSize: 11 }}>{ck.actualDate || "—"}</span>}
+                        </td>
+                        <td style={{ ...S.td, padding: "6px 4px", textAlign: "center" }}>
+                          {ck.sopLink ? <a href={ck.sopLink} target="_blank" rel="noopener noreferrer" style={{ color: "#0284C7", fontSize: 11 }}>Link</a> : (canEdit ? <input style={{ ...S.inp, padding: "2px 4px", fontSize: 11, width: "100%" }} value="" onChange={e => updateField(ms.id, ck.id, "sopLink", e.target.value)} placeholder="URL" /> : "—")}
+                        </td>
+                        <td style={{ ...S.td, padding: "6px 4px", textAlign: "center" }}>
+                          {canEdit && <button style={{ border: "none", background: ck.na ? "#FEF3C7" : "#F1F5F9", color: ck.na ? "#D97706" : "#94A3B8", fontSize: 10, borderRadius: 4, padding: "2px 6px", cursor: "pointer", fontFamily: F }} onClick={() => toggleNA(ms.id, ck.id)}>{ck.na ? "N/A" : "—"}</button>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {canEdit && (() => {
+                  const [newLabel, setNewLabel] = useState("");
+                  return (
+                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                      <input style={{ ...S.inp, flex: 1, padding: "6px 10px", fontSize: 12 }} value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder="Add checklist item..." onKeyDown={e => { if (e.key === "Enter" && newLabel.trim()) { addItem(ms.id, newLabel.trim()); setNewLabel(""); } }} />
+                      <button style={{ ...S.btnMain, width: "auto", padding: "6px 14px", fontSize: 12, marginTop: 0 }} onClick={() => { if (newLabel.trim()) { addItem(ms.id, newLabel.trim()); setNewLabel(""); } }}>+ Add</button>
+                    </div>
+                  );
+                })()}
+                {/* Signatures */}
+                {(ms.signatures||[]).length > 0 && (
+                  <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #F1F5F9" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B", fontFamily: F, marginBottom: 6 }}>Signatures</div>
+                    {ms.signatures.map(sig => (
+                      <div key={sig.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13, fontFamily: F }}>
+                        <div onClick={() => canEdit && updateMilestone(ms.id, m => ({ ...m, signatures: m.signatures.map(s => s.id !== sig.id ? s : { ...s, signed: !s.signed, signedAt: s.signed ? null : new Date().toISOString(), name: s.signed ? "" : user.name, email: s.signed ? "" : user.email }) }))} style={{ width: 16, height: 16, borderRadius: 3, border: `2px solid ${sig.signed ? "#059669" : "#CBD5E1"}`, background: sig.signed ? "#059669" : "#FFF", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "#FFF", cursor: canEdit ? "pointer" : "default" }}>{sig.signed ? "✓" : ""}</div>
+                        <span style={{ color: "#475569" }}>{sig.role}</span>
+                        {sig.signed && <span style={{ color: "#059669", fontSize: 11 }}> — {sig.name} ({fmtDate(sig.signedAt)})</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* Program Details Section — tasks + milestones timeline (unchanged logic, extracted) */
+function ProgramDetailsSection({ cat, pid, state, setState, user, canEdit, lang }) {
+  const progData = state.docData?.[pid]?._programDetails || { tasks: [] };
+  const tasks = progData.tasks || [];
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ name: "", type: "task", date: "", endDate: "" });
+
+  const updateProg = (newTasks) => setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), _programDetails: { ...progData, tasks: newTasks } } } }));
+  const addTask = () => { if (!form.name.trim()) return; updateProg([...tasks, { id: genId(), ...form, addedAt: new Date().toISOString() }]); setForm({ name: "", type: "task", date: "", endDate: "" }); setShowForm(false); };
+  const delTask = (id) => updateProg(tasks.filter(t => t.id !== id));
+
+  return (
+    <div style={{ ...S.card, marginBottom: 12, borderLeft: "3px solid #F59E0B" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F }}>{cat.name}</div>
+        {canEdit && <button style={S.btnEdit} onClick={() => setShowForm(!showForm)}>{showForm ? "Cancel" : "+ Add Task / Milestone"}</button>}
+      </div>
+      {showForm && canEdit && (
+        <div style={{ padding: 14, background: "#F8FAFC", borderRadius: 10, marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <button onClick={() => setForm(f => ({ ...f, type: "task" }))} style={{ ...S.typeBtn, ...(form.type === "task" ? S.typeBtnActive : {}) }}>📋 Task</button>
+            <button onClick={() => setForm(f => ({ ...f, type: "milestone" }))} style={{ ...S.typeBtn, ...(form.type === "milestone" ? S.typeBtnActive : {}) }}>🏁 Milestone</button>
+          </div>
+          <label style={S.lbl}>Name</label><input style={S.inp} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+          <label style={S.lbl}>{form.type === "milestone" ? "Date" : "Start Date"}</label><input type="date" style={S.inp} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+          {form.type === "task" && <><label style={S.lbl}>End Date</label><input type="date" style={S.inp} value={form.endDate} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} /></>}
+          <button style={{ ...S.btnMain, width: "auto", padding: "10px 18px", marginTop: 12 }} onClick={addTask}>Add</button>
+        </div>
+      )}
+      {tasks.length === 0 ? <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>No tasks or milestones yet.</div> : (
+        <table style={{ ...S.table, fontSize: 13 }}>
+          <thead><tr><th style={S.th}>Name</th><th style={S.th}>Type</th><th style={S.th}>Date</th>{canEdit && <th style={S.th}></th>}</tr></thead>
+          <tbody>
+            {tasks.map(t => (
+              <tr key={t.id}>
+                <td style={S.td}>{t.type === "milestone" ? "🏁 " : "📋 "}{t.name}</td>
+                <td style={S.td}><Chip small color={t.type === "milestone" ? "#FEF3C7" : "#F1F5F9"} fg={t.type === "milestone" ? "#D97706" : "#64748B"}>{t.type}</Chip></td>
+                <td style={S.td}>{fmtDay(t.date)}{t.endDate ? ` — ${fmtDay(t.endDate)}` : ""}</td>
+                {canEdit && <td style={S.td}><button style={{ ...S.btnDel, fontSize: 11, padding: "2px 8px" }} onClick={() => delTask(t.id)}>✕</button></td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+/* Hardware Tracking subsection (moved from old SI-specific, now visible to all) */
+function HardwareTrackingSection({ project, state, setState, user, canEdit }) {
+  const pid = project?.id;
+  const hwData = state.docData?.[pid]?._hardwareTracking || [];
+  const updateHW = (newData) => setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), _hardwareTracking: newData } } }));
+  const addHW = (type) => { const serial = prompt("Serial number:"); const tag = prompt("Instrumental Asset Tag:"); if (serial) updateHW([...hwData, { id: genId(), type, serial, assetTag: tag || "" }]); };
+  const delHW = (id) => updateHW(hwData.filter(h => h.id !== id));
+
+  return (
+    <div style={{ ...S.card, marginBottom: 12, marginTop: 16 }}>
+      <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 10 }}>Hardware Tracking</div>
+      {hwData.length === 0 ? <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>No hardware tracked yet.</div> : (
+        <table style={{ ...S.table, fontSize: 13 }}><thead><tr><th style={S.th}>Type</th><th style={S.th}>Serial Number</th><th style={S.th}>Asset Tag</th>{canEdit && <th style={S.th}></th>}</tr></thead>
+        <tbody>{hwData.map(h => (<tr key={h.id}><td style={S.td}>{h.type}</td><td style={S.td}>{h.serial}</td><td style={S.td}>{h.assetTag || "—"}</td>{canEdit && <td style={S.td}><button style={{ ...S.btnDel, fontSize: 11, padding: "2px 8px" }} onClick={() => delHW(h.id)}>✕</button></td>}</tr>))}</tbody></table>
+      )}
+      {canEdit && <div style={{ display: "flex", gap: 8, marginTop: 8 }}>{HW_TYPES.map(t => <button key={t} style={S.btnAddItem} onClick={() => addHW(t)}>+ {t}</button>)}</div>}
+    </div>
+  );
+}
+
+/* Validation subsection (moved from old SI-specific) */
+function ValidationSection({ project, state, setState, user, canEdit }) {
+  const pid = project?.id;
+  const valData = state.docData?.[pid]?._validation || {};
+  const updateVal = (data) => setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), _validation: data } } }));
+  return (
+    <div style={{ ...S.card, marginBottom: 12 }}>
+      <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 10 }}>Validation</div>
+      <div style={{ fontSize: 13, color: "#64748B", fontFamily: F }}>
+        <div style={S.miniStat}><span>FAT Status</span><strong>{valData.fatStatus || "Not started"}</strong></div>
+        <div style={S.miniStat}><span>SAT Status</span><strong>{valData.satStatus || "Not started"}</strong></div>
+        {canEdit && (
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <select style={{ ...S.inp, width: "auto", padding: "6px 10px", fontSize: 12 }} value={valData.fatStatus || ""} onChange={e => updateVal({ ...valData, fatStatus: e.target.value })}>
+              <option value="">FAT Status...</option><option value="Not started">Not started</option><option value="In progress">In progress</option><option value="Passed">Passed</option><option value="Failed">Failed</option><option value="Conditional">Conditional</option>
+            </select>
+            <select style={{ ...S.inp, width: "auto", padding: "6px 10px", fontSize: 12 }} value={valData.satStatus || ""} onChange={e => updateVal({ ...valData, satStatus: e.target.value })}>
+              <option value="">SAT Status...</option><option value="Not started">Not started</option><option value="In progress">In progress</option><option value="Passed">Passed</option><option value="Failed">Failed</option><option value="Conditional">Conditional</option>
+            </select>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ═══ COMMERCIAL VIEW — restricted, admin-gated ═══ */
+function CommercialView({ user, project, state, setState, lang = "en" }) {
+  const canEdit = isInst(user);
+  const pid = project?.id;
+  const cats = getCommercial(state.docData, pid);
+  const [addingItem, setAddingItem] = useState(null);
+  const [itemForm, setItemForm] = useState({ name: "", url: "", type: "link" });
+
+  if (!project) return <div style={S.page}><div style={S.empty}>Select a project from the sidebar.</div></div>;
+
+  const updateCats = (newCats) => setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), commercial: newCats } } }));
+  const addItem = (catId) => {
+    if (!itemForm.name.trim()) return;
+    const item = { id: genId(), name: itemForm.name.trim(), url: itemForm.url.trim(), type: itemForm.type, addedBy: user.name, addedAt: new Date().toISOString() };
+    updateCats(cats.map(c => c.id !== catId ? c : { ...c, items: [...(c.items||[]), item] }));
+    setItemForm({ name: "", url: "", type: "link" }); setAddingItem(null);
+  };
+  const delItem = (catId, itemId) => updateCats(cats.map(c => c.id !== catId ? c : { ...c, items: (c.items||[]).filter(i => i.id !== itemId) }));
+
+  return (
+    <div style={S.page}>
+      <h2 style={S.h2}>Commercial</h2>
+      <p style={S.sub}>{project.name} — agreements, pricing, and legal documents. Access is restricted.</p>
+      <Chip small color="#FEF3C7" fg="#D97706">Restricted — admin-granted access only</Chip>
+      <div style={{ marginTop: 16 }}>
+        {cats.map(cat => (
+          <div key={cat.id} style={{ ...S.card, marginBottom: 12, borderLeft: "3px solid #F59E0B" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F }}>🔒 {cat.name}</div>
+              <Chip small>{(cat.items||[]).length} items</Chip>
+            </div>
+            {(cat.items||[]).map(item => (
+              <div key={item.id} style={S.docItemRow}>
+                <span>🔗</span>
+                <div style={{ flex: 1 }}>{item.url ? <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 15, color: "#0284C7", textDecoration: "none", fontFamily: F }}>{item.name}</a> : <span style={{ fontSize: 15, fontFamily: F }}>{item.name}</span>}</div>
+                {canEdit && <button style={{ ...S.btnDel, padding: "3px 8px", fontSize: 11 }} onClick={() => delItem(cat.id, item.id)}>✕</button>}
+              </div>
+            ))}
+            {(cat.items||[]).length === 0 && <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>No documents yet.</div>}
+            {canEdit && (addingItem === cat.id ? (
+              <div style={{ marginTop: 12, padding: 14, background: "#F8FAFC", borderRadius: 10 }}>
+                <label style={S.lbl}>Name</label><input style={S.inp} value={itemForm.name} onChange={e => setItemForm(f => ({ ...f, name: e.target.value }))} />
+                <label style={S.lbl}>URL</label><input style={S.inp} value={itemForm.url} onChange={e => setItemForm(f => ({ ...f, url: e.target.value }))} placeholder="https://..." />
+                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <button style={{ ...S.btnMain, width: "auto", padding: "10px 18px", marginTop: 0 }} onClick={() => addItem(cat.id)}>Add</button>
+                  <button style={{ ...S.btnFlat, width: "auto" }} onClick={() => setAddingItem(null)}>Cancel</button>
+                </div>
+              </div>
+            ) : <button style={S.btnAddItem} onClick={() => setAddingItem(cat.id)}>+ Add Document</button>)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ═══ TRAINING VIEW — v3.2.0: per-project toggle, belt assignment, materials ═══ */
+function TrainingView({ user, project, state, setState, lang = "en" }) {
+  const canEdit = isInst(user);
+  const pid = project?.id;
+  const trainingData = state.docData?.[pid]?._training || {};
+  const enabled = trainingData.enabled || false;
+  const materials = trainingData.materials || [];
+  const assignments = trainingData.assignments || {}; // { userId: "white"|"blue"|"black" }
+  const allUsers = state.users || [];
+  const [addMat, setAddMat] = useState(false);
+  const [matForm, setMatForm] = useState({ name: "", url: "", belt: "white" });
+
+  if (!project) return <div style={S.page}><div style={S.empty}>Select a project from the sidebar.</div></div>;
+
+  const updateTraining = (data) => setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), _training: data } } }));
+  const toggleEnabled = () => updateTraining({ ...trainingData, enabled: !enabled });
+  const addMaterial = () => { if (!matForm.name.trim()) return; updateTraining({ ...trainingData, materials: [...materials, { id: genId(), ...matForm, addedBy: user.name, addedAt: new Date().toISOString() }] }); setMatForm({ name: "", url: "", belt: "white" }); setAddMat(false); };
+  const delMaterial = (id) => updateTraining({ ...trainingData, materials: materials.filter(m => m.id !== id) });
+  const assignBelt = (uid, belt) => updateTraining({ ...trainingData, assignments: { ...assignments, [uid]: belt } });
+  const removeBelt = (uid) => { const next = { ...assignments }; delete next[uid]; updateTraining({ ...trainingData, assignments: next }); };
+
+  // Users see only their assigned belt
+  const myBelt = assignments[user.id];
+  const myMaterials = myBelt ? materials.filter(m => m.belt === myBelt) : [];
+
+  return (
+    <div style={S.page}>
+      <h2 style={S.h2}>Training</h2>
+      <p style={S.sub}>{project.name}</p>
+
+      {canEdit && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+          <span style={{ fontSize: 14, color: "#64748B", fontFamily: F }}>{enabled ? "Enabled" : "Disabled"}</span>
+          <div onClick={toggleEnabled} style={{ width: 44, height: 24, borderRadius: 12, background: enabled ? "#00C9A7" : "#CBD5E1", cursor: "pointer", position: "relative", transition: "background .2s" }}>
+            <div style={{ width: 18, height: 18, borderRadius: 9, background: "#FFF", position: "absolute", top: 3, left: enabled ? 23 : 3, transition: "left .2s" }} />
+          </div>
+        </div>
+      )}
+
+      {!enabled && <div style={S.empty}>Training is disabled for this project.{canEdit ? " Toggle above to enable." : ""}</div>}
+
+      {enabled && (<>
+        {/* Belt assignment — admin/instrumental can assign users */}
+        {canEdit && (
+          <div style={{ ...S.card, marginBottom: 16 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 10 }}>Belt Assignments</div>
+            <p style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginBottom: 10 }}>Assign users to a belt level. They will only see materials for their assigned belt.</p>
+            {allUsers.map(u => {
+              const belt = assignments[u.id];
+              return (
+                <div key={u.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", borderBottom: "1px solid #F8FAFC" }}>
+                  <span style={{ fontSize: 13, fontFamily: F, flex: 1 }}>{u.name} <span style={{ color: "#94A3B8", fontSize: 11 }}>({u.email})</span></span>
+                  <select style={{ ...S.inp, width: 130, padding: "3px 6px", fontSize: 11 }} value={belt || ""} onChange={e => e.target.value ? assignBelt(u.id, e.target.value) : removeBelt(u.id)}>
+                    <option value="">Not assigned</option>
+                    {Object.entries(BELT_LEVELS).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.name}</option>)}
+                  </select>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Materials — organized by belt */}
+        {canEdit ? (
+          // Instrumental sees all belts
+          ["white", "blue", "black"].map(belt => {
+            const bi = BELT_LEVELS[belt];
+            const beltMats = materials.filter(m => m.belt === belt);
+            return (
+              <div key={belt} style={{ ...S.card, marginBottom: 12, borderLeft: `3px solid ${bi.color}` }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 8 }}>{bi.icon} {bi.name}</div>
+                {beltMats.map(m => (
+                  <div key={m.id} style={S.docItemRow}>
+                    <span>🔗</span>
+                    <div style={{ flex: 1 }}>{m.url ? <a href={m.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 14, color: "#0284C7", fontFamily: F, textDecoration: "none" }}>{m.name}</a> : <span style={{ fontSize: 14, fontFamily: F }}>{m.name}</span>}</div>
+                    <button style={{ ...S.btnDel, padding: "2px 6px", fontSize: 10 }} onClick={() => delMaterial(m.id)}>✕</button>
+                  </div>
+                ))}
+                {beltMats.length === 0 && <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>No materials yet.</div>}
+              </div>
+            );
+          })
+        ) : (
+          // External users see only their assigned belt
+          myBelt ? (
+            <div style={{ ...S.card, borderLeft: `3px solid ${BELT_LEVELS[myBelt].color}` }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 8 }}>{BELT_LEVELS[myBelt].icon} {BELT_LEVELS[myBelt].name}</div>
+              {myMaterials.length > 0 ? myMaterials.map(m => (
+                <div key={m.id} style={S.docItemRow}>
+                  <span>🔗</span>
+                  <div style={{ flex: 1 }}>{m.url ? <a href={m.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 14, color: "#0284C7", fontFamily: F, textDecoration: "none" }}>{m.name}</a> : <span style={{ fontSize: 14, fontFamily: F }}>{m.name}</span>}</div>
+                </div>
+              )) : <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>No materials available for your belt level yet.</div>}
+            </div>
+          ) : <div style={S.empty}>You have not been assigned a training belt for this project yet. Contact your Instrumental team.</div>
+        )}
+
+        {/* Add material — instrumental */}
+        {canEdit && !addMat && <button style={{ ...S.btnAddItem, marginTop: 12 }} onClick={() => setAddMat(true)}>+ Add Training Material</button>}
+        {canEdit && addMat && (
+          <div style={{ ...S.card, marginTop: 12, padding: 14 }}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              {["white","blue","black"].map(b => <button key={b} onClick={() => setMatForm(f => ({...f, belt: b}))} style={{ ...S.typeBtn, ...(matForm.belt === b ? S.typeBtnActive : {}) }}>{BELT_LEVELS[b].icon} {BELT_LEVELS[b].name}</button>)}
+            </div>
+            <label style={S.lbl}>Title</label><input style={S.inp} value={matForm.name} onChange={e => setMatForm(f => ({...f, name: e.target.value}))} />
+            <label style={S.lbl}>URL</label><input style={S.inp} value={matForm.url} onChange={e => setMatForm(f => ({...f, url: e.target.value}))} placeholder="https://..." />
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button style={{ ...S.btnMain, width: "auto", padding: "8px 16px", marginTop: 0 }} onClick={addMaterial}>Add</button>
+              <button style={{ ...S.btnFlat, width: "auto" }} onClick={() => setAddMat(false)}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </>)}
     </div>
   );
 }
@@ -1462,15 +1893,14 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
     setApplyLoading(false);
   };
 
-  // Access map writes — for rule-level enforcement. Only needed for external (non-Instrumental, non-admin) users.
-  const needsAccessMap = (u) => u && u.role !== "admin" && u.partyId !== "instrumental";
+  // Access map writes — for rule-level enforcement. External users need access/ entries.
+  const needsAccessMap = (u) => u && u.role !== "admin" && !(u.email || "").endsWith("@instrumental.com");
 
   const approve = async (pu) => {
     const f = approveForm[pu.id] || {};
-    if (!f.partyId) return;
     const selProj = Object.entries(f.projects || {}).filter(([,v]) => v).map(([k]) => k);
     if (selProj.length === 0) return;
-    const nu = { id: pu.id, name: pu.name, email: pu.email, photoURL: pu.photoURL || null, role: "user", partyId: f.partyId, projects: selProj, createdAt: pu.requestedAt, approvedAt: new Date().toISOString() };
+    const nu = { id: pu.id, name: pu.name, email: pu.email, photoURL: pu.photoURL || null, role: "user", partyId: "external", projects: selProj, createdAt: pu.requestedAt, approvedAt: new Date().toISOString() };
     try {
       await dbWrite(`users/${pu.id}`, nu);
       if (needsAccessMap(nu)) {
@@ -1523,15 +1953,15 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
   };
 
   const pending = pendingUsers || [];
-  const instUsers = (users||[]).filter(u => u.partyId === "instrumental" && u.role !== "admin");
-  const externals = (users||[]).filter(u => u.partyId !== "instrumental" && u.role !== "admin");
+  const instUsers = (users||[]).filter(u => (u.email||"").endsWith("@instrumental.com") && u.role !== "admin");
+  const externals = (users||[]).filter(u => !(u.email||"").endsWith("@instrumental.com") && u.role !== "admin");
   const admins = (users||[]).filter(u => u.role === "admin");
 
   return (
     <div style={S.page}>
       <h2 style={S.h2}>Admin Panel</h2>
       <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
-        {[{ id: "pending", label: `Pending${pending.length > 0 ? ` (${pending.length})` : ""}` }, { id: "users", label: "User Access" }, { id: "hubspot", label: "🔄 HubSpot Sync" }, { id: "restricted", label: "Restricted Folders" }].map(t => (
+        {[{ id: "pending", label: `Pending${pending.length > 0 ? ` (${pending.length})` : ""}` }, { id: "users", label: "User Access" }, { id: "commercial_access", label: "🔒 Commercial Access" }, { id: "hubspot", label: "🔄 HubSpot Sync" }].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{ ...S.tabBtn, ...(tab === t.id ? { background: "#00C9A7", color: "#FFF", borderColor: "#00C9A7" } : {}), ...(t.id === "pending" && pending.length > 0 ? { borderColor: "#F59E0B" } : {}) }}>{t.label}</button>
         ))}
       </div>
@@ -1547,12 +1977,7 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
                 {pu.photoURL ? <img src={pu.photoURL} style={{ width: 38, height: 38, borderRadius: 10 }} alt="" referrerPolicy="no-referrer" /> : <div style={{ ...S.ava, background: "#F59E0B" }}>{(pu.name||"?")[0]}</div>}
                 <div><div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F }}>{pu.name}</div><div style={{ fontSize: 13, color: "#64748B" }}>{pu.email}</div></div>
               </div>
-              <label style={S.lbl}>Assign Party</label>
-              <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-                {Object.values(PARTY_DEFS).filter(p => p.id !== "instrumental").map(p => (
-                  <button key={p.id} onClick={() => setApproveForm(prev => ({ ...prev, [pu.id]: { ...prev[pu.id], partyId: p.id } }))} style={{ padding: "6px 14px", borderRadius: 8, border: `2px solid ${f.partyId === p.id ? p.accent : "#E2E8F0"}`, background: f.partyId === p.id ? `${p.accent}15` : "#FFF", color: f.partyId === p.id ? p.accent : "#94A3B8", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: F }}>{p.defaultName}</button>
-                ))}
-              </div>
+              <div style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginBottom: 8 }}>This user will be added as an <strong>external user</strong>. Select which projects they should have access to.</div>
               <label style={S.lbl}>Assign Projects (active only)</label>
               {allProjects.filter(p => p.status === "active").map(proj => {
                 const ck = f.projects?.[proj.id] || false;
@@ -1564,7 +1989,7 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
                 );
               })}
               <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                <button style={{ ...S.btnMain, width: "auto", padding: "10px 20px", marginTop: 0, opacity: (f.partyId && Object.values(f.projects||{}).some(v=>v)) ? 1 : .4 }} onClick={() => approve(pu)} disabled={!f.partyId || !Object.values(f.projects||{}).some(v=>v)}>✓ Approve</button>
+                <button style={{ ...S.btnMain, width: "auto", padding: "10px 20px", marginTop: 0, opacity: Object.values(f.projects||{}).some(v=>v) ? 1 : .4 }} onClick={() => approve(pu)} disabled={!Object.values(f.projects||{}).some(v=>v)}>✓ Approve</button>
                 <button style={{ ...S.btnDel, padding: "10px 16px" }} onClick={() => deny(pu)}>Deny</button>
               </div>
             </div>
@@ -1597,13 +2022,12 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
 
           <h3 style={{ ...S.h3, marginTop: 24, marginBottom: 10 }}>External Users</h3>
           {externals.length === 0 ? <div style={S.empty}>No external users yet.</div> : externals.map(u => {
-            const p = PARTY_DEFS[u.partyId];
             return (
               <div key={u.id} style={{ ...S.card, marginBottom: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-                  {u.photoURL ? <img src={u.photoURL} style={{ width: 32, height: 32, borderRadius: 8 }} alt="" referrerPolicy="no-referrer" /> : <div style={{ ...S.ava, background: p?.accent||"#94A3B8", width: 32, height: 32 }}>{(u.name||"?")[0]}</div>}
+                  {u.photoURL ? <img src={u.photoURL} style={{ width: 32, height: 32, borderRadius: 8 }} alt="" referrerPolicy="no-referrer" /> : <div style={{ ...S.ava, background: "#94A3B8", width: 32, height: 32 }}>{(u.name||"?")[0]}</div>}
                   <div style={{ flex: 1 }}><div style={{ fontSize: 14, fontWeight: 600, color: "#0F172A", fontFamily: F }}>{u.name}</div><div style={{ fontSize: 12, color: "#64748B" }}>{u.email}</div></div>
-                  <Chip small color={`${p?.accent}22`} fg={p?.accent}>{p?.defaultName}</Chip>
+                  <Chip small color="#F1F5F9" fg="#64748B">External</Chip>
                   <button style={{ ...S.btnDel, fontSize: 11 }} onClick={() => removeUser(u.id)}>Remove</button>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
@@ -1669,32 +2093,39 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
         </div>
       )}
 
-      {/* RESTRICTED FOLDERS TAB */}
-      {tab === "restricted" && (
+      {/* COMMERCIAL ACCESS TAB */}
+      {tab === "commercial_access" && (
         <div>
-          <p style={{ fontSize: 14, color: "#64748B", fontFamily: F, marginBottom: 16 }}>Grant users access to restricted folders per project. Currently you and other admins always have access.</p>
-          {allProjects.filter(p => p.status !== "deprecated").map(proj => {
-            const allCats = Object.entries(SEED_DOC_CATEGORIES).flatMap(([party, cats]) => cats.filter(c => c.accessLevel === "restricted").map(c => ({ ...c, party })));
-            const projCats = Object.entries(state.docData?.[proj.id] || {}).flatMap(([party, cats]) => Array.isArray(cats) ? cats.filter(c => c.accessLevel === "restricted").map(c => ({ ...c, party })) : []);
-            const restricted = [...allCats, ...projCats].filter((c, i, arr) => arr.findIndex(x => x.id === c.id) === i);
-            if (restricted.length === 0) return null;
+          <p style={{ fontSize: 14, color: "#64748B", fontFamily: F, marginBottom: 16 }}>Grant users access to the <strong>Commercial</strong> tab (Agreements, Pricing, Legal) per project. Admins always have access. Both external users AND non-admin Instrumental users need explicit grants.</p>
+          {allProjects.filter(p => p.status === "active").map(proj => {
+            const eligibleUsers = [...instUsers, ...externals];
+            const commAccess = state.commercialAccess?.[proj.id] || {};
+            const toggleComm = (uid) => {
+              const has = commAccess[uid];
+              if (has) {
+                dbWrite(`commercialAccess/${proj.id}/${uid}`, null).catch(console.error);
+                setState(prev => {
+                  const next = { ...(prev.commercialAccess||{}) };
+                  if (next[proj.id]) { const p = { ...next[proj.id] }; delete p[uid]; next[proj.id] = p; }
+                  return { ...prev, commercialAccess: next };
+                });
+              } else {
+                dbWrite(`commercialAccess/${proj.id}/${uid}`, true).catch(console.error);
+                setState(prev => ({ ...prev, commercialAccess: { ...(prev.commercialAccess||{}), [proj.id]: { ...(prev.commercialAccess?.[proj.id]||{}), [uid]: true } } }));
+              }
+            };
             return (
               <div key={proj.id} style={{ ...S.card, marginBottom: 12 }}>
                 <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 10 }}>{proj.name}</div>
-                {restricted.map(cat => (
-                  <div key={cat.id} style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: "#64748B", fontFamily: F, marginBottom: 4 }}>🔒 {cat.name} ({getPN(proj, cat.party)})</div>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      {(externals).map(u => {
-                        const has = getRestricted(proj.id, cat.id).includes(u.id);
-                        return (
-                          <button key={u.id} onClick={() => toggleRestricted(proj.id, cat.id, u.id)} style={{ padding: "4px 10px", borderRadius: 6, border: `1px solid ${has ? "#00C9A7" : "#E2E8F0"}`, background: has ? "#ECFDF5" : "#FFF", color: has ? "#059669" : "#94A3B8", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: F }}>{u.name}{has ? " ✓" : ""}</button>
-                        );
-                      })}
-                      {externals.length === 0 && <span style={{ fontSize: 12, color: "#94A3B8", fontFamily: F }}>No external users to grant access to.</span>}
-                    </div>
-                  </div>
-                ))}
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {eligibleUsers.map(u => {
+                    const has = commAccess[u.id];
+                    return (
+                      <button key={u.id} onClick={() => toggleComm(u.id)} style={{ padding: "4px 10px", borderRadius: 6, border: `1px solid ${has ? "#00C9A7" : "#E2E8F0"}`, background: has ? "#ECFDF5" : "#FFF", color: has ? "#059669" : "#94A3B8", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: F }}>{u.name}{has ? " ✓" : ""}</button>
+                    );
+                  })}
+                  {eligibleUsers.length === 0 && <span style={{ fontSize: 12, color: "#94A3B8", fontFamily: F }}>No users to grant access to.</span>}
+                </div>
               </div>
             );
           })}
@@ -1926,6 +2357,8 @@ export default function App() {
     if (isAdminOrInst) {
       unsubs.push(onValue(ref(db, "appState/demandCustomTypes"), (s) => { setState(prev => ({ ...prev, demandCustomTypes: s.val() || {} })); }, (e) => console.error(e)));
     }
+    // Commercial access map — readable by all auth users
+    unsubs.push(onValue(ref(db, "commercialAccess"), (s) => { setState(prev => ({ ...prev, commercialAccess: s.val() || {} })); }, (e) => console.error(e)));
     unsubs.push(onValue(ref(db, "users"), (s) => { const v = s.val(); if (v) setState(prev => ({ ...prev, users: Object.values(v) })); }, (e) => console.error(e)));
     if (user.role === "admin") { unsubs.push(onValue(ref(db, "pendingUsers"), (s) => { const v = s.val(); setPendingUsers(v ? Object.values(v) : []); }, (e) => console.error(e))); }
     setLoaded(true);
@@ -1939,7 +2372,7 @@ export default function App() {
     (async () => {
       try {
         const schemaVer = await dbRead("_schemaVersion");
-        if (schemaVer === "v3.1.0" || cancelled) return;
+        if (schemaVer === "v3.2.0" || schemaVer === "v3.1.0" || cancelled) return;
         const raw = await dbRead("appState/projects");
         const isArrayLike = Array.isArray(raw) || (raw && typeof raw === "object" && Object.keys(raw).every(k => /^\d+$/.test(k)));
         if (isArrayLike && raw) {
@@ -1990,6 +2423,7 @@ export default function App() {
       if (next.progress !== prev.progress) dbWrite("appState/progress", next.progress).catch(console.error);
       if (next.statusMessage !== prev.statusMessage) dbWrite("appState/statusMessage", next.statusMessage).catch(console.error);
       if (next.demandCustomTypes !== prev.demandCustomTypes) dbWrite("appState/demandCustomTypes", next.demandCustomTypes || null).catch(console.error);
+      if (next.commercialAccess !== prev.commercialAccess) dbWrite("commercialAccess", next.commercialAccess || null).catch(console.error);
       if (next.users !== prev.users && Array.isArray(next.users)) next.users.forEach(u => { if (u.id) dbWrite(`users/${u.id}`, u).catch(console.error); });
       return next;
     });
@@ -2014,21 +2448,28 @@ export default function App() {
   const projectsArr = Array.isArray(state.projects) ? state.projects : (state.projects ? Object.values(state.projects) : []);
   const userProjects = projectsArr.filter(p => user.role === "admin" || (user.projects||[]).includes(p.id));
   const admin = isInst(user);
-  // Project access gate — ensure current project is in user's allowed list (defense against state tampering)
-  const hasProjectAccess = !project || user.role === "admin" || user.partyId === "instrumental" || (user.projects||[]).includes(project.id);
+  const hasProjectAccess = !project || user.role === "admin" || admin || (user.projects||[]).includes(project.id);
+  // Commercial access: admin always has it; others need explicit grant in commercialAccess/{pid}/{uid}
+  const hasCommAccess = user.role === "admin" || (project && state.commercialAccess?.[project.id]?.[user.id]);
 
   const renderMain = () => {
     if (view === "projects_overview" && admin) return <ProjectsOverviewView state={state} setState={save} user={user} lang={lang} />;
-    if (view === "dashboard" || (!view.startsWith("docs_") && view !== "admin" && view !== "manage")) {
-      if (user.partyId !== "instrumental" && user.partyId !== "customer" && user.role !== "admin") return <div style={S.page}><div style={S.empty}>Access denied.</div></div>;
-      if (!hasProjectAccess) return <div style={S.page}><div style={S.empty}>Access denied — you are not assigned to this project.</div></div>;
-      return <DashboardView user={user} project={project} state={state} setState={save} lang={lang} setView={setView} />;
+    if (!hasProjectAccess && view !== "projects_overview" && view !== "admin" && view !== "manage") {
+      return <div style={S.page}><div style={S.empty}>Access denied — you are not assigned to this project.</div></div>;
+    }
+    if (view === "project_details") {
+      return <ProjectDetailsView user={user} project={project} state={state} setState={save} lang={lang} />;
+    }
+    if (view === "commercial") {
+      if (!hasCommAccess) return <div style={S.page}><div style={S.empty}>🔒 Access restricted. Contact your admin for access to Commercial documents.</div></div>;
+      return <CommercialView user={user} project={project} state={state} setState={save} lang={lang} />;
+    }
+    if (view === "training") {
+      return <TrainingView user={user} project={project} state={state} setState={save} lang={lang} />;
     }
     if (view.startsWith("docs_")) {
-      const pid = view.replace("docs_", "");
-      if (!admin && pid !== user.partyId) return <div style={S.page}><div style={S.empty}>Access denied.</div></div>;
-      if (!hasProjectAccess) return <div style={S.page}><div style={S.empty}>Access denied — you are not assigned to this project.</div></div>;
-      return <DocsView partyId={pid} user={user} project={project} state={state} setState={save} lang={lang} />;
+      // Legacy route compat — redirect to project_details
+      return <ProjectDetailsView user={user} project={project} state={state} setState={save} lang={lang} />;
     }
     if (view === "admin" && admin) return <AdminView state={state} setState={save} allProjects={projectsArr} pendingUsers={pendingUsers} currentUser={user} />;
     if (view === "manage" && admin) return <ManageProjects state={state} setState={save} />;
@@ -2049,7 +2490,7 @@ export default function App() {
           ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
           ::selection { background: #00C9A733; }
         `}</style>
-        <Sidebar view={view} setView={setView} user={user} project={project} projects={userProjects} setProject={setProject} onLogout={onLogout} lang={lang} setLang={setLang} />
+        <Sidebar view={view} setView={setView} user={user} project={project} projects={userProjects} setProject={setProject} onLogout={onLogout} lang={lang} setLang={setLang} hasCommercialAccess={hasCommAccess} />
         <main style={S.main}>{renderMain()}</main>
       </div>
     </div>
