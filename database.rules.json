@@ -34,6 +34,13 @@
           ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental' || root.child('access').child($pid).hasChild(auth.uid))"
         }
       },
+      "projectOverview": {
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')",
+        "$pid": {
+          ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental' || root.child('access').child($pid).hasChild(auth.uid))"
+        }
+      },
       "statusMessage": {
         ".read": "auth != null",
         ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'"
@@ -45,29 +52,58 @@
     },
 
     "users": {
-      ".read": "auth != null && root.child('users').child(auth.uid).exists()",
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
       "$uid": {
-        ".write": "auth != null && ($uid === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'admin')",
-        ".validate": "newData.hasChildren(['id', 'name', 'email', 'role', 'partyId'])"
+        ".read": "auth != null && ($uid === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'admin')",
+        ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+        ".validate": "newData.hasChildren(['id', 'name', 'email', 'role']) || newData.val() === null",
+        "role": {
+          ".validate": "newData.val() === 'user' || newData.val() === 'admin' && root.child('users').child(auth.uid).child('role').val() === 'admin'"
+        },
+        "partyId": {
+          ".validate": "newData.val() !== 'instrumental' || auth.token.email.matches(/.*@instrumental\\.com$/) || root.child('users').child(auth.uid).child('role').val() === 'admin'"
+        },
+        "superAdmin": {
+          ".validate": "root.child('users').child(auth.uid).child('superAdmin').val() === true"
+        },
+        "langPref": {
+          ".write": "auth != null && $uid === auth.uid",
+          ".validate": "newData.isString() && newData.val().length <= 8"
+        }
       }
     },
 
     "pendingUsers": {
       ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
       "$uid": {
-        ".write": "auth != null && ($uid === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'admin')",
+        ".read": "auth != null && ($uid === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'admin')",
         ".validate": "newData.hasChildren(['id', 'name', 'email']) || newData.val() === null"
       }
     },
 
     "access": {
-      ".read": "auth != null",
-      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'"
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      "$pid": {
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || data.child(auth.uid).val() === true)"
+      }
     },
 
     "commercialAccess": {
-      ".read": "auth != null",
-      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'"
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      "$pid": {
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || data.child(auth.uid).val() === true)",
+        "$uid": {
+          ".read": "auth != null && ($uid === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'admin')"
+        }
+      }
+    },
+
+    "auditLog": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      ".write": false
     },
 
     "hubspotSync": {

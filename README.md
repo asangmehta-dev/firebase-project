@@ -1,8 +1,8 @@
 # Deployment Portal
 
-**Version:** v3.2.0
+**Version:** v4.0.0
 
-A React 18 web application serving as a consolidated PMO-style frontend UI for the Customer Experience team to track and proactively manage risks/issues with CMs and customers. Speaks directly to HubSpot to provide real-time information on all projects in the deployment and sales pipeline. Coordinates documentation, milestones, and program details across four stakeholder groups: Instrumental, Systems Integrator (SI), Customer, and Contract Manufacturer (CM).
+A React 18 web application serving as a consolidated PMO-style frontend UI for the Customer Experience team to track and proactively manage risks/issues with CMs and customers. Speaks directly to HubSpot to provide real-time information on all projects in the deployment and sales pipeline. Coordinates documentation, milestones, and program details across Instrumental, Systems Integrator (SI), Customer, and CM stakeholders via a unified Project Details / Commercial / Training model.
 
 #Vision 
 The goal of this Webapp is to have a consolidated "PMO" Style frontend UI that the Customer Experience team can use to track and proactively manage risks / issues with CMs/ customers. This will directly speak to Hubspot and provide real time information on all projects in the deploment and sales pipeline 
@@ -46,7 +46,8 @@ The goal of this Webapp is to have a consolidated "PMO" Style frontend UI that t
 | Database | Firebase Realtime Database |
 | Auth | Firebase Authentication (Google OAuth) |
 | Hosting | Firebase Hosting |
-| Cloud Functions | Firebase Functions (Node 18) — HubSpot sync |
+| Cloud Functions | Firebase Functions (Node 20) — HubSpot sync, AI Bot (Claude), admin callables, provisioning |
+| AI | Anthropic Claude API (`claude-sonnet-4-20250514`) — Project Bot, drafted project status |
 | CRM | HubSpot Custom Objects API (v3), 6 pipelines |
 | Legacy hosting | Docker + Nginx on Google Cloud Run (with IAP) |
 | Styles | Inline styles only (no CSS files) |
@@ -92,15 +93,16 @@ npm run dev
 cd functions && npm install && cd ..
 ```
 
-### HubSpot Functions Config (one-time setup)
+### Functions `.env` (one-time setup — do NOT commit)
 
-```bash
-# Set the HubSpot Private App token (do NOT commit this)
-firebase functions:config:set hubspot.token="pat-na2-YOURTOKEN"
+Create `functions/.env`:
 
-# Verify
-firebase functions:config:get
 ```
+HUBSPOT_TOKEN=pat-na2-YOURTOKEN
+ANTHROPIC_API_KEY=sk-ant-YOURKEY
+```
+
+`.env` is gitignored. The legacy `firebase functions:config:*` API is deprecated — we use `process.env` in `functions/index.js`.
 
 ---
 
@@ -175,18 +177,21 @@ New users sign in with Google and land in a pending queue until an admin approve
 | v2.2.1 | Fixed broken IIFE in overview party cards — non-admin users can only navigate to their own party |
 | v3.0.0 | HubSpot CRM sync (6 pipelines, auto Tue/Fri 9am + manual), Projects Overview tab, checklist templates (Internal/External/SI), codename decoding, admin panel HubSpot sync UI, Instrumental/External user split |
 | v3.1.0 | DB-level access control, Demand Plan, per-pipeline bar charts, per-project hardware section |
-| v3.2.0 | **Remove 4-party system** (Instrumental/SI/Customer/CM → unified Project Details/Commercial/Training); new checklist template from deployment PDF (Internal + External + SI toggle, with ownership/dates/SOP fields/N/A); **Commercial tab** (restricted, admin-granted access for all non-admin users including Instrumental); **Training** rework (per-project toggle, per-user belt assignment, materials by belt); searchable project dropdown; simplified external user model (no more partyId); all externals get simplified dashboard |
+| v3.2.0 | Remove 4-party system, unified Project Details/Commercial/Training, new checklist template, searchable dropdown |
+| v3.3.0 | Security lockdowns, Manage Projects overhaul, SI Kanban, Gantt chart, hardware demand forecast, App Scripts links, AI Project Bot, URL redirect |
+| v4.0.0 | **Security review response** (7 findings) — `users/` read locked to admin + own; `access/` and `commercialAccess/` reads scoped; client-side bootstrap removed (manual admin seed); `provisionUser` Cloud Function for sign-in; admin callables (`adminApprove`/`Deny`/`Delete`/`SetRole`/`SetProjectAccess`/`SetCommercialAccess`) with **audit log** on all sensitive ops; URL validation (https-only, `javascript:`/`data:`/`file:` blocked). **Hardware manual override** (HubSpot value = suggestion; Instrumental users can override per-field, override wins in Demand Plan). **Project Overview** section with 8 fields — CAD Complete, CAD Actual Finish, Actual Service Start, Target Build, Actual Deploy (webapp source of truth) + Target Build at Deal Close + CS Program ID (HubSpot pull-only) + Project Status/Next Steps (Bot-drafted). **AI-drafted Project Status** button wires to existing Project Bot. Folds in uncommitted v3.2.0 + v3.3.0 + Apr 22 sign-in hotfixes. |
 
 ---
 
 ## Documentation
 
-- [HOW_TO_USE_GUIDE_3.2.0.md](HOW_TO_USE_GUIDE_3.2.0.md) — End-user guide (current)
-- [SECURITY_REVIEW_3.2.0.md](SECURITY_REVIEW_3.2.0.md) — Full security assessment (current)
-- [REBUILD_3.2.0.md](REBUILD_3.2.0.md) — Step-by-step guide to rebuilding the project from scratch
+- [HOW_TO_USE_GUIDE_4.0.0.md](HOW_TO_USE_GUIDE_4.0.0.md) — End-user guide (current)
+- [SECURITY_REVIEW_4.0.0.md](SECURITY_REVIEW_4.0.0.md) — Response to 4/24 security review (current)
+- [REBUILD_4.0.0.md](REBUILD_4.0.0.md) — Step-by-step guide to rebuilding the project from scratch
+- [PRE_DEPLOY_RUNBOOK_4.0.0.md](PRE_DEPLOY_RUNBOOK_4.0.0.md) — Admin seed instructions + pre-deploy test checklist
 
 ---
 
 ## Security
 
-See [SECURITY_REVIEW_3.2.0.md](SECURITY_REVIEW_3.2.0.md) for the current security assessment.
+See [SECURITY_REVIEW_4.0.0.md](SECURITY_REVIEW_4.0.0.md) for the current security assessment.

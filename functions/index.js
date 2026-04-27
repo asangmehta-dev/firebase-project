@@ -377,3 +377,423 @@ exports.applyChecklistTemplate = functions.https.onCall(async (data, context) =>
 
   return await applyChecklistToProject(projectId, !!isSI);
 });
+
+/* ═══ AI PROJECT BOT — v3.3.0: Claude-powered Q&A per project ═══ */
+exports.askProjectBot = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+
+  // Only Instrumental users can use the bot
+  const userSnap = await db.ref(`users/${context.auth.uid}`).once("value");
+  const user = userSnap.val();
+  const email = context.auth.token?.email || "";
+  if (user?.role !== "admin" && !email.endsWith("@instrumental.com")) {
+    throw new functions.https.HttpsError("permission-denied", "Instrumental users only.");
+  }
+
+  const { projectId, question, action, sectionId } = data || {};
+  if (!projectId) throw new functions.https.HttpsError("invalid-argument", "projectId required.");
+  if (!question && !action) throw new functions.https.HttpsError("invalid-argument", "question or action required.");
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new functions.https.HttpsError("internal", "Anthropic API key not configured. Add ANTHROPIC_API_KEY to functions/.env");
+
+  // Build project context from DB
+  const [projSnap, docSnap] = await Promise.all([
+    db.ref(`appState/projects/${projectId}`).once("value"),
+    db.ref(`appState/docData/${projectId}`).once("value"),
+  ]);
+  const project = projSnap.val() || {};
+  const docData = docSnap.val() || {};
+
+  // Flatten project context into a readable summary for the AI
+  const contextParts = [];
+  contextParts.push(`Project: ${project.name || projectId}`);
+  contextParts.push(`Customer: ${project.customer || "Unknown"}`);
+  contextParts.push(`Status: ${project.status || "unknown"}, Stations: ${project.stations || 0}, SI Involved: ${project.isSI ? "Yes" : "No"}`);
+  if (project.hubspotPipelineLabel) contextParts.push(`Pipeline: ${project.hubspotPipelineLabel}, Stage: ${project.hubspotStageLabel || "Unknown"}`);
+  if (project.hardware) contextParts.push(`Hardware: ${JSON.stringify(project.hardware)}`);
+
+  // Include checklist data
+  const pdCats = docData.projectDetails || docData.instrumental || [];
+  const pdArr = Array.isArray(pdCats) ? pdCats : Object.values(pdCats);
+  pdArr.forEach(cat => {
+    if (cat.type === "checklist" && cat.milestones) {
+      contextParts.push(`\nChecklist: ${cat.name}`);
+      cat.milestones.forEach(ms => {
+        const activeItems = (ms.checklist || []).filter(ck => !ck.na);
+        const doneCount = activeItems.filter(ck => ck.checked).length;
+        contextParts.push(`  ${ms.name}: ${doneCount}/${activeItems.length} complete`);
+        activeItems.forEach(ck => {
+          contextParts.push(`    ${ck.checked ? "[x]" : "[ ]"} ${ck.label}${ck.ownership ? " (Owner: " + ck.ownership + ")" : ""}${ck.projectedDate ? " Due: " + ck.projectedDate : ""}${ck.actualDate ? " Done: " + ck.actualDate : ""}`);
+        });
+      });
+    }
+    if (cat.items && cat.items.length > 0) {
+      contextParts.push(`\nFolder: ${cat.name} (${cat.items.length} documents)`);
+      cat.items.forEach(item => contextParts.push(`  - ${item.name}${item.url ? " [" + item.url + "]" : ""}`));
+    }
+  });
+
+  // Include program details
+  const progData = docData._programDetails || {};
+  if (progData.tasks && progData.tasks.length > 0) {
+    contextParts.push(`\nProgram Tasks & Milestones:`);
+    progData.tasks.forEach(t => contextParts.push(`  ${t.type === "milestone" ? "🏁" : "📋"} ${t.name} — ${t.date || "No date"}${t.endDate ? " to " + t.endDate : ""}`));
+  }
+
+  const projectContext = contextParts.join("\n");
+
+  // Build the prompt
+  let systemPrompt = `You are an AI assistant for Instrumental's Deployment Portal. You help the Customer Experience team manage deployment projects. You have access to the following project data:\n\n${projectContext}\n\nAnswer questions accurately based on this data. If information is not available in the data, say so clearly. Be concise and actionable.`;
+
+  let userMessage = question || "";
+
+  // Section-filling action
+  if (action === "fill_section" && sectionId) {
+    systemPrompt += `\n\nThe user wants you to suggest content for a section of the project. Analyze the project data and any uploaded documents to generate appropriate entries.`;
+    userMessage = `Based on the project data, suggest what should be filled in for the "${sectionId}" section. Provide specific, actionable items.`;
+  }
+
+  try {
+    const Anthropic = require("@anthropic-ai/sdk");
+    const client = new Anthropic({ apiKey });
+
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
+    });
+
+    const answer = response.content?.[0]?.text || "No response generated.";
+    return { answer, projectName: project.name };
+  } catch (err) {
+    console.error("AI Bot error:", err);
+    throw new functions.https.HttpsError("internal", "AI service error: " + (err.message || String(err)));
+  }
+});
+
+/* ═══ v4.0.0 SECURITY ═══ */
+
+// Audit log writer — server-only. Rules block client writes (auditLog/.write: false).
+// Shape: auditLog/{isoTs_random}: { ts, actor, action, target, meta }
+async function writeAuditEntry(actor, action, target, meta) {
+  const ts = new Date().toISOString();
+  const id = `${ts}_${Math.random().toString(36).slice(2, 8)}`;
+  await db.ref(`auditLog/${id}`).set({ ts, actor, action, target: target || null, meta: meta || null });
+}
+
+// URL validator — reject empty, non-https, javascript:, data: URIs.
+function validateUrl(u) {
+  if (u == null || u === "") return "";
+  if (typeof u !== "string") throw new functions.https.HttpsError("invalid-argument", "URL must be a string.");
+  const t = u.trim();
+  if (!/^https:\/\//i.test(t)) throw new functions.https.HttpsError("invalid-argument", "URL must start with https://.");
+  if (/^javascript:|^data:|^vbscript:|^file:/i.test(t)) throw new functions.https.HttpsError("invalid-argument", "Disallowed URL scheme.");
+  if (t.length > 2048) throw new functions.https.HttpsError("invalid-argument", "URL too long.");
+  return t;
+}
+
+async function requireAdmin(context) {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  const snap = await db.ref(`users/${context.auth.uid}`).once("value");
+  const u = snap.val();
+  if (u?.role !== "admin") throw new functions.https.HttpsError("permission-denied", "Admins only.");
+  return u;
+}
+
+/* ── provisionUser: first-time sign-in. Replaces client-side bootstrap + auto-approve. ── */
+exports.provisionUser = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  const uid = context.auth.uid;
+  const email = (context.auth.token?.email || "").toLowerCase();
+  const name = context.auth.token?.name || email;
+  const photoURL = context.auth.token?.picture || null;
+
+  // Idempotent — if user already exists, return it.
+  const existing = (await db.ref(`users/${uid}`).once("value")).val();
+  if (existing) return { status: "exists", user: existing };
+
+  const isInstDomain = /@instrumental\.com$/i.test(email);
+  if (isInstDomain) {
+    // Auto-approve as Instrumental user (role=user, partyId=instrumental).
+    // Admins must be promoted explicitly via adminSetRole by an existing admin.
+    const allProj = (await db.ref("appState/projects").once("value")).val() || {};
+    const projIds = Object.keys(allProj);
+    const nu = {
+      id: uid,
+      name,
+      email,
+      photoURL,
+      role: "user",
+      partyId: "instrumental",
+      projects: projIds,
+      createdAt: new Date().toISOString(),
+    };
+    await db.ref(`users/${uid}`).set(nu);
+    await writeAuditEntry(uid, "provision_instrumental", uid, { email });
+    return { status: "provisioned_instrumental", user: nu };
+  }
+
+  // External user → pendingUsers for admin approval.
+  const pending = { id: uid, name, email, photoURL, requestedAt: new Date().toISOString() };
+  await db.ref(`pendingUsers/${uid}`).set(pending);
+  await writeAuditEntry(uid, "request_access", uid, { email });
+  return { status: "pending", pending };
+});
+
+/* ── Admin callables with audit logging ── */
+
+exports.adminApproveUser = functions.https.onCall(async (data, context) => {
+  const caller = await requireAdmin(context);
+  const { pendingId, projectIds } = data || {};
+  if (!pendingId) throw new functions.https.HttpsError("invalid-argument", "pendingId required.");
+  const pu = (await db.ref(`pendingUsers/${pendingId}`).once("value")).val();
+  if (!pu) throw new functions.https.HttpsError("not-found", "Pending user not found.");
+
+  const selProjIds = Array.isArray(projectIds) ? projectIds : [];
+  const nu = {
+    id: pu.id,
+    name: pu.name,
+    email: pu.email,
+    photoURL: pu.photoURL || null,
+    role: "user",
+    partyId: "external",
+    projects: selProjIds,
+    createdAt: new Date().toISOString(),
+  };
+  await db.ref(`users/${pu.id}`).set(nu);
+  const updates = {};
+  selProjIds.forEach(pid => { updates[`access/${pid}/${pu.id}`] = true; });
+  if (Object.keys(updates).length > 0) await db.ref().update(updates);
+  await db.ref(`pendingUsers/${pendingId}`).set(null);
+  await writeAuditEntry(caller.id, "approve_user", pu.id, { email: pu.email, projectIds: selProjIds });
+  return { ok: true };
+});
+
+exports.adminDenyUser = functions.https.onCall(async (data, context) => {
+  const caller = await requireAdmin(context);
+  const { pendingId } = data || {};
+  if (!pendingId) throw new functions.https.HttpsError("invalid-argument", "pendingId required.");
+  const pu = (await db.ref(`pendingUsers/${pendingId}`).once("value")).val();
+  await db.ref(`pendingUsers/${pendingId}`).set(null);
+  await writeAuditEntry(caller.id, "deny_user", pendingId, { email: pu?.email || null });
+  return { ok: true };
+});
+
+exports.adminDeleteUser = functions.https.onCall(async (data, context) => {
+  const caller = await requireAdmin(context);
+  const { uid } = data || {};
+  if (!uid) throw new functions.https.HttpsError("invalid-argument", "uid required.");
+  if (uid === caller.id) throw new functions.https.HttpsError("failed-precondition", "Cannot delete self.");
+  const target = (await db.ref(`users/${uid}`).once("value")).val();
+  if (!target) throw new functions.https.HttpsError("not-found", "User not found.");
+
+  // Sweep access maps across all projects
+  const allAccess = (await db.ref("access").once("value")).val() || {};
+  const accessUpdates = {};
+  Object.keys(allAccess).forEach(pid => { if (allAccess[pid] && allAccess[pid][uid]) accessUpdates[`access/${pid}/${uid}`] = null; });
+  const allCommercial = (await db.ref("commercialAccess").once("value")).val() || {};
+  const commUpdates = {};
+  Object.keys(allCommercial).forEach(pid => { if (allCommercial[pid] && allCommercial[pid][uid]) commUpdates[`commercialAccess/${pid}/${uid}`] = null; });
+
+  const updates = { ...accessUpdates, ...commUpdates, [`users/${uid}`]: null };
+  await db.ref().update(updates);
+  await writeAuditEntry(caller.id, "delete_user", uid, { email: target.email, role: target.role });
+  return { ok: true };
+});
+
+exports.adminSetRole = functions.https.onCall(async (data, context) => {
+  const caller = await requireAdmin(context);
+  const { uid, role } = data || {};
+  if (!uid || !role) throw new functions.https.HttpsError("invalid-argument", "uid and role required.");
+  if (role !== "user" && role !== "admin") throw new functions.https.HttpsError("invalid-argument", "role must be 'user' or 'admin'.");
+  const target = (await db.ref(`users/${uid}`).once("value")).val();
+  if (!target) throw new functions.https.HttpsError("not-found", "User not found.");
+  if (role === "admin" && !/@instrumental\.com$/i.test((target.email || "").toLowerCase())) {
+    throw new functions.https.HttpsError("failed-precondition", "Only @instrumental.com users can be admins.");
+  }
+  const updates = { [`users/${uid}/role`]: role };
+  if (role === "admin") updates[`users/${uid}/partyId`] = "instrumental";
+  await db.ref().update(updates);
+  await writeAuditEntry(caller.id, "set_role", uid, { oldRole: target.role, newRole: role, email: target.email });
+  return { ok: true };
+});
+
+exports.adminSetProjectAccess = functions.https.onCall(async (data, context) => {
+  const caller = await requireAdmin(context);
+  const { uid, projectId, grant } = data || {};
+  if (!uid || !projectId) throw new functions.https.HttpsError("invalid-argument", "uid and projectId required.");
+  const target = (await db.ref(`users/${uid}`).once("value")).val();
+  if (!target) throw new functions.https.HttpsError("not-found", "User not found.");
+
+  const nextProjects = new Set(target.projects || []);
+  if (grant) nextProjects.add(projectId); else nextProjects.delete(projectId);
+  const needsAccessMap = target.role !== "admin" && !/@instrumental\.com$/i.test((target.email || "").toLowerCase());
+
+  const updates = { [`users/${uid}/projects`]: Array.from(nextProjects) };
+  if (needsAccessMap) updates[`access/${projectId}/${uid}`] = grant ? true : null;
+  await db.ref().update(updates);
+  await writeAuditEntry(caller.id, grant ? "grant_project" : "revoke_project", uid, { projectId, email: target.email });
+  return { ok: true };
+});
+
+exports.adminSetCommercialAccess = functions.https.onCall(async (data, context) => {
+  const caller = await requireAdmin(context);
+  const { uid, projectId, grant } = data || {};
+  if (!uid || !projectId) throw new functions.https.HttpsError("invalid-argument", "uid and projectId required.");
+  await db.ref(`commercialAccess/${projectId}/${uid}`).set(grant ? true : null);
+  await writeAuditEntry(caller.id, grant ? "grant_commercial" : "revoke_commercial", uid, { projectId });
+  return { ok: true };
+});
+
+/* ── v4.1.0 placeholders (commented until HubSpot write + files scopes arrive) ──
+exports.syncHubspotWriteback = functions.https.onCall(async (data, context) => { });
+exports.syncHubspotFiles = functions.https.onCall(async (data, context) => { });
+*/
+
+/* ═══ CHAT BOT — v4.0.0: conversational chat for all authed users, scoped to accessible projects ═══ */
+exports.chatBot = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  const uid = context.auth.uid;
+  const userSnap = await db.ref(`users/${uid}`).once("value");
+  const user = userSnap.val();
+  if (!user) throw new functions.https.HttpsError("permission-denied", "User record not found.");
+
+  const { question, history } = data || {};
+  if (!question || typeof question !== "string") throw new functions.https.HttpsError("invalid-argument", "question required.");
+  if (question.length > 4000) throw new functions.https.HttpsError("invalid-argument", "question too long.");
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new functions.https.HttpsError("internal", "Anthropic API key not configured.");
+
+  // Determine which projects this user can see.
+  const isInstrumental = user.role === "admin" || user.partyId === "instrumental";
+  const allProjects = (await db.ref("appState/projects").once("value")).val() || {};
+  let accessibleProjects;
+  if (isInstrumental) {
+    accessibleProjects = Object.values(allProjects).filter(p => p);
+  } else {
+    const allowedIds = new Set(user.projects || []);
+    accessibleProjects = Object.values(allProjects).filter(p => p && allowedIds.has(p.id));
+  }
+
+  // Build context — keep small for external users (only their projects), larger for Instrumental.
+  const cap = isInstrumental ? 60 : 30;
+  const lines = [];
+  lines.push(`User: ${user.name} (${user.role}, ${user.partyId}). They have access to ${accessibleProjects.length} project(s).`);
+  accessibleProjects.slice(0, cap).forEach(p => {
+    lines.push(`• ${p.name} (${p.customer || "?"}) — pipeline: ${p.hubspotPipelineLabel || "?"}, stage: ${p.hubspotStageLabel || "?"}, status: ${p.status || "?"}, stations: ${p.stations || 0}${p.isSI ? ", SI" : ""}`);
+  });
+
+  const systemPrompt = `You are a friendly AI assistant for Instrumental's Deployment Portal. You help ${isInstrumental ? "the Customer Experience team" : "external partners (customers, SI, CM)"} with questions about their hardware deployment projects. Use the data below. If the user asks about something outside their accessible projects or beyond the data, say so politely.
+
+ACCESSIBLE PROJECTS:
+${lines.join("\n")}
+
+Be conversational, concise, and helpful. Use the user's name (${user.name.split(" ")[0]}) occasionally. Format lists with bullets when listing multiple things.`;
+
+  const trimmedHistory = Array.isArray(history) ? history.slice(-12).filter(m => m && m.role && m.text) : [];
+  const messages = [
+    ...trimmedHistory.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: String(m.text).slice(0, 4000) })),
+    { role: "user", content: question.trim() },
+  ];
+
+  try {
+    const Anthropic = require("@anthropic-ai/sdk");
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages,
+    });
+    const answer = response.content?.[0]?.text || "No response generated.";
+    return { answer };
+  } catch (err) {
+    console.error("chatBot error:", err);
+    throw new functions.https.HttpsError("internal", "AI service error: " + (err.message || String(err)));
+  }
+});
+
+/* ═══ GLOBAL AI SEARCH/CHAT — v4.0.0: cross-project Q&A for Instrumental users ═══ */
+/* Differs from askProjectBot: no projectId required; aggregates all active projects + their key data. */
+exports.askGlobalBot = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+
+  const userSnap = await db.ref(`users/${context.auth.uid}`).once("value");
+  const user = userSnap.val();
+  const email = (context.auth.token?.email || "").toLowerCase();
+  if (user?.role !== "admin" && !email.endsWith("@instrumental.com")) {
+    throw new functions.https.HttpsError("permission-denied", "Instrumental users only.");
+  }
+
+  const { question, history } = data || {};
+  if (!question || typeof question !== "string") throw new functions.https.HttpsError("invalid-argument", "question required.");
+  if (question.length > 4000) throw new functions.https.HttpsError("invalid-argument", "question too long.");
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new functions.https.HttpsError("internal", "Anthropic API key not configured. Add ANTHROPIC_API_KEY to functions/.env");
+
+  // Pull cross-project context. Cap to avoid huge prompts.
+  const [projSnap, docSnap, overviewSnap] = await Promise.all([
+    db.ref("appState/projects").once("value"),
+    db.ref("appState/docData").once("value"),
+    db.ref("appState/projectOverview").once("value"),
+  ]);
+  const projects = projSnap.val() || {};
+  const docData = docSnap.val() || {};
+  const overviews = overviewSnap.val() || {};
+
+  const projArr = Object.values(projects).filter(p => p && p.status === "active").slice(0, 80);
+  const lines = [];
+  lines.push(`There are ${Object.keys(projects).length} total projects. ${projArr.length} active projects summarized below.`);
+  projArr.forEach(p => {
+    const ov = overviews[p.id] || {};
+    const pdd = docData[p.id] || {};
+    const pdCats = pdd.projectDetails || [];
+    const pdArr = Array.isArray(pdCats) ? pdCats : Object.values(pdCats);
+    let totalItems = 0, doneItems = 0;
+    pdArr.forEach(c => {
+      if (c?.type === "checklist" && c.milestones) {
+        c.milestones.forEach(ms => (ms.checklist || []).forEach(ck => { if (!ck.na) { totalItems++; if (ck.checked) doneItems++; } }));
+      }
+    });
+    const hwOv = pdd._hardwareOverride || {};
+    const cameras = parseInt((hwOv.cameras?.value ?? p.hardware?.cameras ?? "").toString().match(/\d+/)?.[0] || "0");
+    const computers = parseInt((hwOv.computers?.value ?? p.hardware?.computers ?? "").toString().match(/\d+/)?.[0] || "0");
+    lines.push(`• ${p.name} (${p.customer || "?"}) — ${p.hubspotPipelineLabel || "?"} → ${p.hubspotStageLabel || "?"}; ${p.isSI ? "SI; " : ""}stations:${p.stations || 0}; cameras:${cameras}; computers:${computers}; checklist:${doneItems}/${totalItems}; CSProgID:${p.csProgramId || "—"}; status:"${(ov.projectStatus || "").substring(0, 120)}"`);
+  });
+
+  const systemPrompt = `You are an AI assistant for Instrumental's Deployment Portal, helping the Customer Experience team manage hardware deployment projects across all customers. You can answer questions that span multiple projects — e.g. "which projects are blocked", "what's our total camera demand", "list projects in CAD review". Use only the data below. If a question can't be answered from this data, say so plainly.
+
+PROJECT DATA:
+${lines.join("\n")}
+
+Keep answers concise and actionable. Use bullet points or short tables when listing multiple projects. Reference projects by name, not ID.`;
+
+  // Build messages array including conversation history (capped).
+  const trimmedHistory = Array.isArray(history) ? history.slice(-10).filter(m => m && m.role && m.text) : [];
+  const messages = [
+    ...trimmedHistory.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: String(m.text).slice(0, 4000) })),
+    { role: "user", content: question.trim() },
+  ];
+
+  try {
+    const Anthropic = require("@anthropic-ai/sdk");
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages,
+    });
+    const answer = response.content?.[0]?.text || "No response generated.";
+    await writeAuditEntry(context.auth.uid, "global_bot_query", null, { qLen: question.length });
+    return { answer };
+  } catch (err) {
+    console.error("Global Bot error:", err);
+    throw new functions.https.HttpsError("internal", "AI service error: " + (err.message || String(err)));
+  }
+});
+

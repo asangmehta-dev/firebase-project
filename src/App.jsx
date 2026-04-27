@@ -6,8 +6,35 @@ import { httpsCallable } from "firebase/functions";
 import { PIPELINES, STAGES, PIPELINE_LIST } from "./hubspotConfig";
 
 /* ═══ DB HELPERS ═══ */
-const dbRead = (p) => new Promise((r) => { onValue(ref(db, p), (s) => r(s.val()), { onlyOnce: true }); });
+const dbRead = (p) => new Promise((resolve, reject) => { onValue(ref(db, p), (s) => resolve(s.val()), (e) => reject(e), { onlyOnce: true }); });
 const dbWrite = (p, d) => set(ref(db, p), d);
+
+/* URL validation — block javascript:/data:/vbscript:/file:, require https://. Empty string allowed (clears field). */
+const sanitizeUrl = (u) => {
+  if (u == null || u === "") return "";
+  const t = String(u).trim();
+  if (!t) return "";
+  if (/^(javascript|data|vbscript|file):/i.test(t)) return null;
+  if (!/^https:\/\//i.test(t)) return null;
+  if (t.length > 2048) return null;
+  return t;
+};
+// Wrap input handlers for URL fields. Returns null if invalid (caller alerts + rejects).
+const commitUrl = (raw) => {
+  if (raw === "" || raw == null) return "";
+  const clean = sanitizeUrl(raw);
+  if (clean === null) { alert("Invalid URL. Must start with https:// — javascript:, data:, and file: are blocked."); return null; }
+  return clean;
+};
+
+/* Cloud Function callables — v4.0.0 admin + provisioning */
+const callProvisionUser = () => httpsCallable(functions, "provisionUser")();
+const callAdminApprove = (pendingId, projectIds) => httpsCallable(functions, "adminApproveUser")({ pendingId, projectIds });
+const callAdminDeny = (pendingId) => httpsCallable(functions, "adminDenyUser")({ pendingId });
+const callAdminDelete = (uid) => httpsCallable(functions, "adminDeleteUser")({ uid });
+const callAdminSetRole = (uid, role) => httpsCallable(functions, "adminSetRole")({ uid, role });
+const callAdminSetProjectAccess = (uid, projectId, grant) => httpsCallable(functions, "adminSetProjectAccess")({ uid, projectId, grant });
+const callAdminSetCommercialAccess = (uid, projectId, grant) => httpsCallable(functions, "adminSetCommercialAccess")({ uid, projectId, grant });
 
 /* ═══ CONSTANTS ═══ */
 const BELT_LEVELS = { white: { name: "White Belt", color: "#64748B", icon: "○" }, blue: { name: "Blue Belt", color: "#3B82F6", icon: "◐" }, black: { name: "Black Belt", color: "#1E293B", icon: "●" } };
@@ -19,6 +46,21 @@ const LANGUAGES = [
   { id: "zh-cn", label: "简体中文", flag: "🇨🇳", short: "简" },
 ];
 const HW_TYPES = ["Camera", "Lens", "Station Computer"];
+const SI_PIPELINE_STAGES = [
+  { id: "sird_drafting", label: "SIRD Drafting", color: "#00C9A7" },
+  { id: "sird_approved", label: "SIRD Approved", color: "#3B82F6" },
+  { id: "dfm_si", label: "DFM (SI)", color: "#F59E0B" },
+  { id: "dfm_approved", label: "DFM Approved", color: "#A855F7" },
+  { id: "quote_received", label: "Quote Received", color: "#0284C7" },
+  { id: "quote_approved", label: "Quote Approved", color: "#DC2626" },
+  { id: "po_issued", label: "PO Issued", color: "#64748B" },
+  { id: "build", label: "Build", color: "#059669" },
+  { id: "fat", label: "FAT", color: "#F59E0B" },
+  { id: "shipped", label: "Shipped", color: "#3B82F6" },
+  { id: "sat", label: "SAT", color: "#A855F7" },
+  { id: "warranty", label: "Warranty / Legal", color: "#DC2626" },
+  { id: "complete", label: "Deployment Complete", color: "#059669" },
+];
 const SEED_PROJECTS = [
   { id: "proj_nvidia_1", name: "NVIDIA — HGX B200 Inspection", customer: "NVIDIA", status: "active", stations: 0, isSI: true },
   { id: "proj_aws_1", name: "AWS — Trainium Board QC", customer: "AWS", status: "active", stations: 0, isSI: false },
@@ -295,6 +337,13 @@ const isExternal = (u) => u && u.role !== "admin" && !(u.email || "").endsWith("
 const projectsToArray = (v) => !v ? [] : (Array.isArray(v) ? v : Object.values(v));
 // Parse hardware field from HubSpot — could be number, numeric string, or descriptive string
 const parseHwCount = (v) => { if (v == null || v === "") return 0; if (typeof v === "number") return v; const m = String(v).match(/\d+/); return m ? parseInt(m[0]) : 0; };
+// v4.0.0: effective hardware count — docData override (Instrumental-writable) wins over HubSpot suggestion.
+const getEffectiveHw = (project, key, docData) => {
+  const ov = docData?.[project?.id]?._hardwareOverride?.[key];
+  if (ov && ov.value != null) return ov.value;
+  return project?.hardware?.[key];
+};
+const getEffectiveHwCount = (project, key, docData) => parseHwCount(getEffectiveHw(project, key, docData));
 // Standard HubSpot-synced hardware fields → display labels
 const HUBSPOT_HW_FIELDS = [
   { key: "cameras", label: "Cameras" },
@@ -397,6 +446,8 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
         </button>
         {/* Training */}
         <button onClick={() => setView("training")} style={{ ...S.navBtn, ...navActive("training") }}>🎓 Training</button>
+        {/* AI Chat — available to all authenticated users */}
+        <button onClick={() => setView("chat")} style={{ ...S.navBtn, ...navActive("chat") }}>💬 AI Chat</button>
         {/* Admin only */}
         {admin && (<>
           <div style={S.divider} />
@@ -556,17 +607,167 @@ function DashboardView({ user, project, state, setState, lang = "en", setView })
       </div>
 
       {/* Hardware — HubSpot-synced (read-only) + Custom manual entries */}
+      {/* Gantt chart — visible for all projects with dates */}
+      <GanttChart project={project} state={state} />
+
+      {/* SI-specific details */}
+      {project.isSI && (
+        <div style={{ ...S.card, marginTop: 16, borderLeft: "3px solid #3B82F6" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#3B82F6", fontFamily: F, marginBottom: 8 }}>SI Deployment Details</div>
+          <div style={S.miniStat}><span>SI Pipeline Stage</span><strong>{SI_PIPELINE_STAGES.find(s => s.id === (project.siStage || "sird_drafting"))?.label || "SIRD Drafting"}</strong></div>
+          <div style={S.miniStat}><span>Checklist Completion</span><strong>{(() => { const cats = getProjectDetails(state.docData, project.id); const all = cats.filter(c => c.type === "checklist").flatMap(c => (c.milestones||[]).flatMap(ms => ms.checklist||[])); const active = all.filter(ck => !ck.na); const done = active.filter(ck => ck.checked); return active.length > 0 ? `${Math.round(done.length / active.length * 100)}% (${done.length}/${active.length})` : "—"; })()}</strong></div>
+          <div style={S.miniStat}><span>Stations</span><strong>{project.stations || 0}</strong></div>
+        </div>
+      )}
+
+      <ProjectOverviewSection project={project} state={state} setState={setState} user={user} />
       <ProjectHardwareSection project={project} state={state} setState={setState} user={user} />
     </div>
   );
 }
 
-/* ═══ PROJECT HARDWARE SECTION — HubSpot read-only + Custom editable ═══ */
+/* ═══ PROJECT OVERVIEW SECTION — v4.0.0: 8 fields, pull-only from HubSpot, writeback in v4.1.0 ═══ */
+function ProjectOverviewSection({ project, state, setState, user }) {
+  const canEdit = isInst(user);
+  const pid = project?.id;
+  const overview = state.projectOverview?.[pid] || {};
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(overview);
+  const [botLoading, setBotLoading] = useState(false);
+  useEffect(() => { setDraft(overview); }, [overview, pid]);
+
+  const save = () => {
+    if (!canEdit || !pid) return;
+    const next = { ...draft, updatedAt: new Date().toISOString(), updatedBy: user.name };
+    setState(prev => ({ ...prev, projectOverview: { ...(prev.projectOverview||{}), [pid]: next } }));
+    setEditing(false);
+  };
+
+  // v4.0.0: AI-drafted project status. Calls existing askProjectBot CF with a tailored prompt.
+  // Drops the answer into the draft.projectStatus textarea for the user to review before saving.
+  const askBotForStatus = async () => {
+    if (!canEdit || !pid) return;
+    setBotLoading(true);
+    try {
+      const fn = httpsCallable(functions, "askProjectBot");
+      const res = await fn({
+        projectId: pid,
+        question: "Draft a concise project status update (3-6 bullet points). Include: current phase/stage, what was done recently, what's next (with owner if known), and any blockers. Format as plain text, one bullet per line starting with '• '. Keep to ~120 words.",
+      });
+      const answer = res?.data?.answer;
+      if (answer) setDraft(d => ({ ...d, projectStatus: answer }));
+      if (!editing) setEditing(true);
+    } catch (e) {
+      alert("Bot error: " + (e.message || String(e)));
+    }
+    setBotLoading(false);
+  };
+
+  // HubSpot-synced fields (pull-only in v4.0.0, read from project)
+  const csProgramId = project.csProgramId || "";
+  const targetBuildAtDealClose = project.targetBuildDateAtDealClose || ""; // HubSpot property wiring pending — see REBUILD_4.0.0
+
+  const WRITABLE = [
+    { key: "cadCompleteDate", label: "CAD Complete Date", type: "date" },
+    { key: "cadActualFinishDate", label: "CAD Actual Finish Date", type: "date" },
+    { key: "actualServiceStartDate", label: "Actual Service Start Date", type: "date" },
+    { key: "targetBuildDate", label: "Target Build Date", type: "date" },
+    { key: "actualDeployDate", label: "Actual Deploy Date", type: "date" },
+  ];
+
+  const Field = ({ label, value, placeholder, readOnly, badge }) => (
+    <div style={{ padding: "10px 14px", background: readOnly ? "#FFF4F0" : "#F8FAFC", borderRadius: 8, border: `1px solid ${readOnly ? "#FED7AA" : "#F1F5F9"}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+        <div style={{ fontSize: 11, color: "#64748B", fontFamily: F, textTransform: "uppercase", letterSpacing: .5, fontWeight: 600 }}>{label}</div>
+        {badge && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "#FFEDD5", color: "#C2410C", fontWeight: 600 }}>{badge}</span>}
+      </div>
+      <div style={{ fontSize: 14, fontWeight: 600, color: value ? "#0F172A" : "#CBD5E1", fontFamily: F, marginTop: 2 }}>{value || placeholder || "—"}</div>
+    </div>
+  );
+
+  return (
+    <div style={{ marginTop: 24 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, paddingBottom: 8, borderBottom: "2px solid #F1F5F9" }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F }}>Project Overview</div>
+        {canEdit && !editing && <button onClick={() => setEditing(true)} style={{ padding: "4px 12px", fontSize: 12, border: "1px solid #E2E8F0", borderRadius: 6, background: "#FFF", cursor: "pointer", fontFamily: F, color: "#3B82F6" }}>✎ Edit</button>}
+        {canEdit && editing && (
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={save} style={{ padding: "4px 12px", fontSize: 12, border: "none", borderRadius: 6, background: "#00C9A7", color: "#FFF", cursor: "pointer", fontFamily: F, fontWeight: 600 }}>Save</button>
+            <button onClick={() => { setDraft(overview); setEditing(false); }} style={{ padding: "4px 12px", fontSize: 12, border: "1px solid #E2E8F0", borderRadius: 6, background: "#FFF", cursor: "pointer", fontFamily: F }}>Cancel</button>
+          </div>
+        )}
+      </div>
+      <div style={{ ...S.card, marginBottom: 12 }}>
+        <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F, marginBottom: 10 }}>Key project dates and status. {canEdit ? "Editable fields are source-of-truth in the webapp; writeback to HubSpot arrives in v4.1.0." : ""}</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+          {WRITABLE.map(f => editing ? (
+            <div key={f.key} style={{ padding: "10px 14px", background: "#F8FAFC", borderRadius: 8, border: "1px solid #F1F5F9" }}>
+              <div style={{ fontSize: 11, color: "#64748B", fontFamily: F, textTransform: "uppercase", letterSpacing: .5, fontWeight: 600, marginBottom: 4 }}>{f.label}</div>
+              <input type={f.type} style={{ ...S.inp, padding: "4px 8px", fontSize: 13 }} value={draft[f.key] || ""} onChange={e => setDraft(d => ({ ...d, [f.key]: e.target.value }))} />
+            </div>
+          ) : <Field key={f.key} label={f.label} value={overview[f.key] ? fmtDay(overview[f.key]) : ""} />)}
+          <Field label="Target Build Date at Deal Close" value={targetBuildAtDealClose ? fmtDay(targetBuildAtDealClose) : ""} readOnly badge="HubSpot" />
+          <Field label="Associated CS Program ID" value={csProgramId} readOnly badge="HubSpot" />
+        </div>
+
+        {/* Project Status + Next Steps */}
+        <div style={{ marginTop: 16, padding: "12px 14px", background: "#F8FAFC", borderRadius: 8, border: "1px solid #F1F5F9" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, gap: 8, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 11, color: "#64748B", fontFamily: F, textTransform: "uppercase", letterSpacing: .5, fontWeight: 600 }}>Project Status & Next Steps</div>
+            {canEdit && (
+              <button onClick={askBotForStatus} disabled={botLoading} style={{ padding: "3px 10px", fontSize: 11, border: "1px solid #A7F3D0", borderRadius: 6, background: botLoading ? "#F1F5F9" : "#ECFDF5", color: botLoading ? "#94A3B8" : "#059669", cursor: botLoading ? "wait" : "pointer", fontFamily: F, fontWeight: 600 }}>{botLoading ? "Bot drafting…" : "🤖 Ask Bot to draft"}</button>
+            )}
+          </div>
+          {editing ? (
+            <textarea rows={6} style={{ ...S.inp, fontSize: 13, fontFamily: F, width: "100%" }} value={draft.projectStatus || ""} onChange={e => setDraft(d => ({ ...d, projectStatus: e.target.value }))} placeholder="Overall status, next steps, owners…" />
+          ) : (
+            <div style={{ fontSize: 14, color: overview.projectStatus ? "#1E293B" : "#CBD5E1", fontFamily: F, whiteSpace: "pre-wrap" }}>{overview.projectStatus || "No status recorded. Click '🤖 Ask Bot to draft' to generate one from the project's checklists, program tasks, and HubSpot data."}</div>
+          )}
+        </div>
+
+        {overview.updatedAt && (
+          <div style={{ fontSize: 11, color: "#94A3B8", fontFamily: F, marginTop: 8, textAlign: "right" }}>
+            Updated {fmtDate(overview.updatedAt)}{overview.updatedBy ? ` by ${overview.updatedBy}` : ""}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ═══ PROJECT HARDWARE SECTION — v4.0.0: HubSpot suggestion + manual override ═══ */
+/* Override model: docData/{pid}/_hardwareOverride[key] = { value, overriddenAt, overriddenBy } wins over HubSpot synced value. */
+/* Stored in docData (not on project) so Instrumental users can write without needing appState/projects admin write. */
 function ProjectHardwareSection({ project, state, setState, user }) {
   const canEdit = isInst(user);
   const customTypes = state.demandCustomTypes || {};
   const hw = project.hardware || {};
-  const hsRows = HUBSPOT_HW_FIELDS.map(f => ({ ...f, value: hw[f.key], count: parseHwCount(hw[f.key]) })).filter(r => r.count > 0 || r.value);
+  const overrides = state.docData?.[project.id]?._hardwareOverride || {};
+  const [editing, setEditing] = useState(null);
+  const [draftVal, setDraftVal] = useState("");
+
+  const hsRows = HUBSPOT_HW_FIELDS.map(f => {
+    const suggestion = hw[f.key];
+    const suggestedCount = parseHwCount(suggestion);
+    const ov = overrides[f.key];
+    const activeValue = ov && ov.value != null ? ov.value : suggestion;
+    const activeCount = parseHwCount(activeValue);
+    return { ...f, suggestion, suggestedCount, override: ov, activeValue, activeCount };
+  }).filter(r => r.suggestedCount > 0 || r.suggestion || r.override);
+
+  const saveOverride = (key, value) => {
+    if (!canEdit) return;
+    setState(prev => {
+      const pid = project.id;
+      const pdd = prev.docData?.[pid] || {};
+      const ov = { ...(pdd._hardwareOverride || {}) };
+      if (value === "" || value == null) { delete ov[key]; }
+      else { ov[key] = { value: String(value), overriddenAt: new Date().toISOString(), overriddenBy: user.name }; }
+      return { ...prev, docData: { ...prev.docData, [pid]: { ...pdd, _hardwareOverride: ov } } };
+    });
+    setEditing(null); setDraftVal("");
+  };
+
   const updateCustomCount = (typeId, val) => {
     if (!canEdit) return;
     const n = parseInt(val) || 0;
@@ -584,23 +785,52 @@ function ProjectHardwareSection({ project, state, setState, user }) {
     <div style={{ marginTop: 24 }}>
       <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 12, paddingBottom: 8, borderBottom: "2px solid #F1F5F9" }}>Hardware</div>
 
-      {/* HubSpot-synced, read-only */}
+      {/* HubSpot-synced with override support (v4.0.0) */}
       <div style={{ ...S.card, marginBottom: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-          <Chip small color="#FFF4F0" fg="#FF7A59">Synced from HubSpot · Read-only</Chip>
-          <span style={{ fontSize: 12, color: "#94A3B8", fontFamily: F }}>To change values, edit in HubSpot directly.</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+          <Chip small color="#FFF4F0" fg="#FF7A59">HubSpot suggestion</Chip>
+          <span style={{ fontSize: 12, color: "#94A3B8", fontFamily: F }}>{canEdit ? "Click ✎ to override. Overrides become the source of truth." : "HubSpot values can be overridden by Instrumental."}</span>
         </div>
         {hsRows.length === 0 ? (
           <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>No hardware synced from HubSpot for this project yet.</div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
-            {hsRows.map(r => (
-              <div key={r.key} style={{ padding: "10px 14px", background: "#F8FAFC", borderRadius: 8, border: "1px solid #F1F5F9" }}>
-                <div style={{ fontSize: 11, color: "#64748B", fontFamily: F, textTransform: "uppercase", letterSpacing: .5, fontWeight: 600 }}>{r.label}</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: "#0F172A", fontFamily: F, marginTop: 2 }}>{r.count || "—"}</div>
-                {typeof r.value === "string" && r.value !== String(r.count) && <div style={{ fontSize: 11, color: "#94A3B8", fontFamily: F, marginTop: 2 }}>{r.value}</div>}
-              </div>
-            ))}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+            {hsRows.map(r => {
+              const isOverridden = !!r.override;
+              const isEditing = editing === r.key;
+              return (
+                <div key={r.key} style={{ padding: "10px 14px", background: isOverridden ? "#EEF2FF" : "#F8FAFC", borderRadius: 8, border: `1px solid ${isOverridden ? "#C7D2FE" : "#F1F5F9"}` }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                    <div style={{ fontSize: 11, color: "#64748B", fontFamily: F, textTransform: "uppercase", letterSpacing: .5, fontWeight: 600 }}>{r.label}</div>
+                    {canEdit && !isEditing && (
+                      <button onClick={() => { setEditing(r.key); setDraftVal(r.activeValue != null ? String(r.activeValue) : ""); }} style={{ padding: "2px 6px", fontSize: 10, border: "1px solid #E2E8F0", borderRadius: 4, background: "#FFF", cursor: "pointer", fontFamily: F }} title="Override">✎</button>
+                    )}
+                  </div>
+                  {isEditing ? (
+                    <div style={{ marginTop: 4 }}>
+                      <input autoFocus style={{ ...S.inp, padding: "4px 8px", fontSize: 14 }} value={draftVal} onChange={e => setDraftVal(e.target.value)} onKeyDown={e => { if (e.key === "Enter") saveOverride(r.key, draftVal); if (e.key === "Escape") { setEditing(null); setDraftVal(""); } }} />
+                      <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+                        <button onClick={() => saveOverride(r.key, draftVal)} style={{ padding: "2px 8px", fontSize: 11, background: "#00C9A7", color: "#FFF", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: F }}>Save</button>
+                        {isOverridden && <button onClick={() => saveOverride(r.key, null)} style={{ padding: "2px 8px", fontSize: 11, background: "#FEE2E2", color: "#B91C1C", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: F }}>Clear</button>}
+                        <button onClick={() => { setEditing(null); setDraftVal(""); }} style={{ padding: "2px 8px", fontSize: 11, background: "#F1F5F9", color: "#64748B", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: F }}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "#0F172A", fontFamily: F, marginTop: 2 }}>{r.activeCount || "—"}</div>
+                      {isOverridden && (
+                        <div style={{ fontSize: 10, color: "#6366F1", fontFamily: F, marginTop: 2 }}>
+                          Override · was {r.suggestedCount || "—"} from HubSpot
+                        </div>
+                      )}
+                      {!isOverridden && typeof r.suggestion === "string" && r.suggestion !== String(r.suggestedCount) && (
+                        <div style={{ fontSize: 11, color: "#94A3B8", fontFamily: F, marginTop: 2 }}>{r.suggestion}</div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -654,7 +884,8 @@ function ProjectDetailsView({ user, project, state, setState, lang = "en" }) {
   const delFolder = (catId) => { if (!confirm("Delete this folder?")) return; updateCats(cats.filter(c => c.id !== catId)); };
   const addItem = (catId) => {
     if (!itemForm.name.trim()) return;
-    const item = { id: genId(), name: itemForm.name.trim(), url: itemForm.url.trim(), type: itemForm.type, lang: itemForm.lang, addedBy: user.name, addedAt: new Date().toISOString() };
+    const url = commitUrl(itemForm.url); if (url === null) return;
+    const item = { id: genId(), name: itemForm.name.trim(), url, type: itemForm.type, lang: itemForm.lang, addedBy: user.name, addedAt: new Date().toISOString() };
     updateCats(cats.map(c => c.id !== catId ? c : { ...c, items: [...(c.items||[]), item] }));
     setItemForm({ name: "", url: "", type: "link", lang: "en" }); setAddingItem(null);
   };
@@ -794,7 +1025,7 @@ function ChecklistSection({ cat, cats, updateCats, user, canEdit, pid, lang }) {
                           {canEdit ? <input type="date" style={{ ...S.inp, padding: "2px 4px", fontSize: 11, width: "100%" }} value={ck.actualDate || ""} onChange={e => updateField(ms.id, ck.id, "actualDate", e.target.value)} /> : <span style={{ fontSize: 11 }}>{ck.actualDate || "—"}</span>}
                         </td>
                         <td style={{ ...S.td, padding: "6px 4px", textAlign: "center" }}>
-                          {ck.sopLink ? <a href={ck.sopLink} target="_blank" rel="noopener noreferrer" style={{ color: "#0284C7", fontSize: 11 }}>Link</a> : (canEdit ? <input style={{ ...S.inp, padding: "2px 4px", fontSize: 11, width: "100%" }} value="" onChange={e => updateField(ms.id, ck.id, "sopLink", e.target.value)} placeholder="URL" /> : "—")}
+                          {ck.sopLink ? <a href={ck.sopLink} target="_blank" rel="noopener noreferrer" style={{ color: "#0284C7", fontSize: 11 }}>Link</a> : (canEdit ? <input style={{ ...S.inp, padding: "2px 4px", fontSize: 11, width: "100%" }} defaultValue="" onBlur={e => { const v = e.target.value; if (!v) return; const clean = commitUrl(v); if (clean) updateField(ms.id, ck.id, "sopLink", clean); else e.target.value = ""; }} placeholder="https://..." /> : "—")}
                         </td>
                         <td style={{ ...S.td, padding: "6px 4px", textAlign: "center" }}>
                           {canEdit && <button style={{ border: "none", background: ck.na ? "#FEF3C7" : "#F1F5F9", color: ck.na ? "#D97706" : "#94A3B8", fontSize: 10, borderRadius: 4, padding: "2px 6px", cursor: "pointer", fontFamily: F }} onClick={() => toggleNA(ms.id, ck.id)}>{ck.na ? "N/A" : "—"}</button>}
@@ -941,7 +1172,8 @@ function CommercialView({ user, project, state, setState, lang = "en" }) {
   const updateCats = (newCats) => setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), commercial: newCats } } }));
   const addItem = (catId) => {
     if (!itemForm.name.trim()) return;
-    const item = { id: genId(), name: itemForm.name.trim(), url: itemForm.url.trim(), type: itemForm.type, addedBy: user.name, addedAt: new Date().toISOString() };
+    const url = commitUrl(itemForm.url); if (url === null) return;
+    const item = { id: genId(), name: itemForm.name.trim(), url, type: itemForm.type, addedBy: user.name, addedAt: new Date().toISOString() };
     updateCats(cats.map(c => c.id !== catId ? c : { ...c, items: [...(c.items||[]), item] }));
     setItemForm({ name: "", url: "", type: "link" }); setAddingItem(null);
   };
@@ -1000,7 +1232,7 @@ function TrainingView({ user, project, state, setState, lang = "en" }) {
 
   const updateTraining = (data) => setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), _training: data } } }));
   const toggleEnabled = () => updateTraining({ ...trainingData, enabled: !enabled });
-  const addMaterial = () => { if (!matForm.name.trim()) return; updateTraining({ ...trainingData, materials: [...materials, { id: genId(), ...matForm, addedBy: user.name, addedAt: new Date().toISOString() }] }); setMatForm({ name: "", url: "", belt: "white" }); setAddMat(false); };
+  const addMaterial = () => { if (!matForm.name.trim()) return; const url = commitUrl(matForm.url); if (url === null) return; updateTraining({ ...trainingData, materials: [...materials, { id: genId(), ...matForm, url, addedBy: user.name, addedAt: new Date().toISOString() }] }); setMatForm({ name: "", url: "", belt: "white" }); setAddMat(false); };
   const delMaterial = (id) => updateTraining({ ...trainingData, materials: materials.filter(m => m.id !== id) });
   const assignBelt = (uid, belt) => updateTraining({ ...trainingData, assignments: { ...assignments, [uid]: belt } });
   const removeBelt = (uid) => { const next = { ...assignments }; delete next[uid]; updateTraining({ ...trainingData, assignments: next }); };
@@ -1101,12 +1333,362 @@ function TrainingView({ user, project, state, setState, lang = "en" }) {
   );
 }
 
+/* ═══ AI BOT CHAT — v3.3.0: per-project Q&A for Instrumental users ═══ */
+/* ═══ CHAT VIEW — v4.0.0: full-page conversational chatbot, available to all authed users ═══ */
+function ChatView({ user }) {
+  const [messages, setMessages] = useState([
+    { role: "assistant", text: `Hi ${user.name.split(" ")[0]} — I'm the Deployment Portal AI assistant. Ask me anything about your projects: status, milestones, hardware, who owns what. I'll do my best to help.` },
+  ]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const send = async () => {
+    const q = input.trim();
+    if (!q || loading) return;
+    setInput("");
+    const next = [...messages, { role: "user", text: q }];
+    setMessages(next);
+    setLoading(true);
+    try {
+      const fn = httpsCallable(functions, "chatBot");
+      const res = await fn({ question: q, history: messages });
+      setMessages(prev => [...prev, { role: "assistant", text: res.data?.answer || "No response." }]);
+    } catch (e) {
+      setMessages(prev => [...prev, { role: "assistant", text: "Sorry — I hit an error: " + (e.message || String(e)) }]);
+    }
+    setLoading(false);
+  };
+
+  const suggestions = isInst(user)
+    ? ["Which projects are blocked?", "Summarize all active deployments", "What's our total camera demand?", "Which projects have CAD pending?"]
+    : ["What's the status of my projects?", "What milestones are coming up?", "Who owns the next steps?", "When is my project's expected deploy date?"];
+
+  return (
+    <div style={{ ...S.page, maxWidth: 900 }}>
+      <h2 style={S.h2}>💬 AI Chat</h2>
+      <p style={S.sub}>Conversational assistant for your projects. Powered by Claude.</p>
+
+      <div style={{ ...S.card, padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", height: "calc(100vh - 240px)", minHeight: 460 }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: 20, background: "#FAFAFA" }}>
+          {messages.map((m, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start", marginBottom: 12 }}>
+              <div style={{ maxWidth: "78%", padding: "10px 14px", borderRadius: 12, background: m.role === "user" ? "#00C9A7" : "#FFF", color: m.role === "user" ? "#FFF" : "#0F172A", fontSize: 14, fontFamily: F, whiteSpace: "pre-wrap", border: m.role === "assistant" ? "1px solid #E2E8F0" : "none", lineHeight: 1.55, boxShadow: m.role === "assistant" ? "0 1px 2px rgba(0,0,0,.04)" : "none" }}>
+                {m.text}
+              </div>
+            </div>
+          ))}
+          {loading && (
+            <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 12 }}>
+              <div style={{ padding: "10px 14px", borderRadius: 12, background: "#FFF", color: "#94A3B8", fontSize: 13, fontFamily: F, border: "1px solid #E2E8F0", fontStyle: "italic" }}>thinking…</div>
+            </div>
+          )}
+        </div>
+
+        {messages.length <= 2 && !loading && (
+          <div style={{ padding: "10px 16px", borderTop: "1px solid #E2E8F0", background: "#F8FAFC" }}>
+            <div style={{ fontSize: 11, color: "#64748B", fontFamily: F, marginBottom: 6, textTransform: "uppercase", letterSpacing: .5, fontWeight: 600 }}>Suggested questions</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {suggestions.map(s => (
+                <button key={s} onClick={() => setInput(s)} style={{ padding: "5px 10px", fontSize: 12, border: "1px solid #E2E8F0", borderRadius: 14, background: "#FFF", color: "#475569", cursor: "pointer", fontFamily: F }}>{s}</button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 8, padding: 12, borderTop: "1px solid #E2E8F0", background: "#FFF" }}>
+          <input
+            style={{ flex: 1, padding: "10px 14px", fontSize: 14, fontFamily: F, border: "1px solid #E2E8F0", borderRadius: 10, outline: "none" }}
+            placeholder="Type a message…"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+            disabled={loading}
+          />
+          <button onClick={send} disabled={loading || !input.trim()} style={{ padding: "10px 18px", fontSize: 14, fontWeight: 600, border: "none", borderRadius: 10, background: loading || !input.trim() ? "#CBD5E1" : "#00C9A7", color: "#FFF", cursor: loading || !input.trim() ? "default" : "pointer", fontFamily: F }}>Send</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ GLOBAL AI BAR — v4.0.0: cross-project chat search at top of every view (Instrumental only) ═══ */
+function GlobalBotBar({ user }) {
+  const [open, setOpen] = useState(false);
+  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  if (!isInst(user)) return null;
+
+  const ask = async () => {
+    const q = input.trim();
+    if (!q || loading) return;
+    setInput("");
+    const next = [...messages, { role: "user", text: q }];
+    setMessages(next);
+    setLoading(true);
+    setOpen(true);
+    try {
+      const fn = httpsCallable(functions, "askGlobalBot");
+      const res = await fn({ question: q, history: messages });
+      setMessages(prev => [...prev, { role: "assistant", text: res.data?.answer || "No response." }]);
+    } catch (e) {
+      setMessages(prev => [...prev, { role: "assistant", text: "Error: " + (e.message || String(e)) }]);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ position: "sticky", top: 0, zIndex: 50, background: "rgba(248,250,252,0.95)", backdropFilter: "blur(6px)", padding: "10px 24px", borderBottom: "1px solid #E2E8F0" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, maxWidth: 1100, margin: "0 auto" }}>
+        <span style={{ fontSize: 16 }}>🤖</span>
+        <input
+          style={{ flex: 1, padding: "8px 14px", fontSize: 13, fontFamily: F, border: "1px solid #E2E8F0", borderRadius: 8, background: "#FFF", outline: "none" }}
+          placeholder="Ask the AI anything across all projects — e.g. 'Which projects are blocked?' or 'Total camera demand this quarter'"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") ask(); }}
+        />
+        <button onClick={ask} disabled={loading || !input.trim()} style={{ padding: "8px 14px", fontSize: 13, fontWeight: 600, border: "none", borderRadius: 8, background: loading ? "#CBD5E1" : "#00C9A7", color: "#FFF", cursor: loading || !input.trim() ? "default" : "pointer", fontFamily: F }}>{loading ? "Thinking…" : "Ask"}</button>
+        {messages.length > 0 && (
+          <button onClick={() => setOpen(o => !o)} style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #E2E8F0", borderRadius: 6, background: "#FFF", color: "#64748B", cursor: "pointer", fontFamily: F }}>{open ? "Hide" : `Show (${messages.length})`}</button>
+        )}
+        {messages.length > 0 && (
+          <button onClick={() => { setMessages([]); setOpen(false); }} style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #FECACA", borderRadius: 6, background: "#FFF", color: "#B91C1C", cursor: "pointer", fontFamily: F }}>Clear</button>
+        )}
+      </div>
+      {open && messages.length > 0 && (
+        <div style={{ maxWidth: 1100, margin: "10px auto 0", maxHeight: 380, overflowY: "auto", padding: "8px 4px" }}>
+          {messages.map((m, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start", marginBottom: 8 }}>
+              <div style={{ maxWidth: "78%", padding: "8px 12px", borderRadius: 10, background: m.role === "user" ? "#00C9A7" : "#FFF", color: m.role === "user" ? "#FFF" : "#0F172A", fontSize: 13, fontFamily: F, whiteSpace: "pre-wrap", border: m.role === "assistant" ? "1px solid #E2E8F0" : "none", lineHeight: 1.5 }}>
+                {m.text}
+              </div>
+            </div>
+          ))}
+          {loading && <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F, textAlign: "center", padding: 6 }}>AI is thinking…</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProjectBotChat({ project, user }) {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  if (!project || !isInst(user)) return null;
+
+  const sendMessage = async () => {
+    if (!input.trim() || loading) return;
+    const q = input.trim();
+    setInput("");
+    setMessages(prev => [...prev, { role: "user", text: q }]);
+    setLoading(true);
+    try {
+      const fn = httpsCallable(functions, "askProjectBot");
+      const res = await fn({ projectId: project.id, question: q });
+      setMessages(prev => [...prev, { role: "assistant", text: res.data?.answer || "No response." }]);
+    } catch (e) {
+      setMessages(prev => [...prev, { role: "assistant", text: "Error: " + (e.message || String(e)) }]);
+    }
+    setLoading(false);
+  };
+
+  const fillSection = async (sectionId) => {
+    setMessages(prev => [...prev, { role: "user", text: `Fill section: ${sectionId}` }]);
+    setLoading(true);
+    try {
+      const fn = httpsCallable(functions, "askProjectBot");
+      const res = await fn({ projectId: project.id, action: "fill_section", sectionId });
+      setMessages(prev => [...prev, { role: "assistant", text: res.data?.answer || "No suggestions." }]);
+    } catch (e) {
+      setMessages(prev => [...prev, { role: "assistant", text: "Error: " + (e.message || String(e)) }]);
+    }
+    setLoading(false);
+  };
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} style={{ position: "fixed", bottom: 24, right: 24, width: 56, height: 56, borderRadius: 28, background: "#00C9A7", color: "#FFF", border: "none", fontSize: 24, cursor: "pointer", boxShadow: "0 4px 20px rgba(0,201,167,.4)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F }}>
+        AI
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ position: "fixed", bottom: 24, right: 24, width: 400, maxHeight: "70vh", background: "#FFF", borderRadius: 16, border: "1px solid #E2E8F0", boxShadow: "0 8px 40px rgba(0,0,0,.15)", zIndex: 200, display: "flex", flexDirection: "column", fontFamily: F }}>
+      {/* Header */}
+      <div style={{ padding: "14px 18px", borderBottom: "1px solid #F1F5F9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A" }}>AI Assistant</div>
+          <div style={{ fontSize: 12, color: "#94A3B8" }}>{project.name}</div>
+        </div>
+        <button onClick={() => setOpen(false)} style={{ border: "none", background: "none", fontSize: 18, color: "#94A3B8", cursor: "pointer" }}>✕</button>
+      </div>
+
+      {/* Messages */}
+      <div style={{ flex: 1, overflowY: "auto", padding: 14, maxHeight: "50vh" }}>
+        {messages.length === 0 && (
+          <div style={{ textAlign: "center", padding: 20 }}>
+            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 12 }}>Ask me anything about this project. I can see checklists, milestones, hardware, and documents.</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {["What's the checklist progress?", "What are the upcoming milestones?", "Summarize the project status"].map(q => (
+                <button key={q} onClick={() => { setInput(q); }} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #E2E8F0", background: "#F8FAFC", color: "#475569", fontSize: 12, cursor: "pointer", textAlign: "left", fontFamily: F }}>{q}</button>
+              ))}
+            </div>
+            <div style={{ marginTop: 12, fontSize: 12, color: "#94A3B8" }}>Or ask the AI to fill a section:</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6, justifyContent: "center" }}>
+              {["Hardware", "Program Details", "Deployment Planning"].map(s => (
+                <button key={s} onClick={() => fillSection(s)} style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #00C9A7", background: "#ECFDF5", color: "#059669", fontSize: 11, cursor: "pointer", fontFamily: F }}>Fill: {s}</button>
+              ))}
+            </div>
+          </div>
+        )}
+        {messages.map((m, i) => (
+          <div key={i} style={{ marginBottom: 10, display: "flex", flexDirection: "column", alignItems: m.role === "user" ? "flex-end" : "flex-start" }}>
+            <div style={{ maxWidth: "85%", padding: "10px 14px", borderRadius: m.role === "user" ? "14px 14px 4px 14px" : "14px 14px 14px 4px", background: m.role === "user" ? "#00C9A7" : "#F1F5F9", color: m.role === "user" ? "#FFF" : "#0F172A", fontSize: 13, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+              {m.text}
+            </div>
+          </div>
+        ))}
+        {loading && <div style={{ fontSize: 13, color: "#94A3B8", fontStyle: "italic" }}>Thinking...</div>}
+      </div>
+
+      {/* Input */}
+      <div style={{ padding: "10px 14px", borderTop: "1px solid #F1F5F9", display: "flex", gap: 8 }}>
+        <input style={{ ...S.inp, flex: 1, padding: "10px 14px", fontSize: 13 }} value={input} onChange={e => setInput(e.target.value)} placeholder="Ask about this project..." onKeyDown={e => e.key === "Enter" && sendMessage()} />
+        <button onClick={sendMessage} disabled={loading || !input.trim()} style={{ ...S.btnMain, width: "auto", padding: "10px 18px", marginTop: 0, opacity: loading || !input.trim() ? 0.5 : 1 }}>Send</button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ SI KANBAN — shows SI-flagged projects across SI pipeline stages ═══ */
+function SIKanbanView({ projects, state, setState }) {
+  const siProjects = projects.filter(p => p.isSI && p.status === "active");
+  const [draggingId, setDraggingId] = useState(null);
+  const [dragOverStage, setDragOverStage] = useState(null);
+
+  if (siProjects.length === 0) return null;
+
+  const getStage = (proj) => proj.siStage || "sird_drafting";
+  const setStage = (pid, stageId) => setState(prev => ({ ...prev, projects: (prev.projects||[]).map(p => p.id !== pid ? p : { ...p, siStage: stageId, updatedAt: new Date().toISOString() }) }));
+
+  const onDragStart = (e, projId) => { setDraggingId(projId); e.dataTransfer.effectAllowed = "move"; };
+  const onDragEnd = () => { setDraggingId(null); setDragOverStage(null); };
+  const onDragOver = (e, stageId) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOverStage(stageId); };
+  const onDragLeave = () => setDragOverStage(null);
+  const onDrop = (e, stageId) => { e.preventDefault(); if (draggingId) setStage(draggingId, stageId); setDraggingId(null); setDragOverStage(null); };
+
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <h3 style={{ ...S.h3, marginBottom: 6 }}>SI Deployment Kanban (Active SI Projects)</h3>
+      <p style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginBottom: 14 }}>Drag project cards between stages to update their position. {siProjects.length} SI project{siProjects.length !== 1 ? "s" : ""} tracked.</p>
+
+      {/* SI Process link */}
+      <a href="https://script.google.com/a/macros/instrumental.com/s/AKfycbxOAtRNRm2_-XIPPK1fPKW-O55uVtMhMZSDcdZiR4xRqRBmtYgqURhAZ8MPg3RVsvNG/exec" target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, background: "#EFF6FF", color: "#3B82F6", fontSize: 12, fontWeight: 600, textDecoration: "none", fontFamily: F, marginBottom: 14 }}>
+        SI Process, RACI & Principles ↗
+      </a>
+
+      <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 8 }}>
+        {SI_PIPELINE_STAGES.map(stage => {
+          const stageProjects = siProjects.filter(p => getStage(p) === stage.id);
+          const isOver = dragOverStage === stage.id;
+          return (
+            <div key={stage.id}
+              onDragOver={e => onDragOver(e, stage.id)}
+              onDragLeave={onDragLeave}
+              onDrop={e => onDrop(e, stage.id)}
+              style={{ minWidth: 190, maxWidth: 230, flex: "0 0 auto", background: isOver ? `${stage.color}10` : "#F8FAFC", borderRadius: 12, border: `2px solid ${isOver ? stage.color : "#F1F5F9"}`, padding: 12, transition: "all .15s" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                <div style={{ width: 8, height: 8, borderRadius: 4, background: stage.color }} />
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#0F172A", fontFamily: F }}>{stage.label}</div>
+                <Chip small color={`${stage.color}22`} fg={stage.color}>{stageProjects.length}</Chip>
+              </div>
+              {stageProjects.map(proj => (
+                <div key={proj.id}
+                  draggable
+                  onDragStart={e => onDragStart(e, proj.id)}
+                  onDragEnd={onDragEnd}
+                  style={{ background: draggingId === proj.id ? "#ECFDF5" : "#FFF", borderRadius: 8, padding: "8px 10px", marginBottom: 6, border: `1px solid ${draggingId === proj.id ? "#00C9A7" : "#E2E8F0"}`, fontSize: 12, fontFamily: F, cursor: "grab", opacity: draggingId === proj.id ? 0.6 : 1, transition: "all .1s" }}>
+                  <div style={{ fontWeight: 600, color: "#0F172A", marginBottom: 2 }}>{proj.customer || proj.name}</div>
+                  <div style={{ color: "#94A3B8", fontSize: 11 }}>{proj.stations || 0} stn{proj.updatedAt ? ` · ${fmtDay(proj.updatedAt)}` : ""}</div>
+                </div>
+              ))}
+              {stageProjects.length === 0 && <div style={{ fontSize: 11, color: "#CBD5E1", fontStyle: "italic", fontFamily: F, padding: "8px 0" }}>{isOver ? "Drop here" : "No projects"}</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ═══ GANTT CHART — per-project milestone/activity timeline (inline SVG) ═══ */
+function GanttChart({ project, state }) {
+  const pdCats = getProjectDetails(state.docData, project?.id);
+  const progData = state.docData?.[project?.id]?._programDetails || {};
+  const tasks = progData.tasks || [];
+  const checklistItems = pdCats.filter(c => c.type === "checklist").flatMap(c => (c.milestones||[]).flatMap(ms => ms.checklist.filter(ck => !ck.na && (ck.projectedDate || ck.actualDate)).map(ck => ({ id: ck.id, name: ck.label.substring(0, 40), start: ck.projectedDate || ck.actualDate, end: ck.actualDate || ck.projectedDate, done: ck.checked, type: "checklist" }))));
+  const programTasks = tasks.map(t => ({ id: t.id, name: t.name, start: t.date, end: t.endDate || t.date, done: false, type: t.type }));
+  const allItems = [...programTasks, ...checklistItems].filter(i => i.start).sort((a, b) => new Date(a.start) - new Date(b.start));
+
+  if (allItems.length === 0) return null;
+
+  const dates = allItems.flatMap(i => [new Date(i.start), new Date(i.end || i.start)]);
+  const minDate = new Date(Math.min(...dates));
+  const maxDate = new Date(Math.max(...dates));
+  const range = Math.max(1, (maxDate - minDate) / (1000 * 60 * 60 * 24));
+  const chartW = 600;
+  const barH = 20;
+  const rowH = 28;
+  const labelW = 200;
+  const totalH = allItems.length * rowH + 30;
+  const toX = (d) => ((new Date(d) - minDate) / (1000 * 60 * 60 * 24) / range) * chartW;
+
+  return (
+    <div style={{ ...S.card, marginTop: 16, overflow: "auto" }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 12 }}>Gantt Chart — Key Activities & Milestones</div>
+      <svg width={labelW + chartW + 20} height={totalH} style={{ fontFamily: F, fontSize: 11 }}>
+        {/* Header dates */}
+        <text x={labelW} y={12} fill="#94A3B8" fontSize={10}>{fmtDay(minDate.toISOString())}</text>
+        <text x={labelW + chartW - 60} y={12} fill="#94A3B8" fontSize={10} textAnchor="end">{fmtDay(maxDate.toISOString())}</text>
+        <line x1={labelW} y1={18} x2={labelW + chartW} y2={18} stroke="#E2E8F0" />
+        {/* Today line */}
+        {(() => { const todayX = toX(new Date().toISOString()); return todayX >= 0 && todayX <= chartW ? <line x1={labelW + todayX} y1={18} x2={labelW + todayX} y2={totalH} stroke="#DC2626" strokeWidth={1} strokeDasharray="4,4" /> : null; })()}
+        {/* Rows */}
+        {allItems.map((item, i) => {
+          const y = 24 + i * rowH;
+          const x1 = toX(item.start);
+          const x2 = toX(item.end || item.start);
+          const w = Math.max(4, x2 - x1);
+          const color = item.done ? "#059669" : item.type === "milestone" ? "#F59E0B" : "#3B82F6";
+          return (
+            <g key={item.id}>
+              <text x={labelW - 8} y={y + barH / 2 + 4} fill="#475569" fontSize={11} textAnchor="end">{item.name}</text>
+              {item.type === "milestone" ? (
+                <polygon points={`${labelW + x1},${y + 4} ${labelW + x1 + 8},${y + barH / 2} ${labelW + x1},${y + barH - 4} ${labelW + x1 - 8},${y + barH / 2}`} fill={color} />
+              ) : (
+                <rect x={labelW + x1} y={y + 4} width={w} height={barH - 8} rx={3} fill={color} opacity={item.done ? 1 : 0.7} />
+              )}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 /* ═══ PROJECTS OVERVIEW — summary of ALL projects across pipelines ═══ */
 /* Note: distinct from per-project "Overview" dashboard. This aggregates every project. */
 function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
   const allProjects = projectsToArray(state.projects);
   const activeProjects = allProjects.filter(p => p.status === "active");
   const [selPipeline, setSelPipeline] = useState(PIPELINE_LIST[0]?.id || "");
+  const [demandExpanded, setDemandExpanded] = useState(null); // which hw row is expanded to show per-project
   const canEditDemand = isInst(user); // Any Instrumental user can add custom demand types
 
   // ─── Demand Plan: aggregate hardware across all ACTIVE projects ───
@@ -1114,8 +1696,8 @@ function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
   const hubspotTotals = HUBSPOT_HW_FIELDS.map(f => ({
     label: f.label,
     source: "HubSpot",
-    total: activeProjects.reduce((sum, p) => sum + parseHwCount(p.hardware?.[f.key]), 0),
-    perProject: activeProjects.map(p => ({ id: p.id, name: p.customer || p.name, count: parseHwCount(p.hardware?.[f.key]) })).filter(x => x.count > 0),
+    total: activeProjects.reduce((sum, p) => sum + getEffectiveHwCount(p, f.key, state.docData), 0),
+    perProject: activeProjects.map(p => ({ id: p.id, name: p.customer || p.name, count: getEffectiveHwCount(p, f.key, state.docData) })).filter(x => x.count > 0),
   }));
   const customTotals = Object.entries(customTypes).map(([id, t]) => ({
     id,
@@ -1163,7 +1745,7 @@ function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
     <div key={proj.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid #F8FAFC" }}>
       <div style={{ flex: 1 }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: "#0F172A", fontFamily: F }}>{proj.customer || proj.name}</div>
-        {proj.si && proj.si !== "—" && proj.si !== "N/A" && <div style={{ fontSize: 12, color: "#64748B", fontFamily: F }}>SI: {proj.si}</div>}
+        <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F }}>{proj.name}{proj.updatedAt ? ` · Updated ${fmtDay(proj.updatedAt)}` : ""}</div>
       </div>
       {proj.isSI && <Chip small color="#EFF6FF" fg="#3B82F6">SI</Chip>}
       {proj.stations > 0 && <span style={{ fontSize: 12, color: "#94A3B8", fontFamily: F }}>{proj.stations} stn</span>}
@@ -1172,8 +1754,20 @@ function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
 
   return (
     <div style={S.page}>
-      <h2 style={S.h2}>Projects Overview</h2>
+      <h2 style={S.h2}>All Projects Overview</h2>
       <p style={S.sub}>Summary of all HubSpot projects. <b>This page shows ACTIVE projects only</b> — closed/cancelled projects are excluded throughout.</p>
+
+      {/* External links — prominent at top */}
+      <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+        <a href="https://script.google.com/a/macros/instrumental.com/s/AKfycbxVMKgsK6nacvY2zEl4bF9AsKEtN6BNKvd-EQ8LGtOyWw3w5sLfTMT-hXSz102PjbNaqQ/exec" target="_blank" rel="noopener noreferrer" style={{ ...S.card, flex: "1 1 280px", padding: "16px 20px", borderLeft: "4px solid #00C9A7", textDecoration: "none", cursor: "pointer", transition: "box-shadow .15s" }} onMouseEnter={e => e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,.10)"} onMouseLeave={e => e.currentTarget.style.boxShadow=""}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#00C9A7", fontFamily: F }}>Deployment Timeline</div>
+          <div style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginTop: 4 }}>View the interactive deployment timeline for all projects</div>
+        </a>
+        <a href="https://script.google.com/a/macros/instrumental.com/s/AKfycbxOAtRNRm2_-XIPPK1fPKW-O55uVtMhMZSDcdZiR4xRqRBmtYgqURhAZ8MPg3RVsvNG/exec" target="_blank" rel="noopener noreferrer" style={{ ...S.card, flex: "1 1 280px", padding: "16px 20px", borderLeft: "4px solid #3B82F6", textDecoration: "none", cursor: "pointer", transition: "box-shadow .15s" }} onMouseEnter={e => e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,.10)"} onMouseLeave={e => e.currentTarget.style.boxShadow=""}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#3B82F6", fontFamily: F }}>SI Process, RACI & Principles</div>
+          <div style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginTop: 4 }}>Deployment process flowchart, RACI matrix, and SI working principles</div>
+        </a>
+      </div>
       <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 999, background: "#ECFDF5", color: "#059669", fontSize: 12, fontWeight: 700, marginBottom: 24, fontFamily: F }}>
         ● ACTIVE PROJECTS ONLY · {activeProjects.length} total
       </div>
@@ -1182,10 +1776,13 @@ function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
         <div style={S.empty}>No active projects. Sync from Admin Panel → HubSpot Sync, or create one in Manage Projects.</div>
       )}
 
+      {/* SI Kanban — only shown if there are SI projects */}
+      <SIKanbanView projects={activeProjects} state={state} setState={setState} />
+
       {activeProjects.length > 0 && (<>
         {/* ═══ DEMAND PLAN ═══ */}
-        <h3 style={{ ...S.h3, marginTop: 8, marginBottom: 6 }}>Demand Plan (Active Projects)</h3>
-        <p style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginBottom: 14 }}>Aggregated hardware requirements across all active projects. HubSpot values are read-only — edit discrepancies in HubSpot directly. Instrumental users can add custom manual types below.</p>
+        <h3 style={{ ...S.h3, marginTop: 8, marginBottom: 6 }}>Demand Plan & Forecast (Active Projects)</h3>
+        <p style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginBottom: 14 }}>Aggregated hardware requirements across all {activeProjects.length} active projects. HubSpot values are read-only. Instrumental users can add custom types. Click any row to see the per-project breakdown.</p>
         <div style={{ ...S.card, marginBottom: 24, padding: 0, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: F }}>
             <thead>
@@ -1197,14 +1794,22 @@ function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
               </tr>
             </thead>
             <tbody>
-              {hubspotTotals.map(row => (
-                <tr key={row.label}>
-                  <td style={S.td}>{row.label}</td>
+              {hubspotTotals.map(row => (<>
+                <tr key={row.label} onClick={() => setDemandExpanded(demandExpanded === row.label ? null : row.label)} style={{ cursor: "pointer" }}>
+                  <td style={S.td}>{demandExpanded === row.label ? "▼" : "▶"} {row.label}</td>
                   <td style={{ ...S.td, textAlign: "center" }}><Chip small color="#FFF4F0" fg="#FF7A59">HubSpot</Chip></td>
                   <td style={{ ...S.td, textAlign: "right", fontWeight: 700, color: "#0F172A", fontSize: 16 }}>{row.total}</td>
                   <td style={S.td}></td>
                 </tr>
-              ))}
+                {demandExpanded === row.label && row.perProject.length > 0 && row.perProject.map(pp => (
+                  <tr key={pp.id} style={{ background: "#F8FAFC" }}>
+                    <td style={{ ...S.td, paddingLeft: 32, fontSize: 12, color: "#64748B" }}>{pp.name}</td>
+                    <td style={{ ...S.td, textAlign: "center", fontSize: 12, color: "#94A3B8" }}>—</td>
+                    <td style={{ ...S.td, textAlign: "right", fontSize: 13, fontWeight: 600, color: "#475569" }}>{pp.count}</td>
+                    <td style={S.td}></td>
+                  </tr>
+                ))}
+              </>))}
               {customTotals.map(row => (
                 <tr key={row.id}>
                   <td style={S.td}>{row.label}</td>
@@ -1229,6 +1834,33 @@ function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
         </div>
 
         {/* ═══ PIPELINE BAR CHARTS ═══ */}
+        {/* Demand by stage — forecast view */}
+        <div style={{ ...S.card, marginBottom: 24, marginTop: 12 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 8 }}>Hardware Forecast by Pipeline Stage</div>
+          <p style={{ fontSize: 12, color: "#64748B", fontFamily: F, marginBottom: 10 }}>Station demand breakdown by where projects are in the Hardware Deployment pipeline. Helps forecast upcoming hardware needs.</p>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: F, fontSize: 12 }}>
+            <thead><tr><th style={{ ...S.th, fontSize: 10 }}>Stage</th><th style={{ ...S.th, fontSize: 10, textAlign: "center" }}>Projects</th><th style={{ ...S.th, fontSize: 10, textAlign: "right" }}>Total Stations</th><th style={{ ...S.th, fontSize: 10, textAlign: "right" }}>Cameras</th><th style={{ ...S.th, fontSize: 10, textAlign: "right" }}>Computers</th></tr></thead>
+            <tbody>
+              {Object.entries(STAGES).filter(([, s]) => s.pipelineId === "680801112" && !s.closed).sort((a, b) => a[1].order - b[1].order).map(([sid, stage]) => {
+                const stageProjs = activeProjects.filter(p => p.hubspotPipelineId === "680801112" && p.hubspotStageId === sid);
+                const totalStations = stageProjs.reduce((s, p) => s + (p.stations || 0), 0);
+                const totalCameras = stageProjs.reduce((s, p) => s + getEffectiveHwCount(p, "cameras", state.docData), 0);
+                const totalComputers = stageProjs.reduce((s, p) => s + getEffectiveHwCount(p, "computers", state.docData), 0);
+                if (stageProjs.length === 0) return null;
+                return (
+                  <tr key={sid}>
+                    <td style={{ ...S.td, fontSize: 12 }}>{stage.label}</td>
+                    <td style={{ ...S.td, textAlign: "center", fontWeight: 600 }}>{stageProjs.length}</td>
+                    <td style={{ ...S.td, textAlign: "right", fontWeight: 600 }}>{totalStations}</td>
+                    <td style={{ ...S.td, textAlign: "right" }}>{totalCameras || "—"}</td>
+                    <td style={{ ...S.td, textAlign: "right" }}>{totalComputers || "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
         <h3 style={{ ...S.h3, marginBottom: 6 }}>Pipeline Stage Distribution (Active Projects)</h3>
         <p style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginBottom: 14 }}>Active project count per stage, shown per pipeline. Closed/cancelled stages excluded.</p>
         <div style={{ marginBottom: 24 }}>
@@ -1448,8 +2080,9 @@ function SIValidation({ project, state, setState, isAdmin }) {
         ))}
         {isAdmin && <button style={{ ...S.btnAddItem, fontSize: 12, marginTop: 6 }} onClick={() => {
           const name = prompt("Document name:"); if (!name) return;
-          const url = prompt("PDF URL:"); 
-          update({ ...val, [key]: { ...sec, docs: [...(sec.docs||[]), { id: genId(), name, url: url || "", type: "pdf" }] } });
+          const rawUrl = prompt("PDF URL (https://...):");
+          const url = commitUrl(rawUrl || ""); if (url === null) return;
+          update({ ...val, [key]: { ...sec, docs: [...(sec.docs||[]), { id: genId(), name, url, type: "pdf" }] } });
         }}>+ Add PDF Document</button>}
       </div>
     );
@@ -1588,8 +2221,9 @@ function ProgramDetails({ project, state, setState, isAdmin }) {
         ))}
         {isAdmin && <button style={{ ...S.btnAddItem, fontSize: 12, marginTop: 6 }} onClick={() => {
           const name = prompt("Document name (e.g. RACI Matrix):"); if (!name) return;
-          const url = prompt("URL or PDF link:");
-          updateProg({ ...prog, docs: [...(prog.docs||[]), { id: genId(), name, url: url || "" }] });
+          const rawUrl = prompt("URL (https://...):");
+          const url = commitUrl(rawUrl || ""); if (url === null) return;
+          updateProg({ ...prog, docs: [...(prog.docs||[]), { id: genId(), name, url }] });
         }}>+ Add Document</button>}
       </div>
     </div>
@@ -1630,8 +2264,9 @@ function DocsView({ partyId, user, project, state, setState, lang }) {
 
   const addItem = (catId) => {
     if (!itemForm.name.trim()) return;
+    const url = commitUrl(itemForm.url); if (url === null) return;
     const c = ensureCats();
-    updateCats(c.map(cat => cat.id !== catId ? cat : { ...cat, items: [...(cat.items||[]), { id: genId(), name: itemForm.name.trim(), url: itemForm.url.trim() || null, type: itemForm.type, lang: itemForm.lang, addedAt: new Date().toISOString(), addedBy: user.name }] }));
+    updateCats(c.map(cat => cat.id !== catId ? cat : { ...cat, items: [...(cat.items||[]), { id: genId(), name: itemForm.name.trim(), url: url || null, type: itemForm.type, lang: itemForm.lang, addedAt: new Date().toISOString(), addedBy: user.name }] }));
     setItemForm({ name: "", url: "", type: "link", lang: "en" }); setAddingItem(null);
   };
   const delItem = (catId, itemId) => { const c = ensureCats(); updateCats(c.map(cat => cat.id !== catId ? cat : { ...cat, items: (cat.items||[]).filter(i => i.id !== itemId) })); };
@@ -1782,7 +2417,7 @@ function DocsView({ partyId, user, project, state, setState, lang }) {
         const [addTL, setAddTL] = useState(false);
         const [tlForm, setTlForm] = useState({ name: "", url: "", belt: "white" });
         const toggleT = () => { if (!pid) return; setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), _training: { ...(prev.docData?.[pid]?._training||{}), [partyId]: { ...td, enabled: !enabled } } } } })); };
-        const addTLink = () => { if (!tlForm.name.trim()) return; const nl = { id: genId(), ...tlForm, addedAt: new Date().toISOString(), addedBy: user.name }; setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), _training: { ...(prev.docData?.[pid]?._training||{}), [partyId]: { ...td, links: [...links, nl] } } } } })); setTlForm({ name: "", url: "", belt: "white" }); setAddTL(false); };
+        const addTLink = () => { if (!tlForm.name.trim()) return; const url = commitUrl(tlForm.url); if (url === null) return; const nl = { id: genId(), ...tlForm, url, addedAt: new Date().toISOString(), addedBy: user.name }; setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), _training: { ...(prev.docData?.[pid]?._training||{}), [partyId]: { ...td, links: [...links, nl] } } } } })); setTlForm({ name: "", url: "", belt: "white" }); setAddTL(false); };
         const delTLink = (id) => { setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), _training: { ...(prev.docData?.[pid]?._training||{}), [partyId]: { ...td, links: links.filter(l => l.id !== id) } } } } })); };
         const toggleBeltNA = (belt) => { const k = `${belt}_disabled`; setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), _training: { ...(prev.docData?.[pid]?._training||{}), [partyId]: { ...td, [k]: !td[k] } } } } })); };
 
@@ -1893,54 +2528,48 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
     setApplyLoading(false);
   };
 
-  // Access map writes — for rule-level enforcement. External users need access/ entries.
-  const needsAccessMap = (u) => u && u.role !== "admin" && !(u.email || "").endsWith("@instrumental.com");
+  // v4.0.0: all admin ops go through Cloud Function callables (audited, server-validated).
 
   const approve = async (pu) => {
     const f = approveForm[pu.id] || {};
     const selProj = Object.entries(f.projects || {}).filter(([,v]) => v).map(([k]) => k);
     if (selProj.length === 0) return;
-    const nu = { id: pu.id, name: pu.name, email: pu.email, photoURL: pu.photoURL || null, role: "user", partyId: "external", projects: selProj, createdAt: pu.requestedAt, approvedAt: new Date().toISOString() };
-    try {
-      await dbWrite(`users/${pu.id}`, nu);
-      if (needsAccessMap(nu)) {
-        await Promise.all(selProj.map(pid => dbWrite(`access/${pid}/${pu.id}`, true)));
-      }
-      await dbWrite(`pendingUsers/${pu.id}`, null);
-    } catch(e) { console.error(e); }
+    try { await callAdminApprove(pu.id, selProj); }
+    catch(e) { console.error(e); alert("Approve failed: " + (e.message || String(e))); }
   };
-  const deny = async (pu) => { try { await dbWrite(`pendingUsers/${pu.id}`, null); } catch(e) { console.error(e); } };
+  const deny = async (pu) => {
+    try { await callAdminDeny(pu.id); }
+    catch(e) { console.error(e); alert("Deny failed: " + (e.message || String(e))); }
+  };
   const removeUser = async (uid) => {
     try {
-      // Clean up access map entries for this user before removing
-      const target = (users||[]).find(u => u.id === uid);
-      if (target && needsAccessMap(target)) {
-        await Promise.all((target.projects || []).map(pid => dbWrite(`access/${pid}/${uid}`, null)));
-      }
-      await dbWrite(`users/${uid}`, null);
+      await callAdminDelete(uid);
       setState(prev => ({ ...prev, users: (prev.users||[]).filter(u => u.id !== uid) }));
-    } catch(e) { console.error(e); }
+    } catch(e) { console.error(e); alert("Delete failed: " + (e.message || String(e))); }
   };
   const promoteAdmin = async (uid) => {
     if (!currentUser?.superAdmin) { alert("Only the super admin can promote users to admin."); return; }
     const target = (users||[]).find(u => u.id === uid);
-    if (!target?.email?.endsWith("@instrumental.com")) { alert("Only @instrumental.com users can be promoted to admin."); return; }
+    if (!target) return;
     if (!confirm(`Make ${target.name} an admin? They'll have full edit access.`)) return;
-    try { await dbWrite(`users/${uid}/role`, "admin"); await dbWrite(`users/${uid}/partyId`, "instrumental"); setState(prev => ({ ...prev, users: (prev.users||[]).map(u => u.id !== uid ? u : { ...u, role: "admin", partyId: "instrumental" }) })); } catch(e) { console.error(e); }
+    try {
+      await callAdminSetRole(uid, "admin");
+      setState(prev => ({ ...prev, users: (prev.users||[]).map(u => u.id !== uid ? u : { ...u, role: "admin", partyId: "instrumental" }) }));
+    } catch(e) { console.error(e); alert("Promote failed: " + (e.message || String(e))); }
   };
-  const addProject = (uid, pid) => {
+  const addProject = async (uid, pid) => {
     const u = (users||[]).find(u => u.id === uid); if (!u || (u.projects||[]).includes(pid)) return;
     const np = [...(u.projects||[]), pid];
     setState(prev => ({ ...prev, users: (prev.users||[]).map(usr => usr.id !== uid ? usr : { ...usr, projects: np }) }));
-    dbWrite(`users/${uid}/projects`, np).catch(console.error);
-    if (needsAccessMap(u)) dbWrite(`access/${pid}/${uid}`, true).catch(console.error);
+    try { await callAdminSetProjectAccess(uid, pid, true); }
+    catch(e) { console.error(e); alert("Grant failed: " + (e.message || String(e))); }
   };
-  const removeProject = (uid, pid) => {
+  const removeProject = async (uid, pid) => {
     const u = (users||[]).find(u => u.id === uid);
     const np = ((u?.projects)||[]).filter(p => p !== pid);
     setState(prev => ({ ...prev, users: (prev.users||[]).map(usr => usr.id !== uid ? usr : { ...usr, projects: np }) }));
-    dbWrite(`users/${uid}/projects`, np).catch(console.error);
-    if (needsAccessMap(u)) dbWrite(`access/${pid}/${uid}`, null).catch(console.error);
+    try { await callAdminSetProjectAccess(uid, pid, false); }
+    catch(e) { console.error(e); alert("Revoke failed: " + (e.message || String(e))); }
   };
 
   // Restricted access management
@@ -2100,19 +2729,20 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
           {allProjects.filter(p => p.status === "active").map(proj => {
             const eligibleUsers = [...instUsers, ...externals];
             const commAccess = state.commercialAccess?.[proj.id] || {};
-            const toggleComm = (uid) => {
-              const has = commAccess[uid];
+            const toggleComm = async (uid) => {
+              const has = !!commAccess[uid];
+              // Optimistic UI
               if (has) {
-                dbWrite(`commercialAccess/${proj.id}/${uid}`, null).catch(console.error);
                 setState(prev => {
                   const next = { ...(prev.commercialAccess||{}) };
                   if (next[proj.id]) { const p = { ...next[proj.id] }; delete p[uid]; next[proj.id] = p; }
                   return { ...prev, commercialAccess: next };
                 });
               } else {
-                dbWrite(`commercialAccess/${proj.id}/${uid}`, true).catch(console.error);
                 setState(prev => ({ ...prev, commercialAccess: { ...(prev.commercialAccess||{}), [proj.id]: { ...(prev.commercialAccess?.[proj.id]||{}), [uid]: true } } }));
               }
+              try { await callAdminSetCommercialAccess(uid, proj.id, !has); }
+              catch(e) { console.error(e); alert("Commercial access update failed: " + (e.message || String(e))); }
             };
             return (
               <div key={proj.id} style={{ ...S.card, marginBottom: 12 }}>
@@ -2136,62 +2766,72 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
 }
 
 /* ═══ MANAGE PROJECTS — with station count input ═══ */
+/* ═══ MANAGE PROJECTS — v3.3.0: active/inactive/past separation, SI toggle, last-updated ═══ */
 function ManageProjects({ state, setState }) {
   const [showForm, setShowForm] = useState(false);
-  const [formType, setFormType] = useState("active");
-  const [form, setForm] = useState({ name: "", customer: "", si: "", cm: "", stations: "", docLink: "" });
-  const [editingNames, setEditingNames] = useState(null);
+  const [form, setForm] = useState({ name: "", customer: "", stations: "", isSI: false });
+  const [editingId, setEditingId] = useState(null);
+  const [mgTab, setMgTab] = useState("active");
 
   const addProj = () => {
     if (!form.name.trim() || !form.customer.trim()) return;
-    const proj = { id: genId(), name: form.name.trim(), customer: form.customer.trim(), si: form.si.trim(), cm: form.cm.trim(), stations: parseInt(form.stations) || 0, status: formType === "deprecated" ? "deprecated" : "active", docLink: form.docLink.trim() || null,
-      partyNames: { instrumental: "Instrumental", si: form.si.trim() || "Systems Integrator", customer: form.customer.trim(), cm: form.cm.trim() || "Contract Manufacturer" } };
+    const proj = { id: genId(), name: form.name.trim(), customer: form.customer.trim(), stations: parseInt(form.stations) || 0, isSI: form.isSI, status: "active", updatedAt: new Date().toISOString() };
     setState(prev => ({ ...prev, projects: [...(prev.projects||[]), proj] }));
-    setForm({ name: "", customer: "", si: "", cm: "", stations: "", docLink: "" }); setShowForm(false);
+    setForm({ name: "", customer: "", stations: "", isSI: false }); setShowForm(false);
   };
-  const toggleStatus = (pid) => setState(prev => ({ ...prev, projects: (prev.projects||[]).map(p => p.id !== pid ? p : { ...p, status: p.status === "deprecated" ? "active" : "deprecated" }) }));
-  const updatePN = (pid, key, val) => setState(prev => ({ ...prev, projects: (prev.projects||[]).map(p => p.id !== pid ? p : { ...p, partyNames: { ...(p.partyNames||{}), [key]: val } }) }));
-  const updateDocLink = (pid, link) => setState(prev => ({ ...prev, projects: (prev.projects||[]).map(p => p.id !== pid ? p : { ...p, docLink: link }) }));
-  const updateStations = (pid, val) => setState(prev => ({ ...prev, projects: (prev.projects||[]).map(p => p.id !== pid ? p : { ...p, stations: parseInt(val)||0 }) }));
+  const toggleStatus = (pid) => setState(prev => ({ ...prev, projects: (prev.projects||[]).map(p => p.id !== pid ? p : { ...p, status: p.status === "deprecated" ? "active" : "deprecated", updatedAt: new Date().toISOString() }) }));
+  const toggleSI = (pid) => setState(prev => ({ ...prev, projects: (prev.projects||[]).map(p => p.id !== pid ? p : { ...p, isSI: !p.isSI, updatedAt: new Date().toISOString() }) }));
+  const updateStations = (pid, val) => setState(prev => ({ ...prev, projects: (prev.projects||[]).map(p => p.id !== pid ? p : { ...p, stations: parseInt(val)||0, updatedAt: new Date().toISOString() }) }));
+  const updateDocLink = (pid, link) => setState(prev => ({ ...prev, projects: (prev.projects||[]).map(p => p.id !== pid ? p : { ...p, docLink: link, updatedAt: new Date().toISOString() }) }));
 
-  const active = (state.projects||[]).filter(p => p.status !== "deprecated");
-  const past = (state.projects||[]).filter(p => p.status === "deprecated");
+  const allProjects = state.projects || [];
+  const active = allProjects.filter(p => p.status === "active");
+  const inactive = allProjects.filter(p => p.status === "inactive");
+  const past = allProjects.filter(p => p.status === "deprecated");
 
   const renderCard = (proj) => {
-    const ed = editingNames === proj.id;
-    const names = proj.partyNames || {};
+    const ed = editingId === proj.id;
     const isPast = proj.status === "deprecated";
+    const isInactive = proj.status === "inactive";
     return (
-      <div key={proj.id} style={{ ...S.card, marginBottom: 10, opacity: isPast ? .75 : 1 }}>
+      <div key={proj.id} style={{ ...S.card, marginBottom: 10, opacity: isPast || isInactive ? .7 : 1 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: ed ? 14 : 0 }}>
           <div style={{ flex: 1, minWidth: 200 }}>
-            <div style={{ fontSize: 17, fontWeight: 700, color: "#0F172A", fontFamily: F }}>{proj.name}</div>
-            {!ed && <div style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginTop: 2 }}>{getPN(proj, "customer")} · SI: {getPN(proj, "si")} · CM: {getPN(proj, "cm")} · Stations: {proj.stations || 0}</div>}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 17, fontWeight: 700, color: "#0F172A", fontFamily: F }}>{proj.customer || proj.name}</span>
+              {proj.isSI && <Chip small color="#EFF6FF" fg="#3B82F6">SI</Chip>}
+            </div>
+            <div style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginTop: 2 }}>
+              {proj.name} · {proj.stations || 0} stations
+              {proj.updatedAt && <span> · Updated {fmtDay(proj.updatedAt)}</span>}
+            </div>
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-            <Chip color={isPast ? "#FEF3C7" : "#ECFDF5"} fg={isPast ? "#D97706" : "#059669"}>{isPast ? "Past" : "Active"}</Chip>
-            <button style={S.btnEdit} onClick={() => toggleStatus(proj.id)}>{isPast ? "↑ Reactivate" : "↓ Archive"}</button>
-            {!isPast && <button style={S.btnEdit} onClick={() => setEditingNames(ed ? null : proj.id)}>{ed ? "✓ Done" : "✎ Edit"}</button>}
-            {!isPast && <button style={{ ...S.btnEdit, borderColor: "#00C9A7", color: "#00C9A7" }} onClick={async () => {
-              if (!confirm(`Apply checklist template to "${proj.name}"? This will add checklist folders if not already present.`)) return;
+            <Chip color={isPast ? "#FEF3C7" : isInactive ? "#F1F5F9" : "#ECFDF5"} fg={isPast ? "#D97706" : isInactive ? "#94A3B8" : "#059669"}>{isPast ? "Past" : isInactive ? "Inactive" : "Active"}</Chip>
+            {!isInactive && <button style={S.btnEdit} onClick={() => toggleStatus(proj.id)}>{isPast ? "↑ Reactivate" : "↓ Archive"}</button>}
+            {!isPast && !isInactive && <button style={S.btnEdit} onClick={() => setEditingId(ed ? null : proj.id)}>{ed ? "✓ Done" : "✎ Edit"}</button>}
+            {!isPast && !isInactive && (
+              <button style={{ ...S.btnEdit, borderColor: proj.isSI ? "#3B82F6" : "#E2E8F0", color: proj.isSI ? "#3B82F6" : "#94A3B8" }} onClick={() => toggleSI(proj.id)}>
+                {proj.isSI ? "✓ SI" : "☐ SI"}
+              </button>
+            )}
+            {!isPast && !isInactive && <button style={{ ...S.btnEdit, borderColor: "#00C9A7", color: "#00C9A7" }} onClick={async () => {
+              if (!confirm(`Apply checklist template to "${proj.name}"?${proj.isSI ? " (SI Deployment Checklist)" : " (Internal + External Checklist)"}`)) return;
               try {
                 const fn = httpsCallable(functions, "applyChecklistTemplate");
-                await fn({ projectId: proj.id });
+                await fn({ projectId: proj.id, isSI: proj.isSI });
                 alert("Checklist template applied.");
               } catch(e) { alert("Error: " + (e.message || String(e))); }
             }}>☑ Apply Checklist</button>}
           </div>
         </div>
         {isPast && proj.docLink && <div style={{ marginTop: 6 }}><span style={{ fontSize: 12, color: "#64748B" }}>📁 </span><a href={proj.docLink} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: "#0284C7", fontFamily: F }}>{proj.docLink}</a></div>}
-        {isPast && !proj.docLink && <button style={{ ...S.btnEdit, marginTop: 6, fontSize: 11 }} onClick={() => { const l = prompt("Doc link:", proj.docLink || ""); if (l !== null) updateDocLink(proj.id, l); }}>+ Add doc link</button>}
+        {isPast && !proj.docLink && <button style={{ ...S.btnEdit, marginTop: 6, fontSize: 11 }} onClick={() => { const l = prompt("Doc link (https://...):", proj.docLink || ""); if (l === null) return; const clean = commitUrl(l); if (clean === null) return; updateDocLink(proj.id, clean); }}>+ Add doc link</button>}
         {ed && (
           <div style={{ padding: 14, background: "#F8FAFC", borderRadius: 10 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              {Object.entries(PARTY_DEFS).map(([k, p]) => <div key={k}><label style={{ ...S.lbl, marginTop: 0 }}>{p.icon} {p.defaultName}</label><input style={S.inp} value={names[k] || p.defaultName} onChange={e => updatePN(proj.id, k, e.target.value)} /></div>)}
-            </div>
-            <div style={{ marginTop: 10 }}>
-              <label style={S.lbl}>Station Count</label>
-              <input type="number" style={{ ...S.inp, width: 140 }} value={proj.stations || ""} onChange={e => updateStations(proj.id, e.target.value)} placeholder="0" />
+              <div><label style={{ ...S.lbl, marginTop: 0 }}>Customer</label><input style={S.inp} value={proj.customer || ""} onChange={e => setState(prev => ({ ...prev, projects: (prev.projects||[]).map(p => p.id !== proj.id ? p : { ...p, customer: e.target.value, updatedAt: new Date().toISOString() }) }))} /></div>
+              <div><label style={{ ...S.lbl, marginTop: 0 }}>Station Count</label><input type="number" style={S.inp} value={proj.stations || ""} onChange={e => updateStations(proj.id, e.target.value)} placeholder="0" /></div>
             </div>
           </div>
         )}
@@ -2205,38 +2845,50 @@ function ManageProjects({ state, setState }) {
         <h2 style={S.h2}>Manage Projects</h2>
         <button style={{ ...S.btnMain, width: "auto", padding: "10px 20px", marginTop: 0 }} onClick={() => setShowForm(!showForm)}>{showForm ? "Cancel" : "+ New Project"}</button>
       </div>
-      <p style={S.sub}>Create projects, edit party names, manage station counts.</p>
+      <p style={S.sub}>Create projects, manage station counts, toggle SI involvement. Showing {active.length} active, {inactive.length} inactive, {past.length} past.</p>
+
+      {/* Tab selector */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        {[{ id: "active", label: `Active (${active.length})`, color: "#059669" }, { id: "inactive", label: `Inactive (${inactive.length})`, color: "#94A3B8" }, { id: "past", label: `Past (${past.length})`, color: "#D97706" }].map(t => (
+          <button key={t.id} onClick={() => setMgTab(t.id)} style={{ ...S.tabBtn, ...(mgTab === t.id ? { background: t.color, color: "#FFF", borderColor: t.color } : {}) }}>{t.label}</button>
+        ))}
+      </div>
+
       {showForm && (
         <div style={{ ...S.card, marginBottom: 20 }}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-            <button onClick={() => setFormType("active")} style={{ ...S.typeBtn, ...(formType === "active" ? S.typeBtnActive : {}) }}>Active</button>
-            <button onClick={() => setFormType("deprecated")} style={{ ...S.typeBtn, ...(formType === "deprecated" ? { background: "#FEF3C7", borderColor: "#D97706", color: "#D97706" } : {}) }}>Past / Deprecated</button>
-          </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div><label style={S.lbl}>Project Name</label><input style={S.inp} value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))} placeholder="e.g. NVIDIA HGX Inspection" /></div>
             <div><label style={S.lbl}>Customer</label><input style={S.inp} value={form.customer} onChange={e => setForm(f => ({...f, customer: e.target.value}))} placeholder="e.g. NVIDIA" /></div>
-            <div><label style={S.lbl}>Systems Integrator</label><input style={S.inp} value={form.si} onChange={e => setForm(f => ({...f, si: e.target.value}))} placeholder="e.g. Anda Technologies (or N/A)" /></div>
-            <div><label style={S.lbl}>Contract Manufacturer</label><input style={S.inp} value={form.cm} onChange={e => setForm(f => ({...f, cm: e.target.value}))} placeholder="e.g. Foxconn (or N/A)" /></div>
           </div>
-          {formType === "active" && <div><label style={S.lbl}>Number of Stations</label><input type="number" style={{ ...S.inp, width: 160 }} value={form.stations} onChange={e => setForm(f => ({...f, stations: e.target.value}))} placeholder="0" /></div>}
-          {formType === "deprecated" && <div><label style={S.lbl}>Documentation Link</label><input style={S.inp} value={form.docLink} onChange={e => setForm(f => ({...f, docLink: e.target.value}))} placeholder="https://drive.google.com/..." /></div>}
-          <button style={{ ...S.btnMain, marginTop: 16, width: "auto", padding: "10px 24px" }} onClick={addProj}>Create {formType === "deprecated" ? "Past" : "Active"} Project</button>
+          <div style={{ display: "flex", gap: 12, marginTop: 12, alignItems: "center" }}>
+            <div><label style={S.lbl}>Stations</label><input type="number" style={{ ...S.inp, width: 120 }} value={form.stations} onChange={e => setForm(f => ({...f, stations: e.target.value}))} placeholder="0" /></div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 20, cursor: "pointer" }} onClick={() => setForm(f => ({ ...f, isSI: !f.isSI }))}>
+              <div style={{ width: 20, height: 20, borderRadius: 4, border: `2px solid ${form.isSI ? "#3B82F6" : "#CBD5E1"}`, background: form.isSI ? "#3B82F6" : "#FFF", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#FFF", fontWeight: 800 }}>{form.isSI ? "✓" : ""}</div>
+              <span style={{ fontSize: 14, fontFamily: F, color: "#475569" }}>SI Involved</span>
+            </div>
+          </div>
+          <button style={{ ...S.btnMain, marginTop: 16, width: "auto", padding: "10px 24px" }} onClick={addProj}>Create Project</button>
         </div>
       )}
 
-      <h3 style={{ ...S.h3, marginBottom: 10 }}>Active ({active.length})</h3>
-      {active.length === 0 ? <div style={{ ...S.empty, marginBottom: 20 }}>No active projects.</div> : active.map(renderCard)}
-
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 24, marginBottom: 10 }}>
-        <h3 style={{ ...S.h3, color: "#94A3B8" }}>Past ({past.length})</h3>
-        <button style={{ ...S.btnEdit, fontSize: 12 }} onClick={() => {
-          const csv = prompt("Paste past projects, one per line:\nFormat: Name, Customer, SI, CM, Doc Link");
-          if (!csv) return;
-          const newP = csv.split("\n").filter(l => l.trim()).map(l => { const p = l.split(",").map(s => s.trim()); return { id: genId(), name: p[0]||"Unnamed", customer: p[1]||"", si: p[2]||"", cm: p[3]||"", docLink: p[4]||null, stations: 0, status: "deprecated", partyNames: { instrumental: "Instrumental", si: p[2]||"SI", customer: p[1]||"Customer", cm: p[3]||"CM" } }; });
-          setState(prev => ({ ...prev, projects: [...(prev.projects||[]), ...newP] }));
-        }}>📋 Bulk Import</button>
-      </div>
-      {past.length === 0 ? <div style={S.empty}>No past projects.</div> : past.map(renderCard)}
+      {/* Tab content */}
+      {mgTab === "active" && (
+        active.length === 0 ? <div style={S.empty}>No active projects.</div> : active.map(renderCard)
+      )}
+      {mgTab === "inactive" && (
+        inactive.length === 0 ? <div style={S.empty}>No inactive/closed projects from HubSpot.</div> : inactive.map(renderCard)
+      )}
+      {mgTab === "past" && (<>
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+          <button style={{ ...S.btnEdit, fontSize: 12 }} onClick={() => {
+            const csv = prompt("Paste past projects, one per line:\nFormat: Name, Customer, Doc Link");
+            if (!csv) return;
+            const newP = csv.split("\n").filter(l => l.trim()).map(l => { const p = l.split(",").map(s => s.trim()); return { id: genId(), name: p[0]||"Unnamed", customer: p[1]||"", docLink: p[2]||null, stations: 0, status: "deprecated", updatedAt: new Date().toISOString() }; });
+            setState(prev => ({ ...prev, projects: [...(prev.projects||[]), ...newP] }));
+          }}>📋 Bulk Import</button>
+        </div>
+        {past.length === 0 ? <div style={S.empty}>No past projects.</div> : past.map(renderCard)}
+      </>)}
     </div>
   );
 }
@@ -2270,7 +2922,8 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // 2. User init — AUTO-APPROVE @instrumental.com
+  // 2. User init — v4.0.0: all provisioning goes through provisionUser Cloud Function.
+  // No client-side bootstrap. First admin must be manually seeded in Firebase console (see PRE_DEPLOY_RUNBOOK_4.0.0.md).
   useEffect(() => {
     if (!authUser) return;
     let cancelled = false;
@@ -2280,38 +2933,22 @@ export default function App() {
         if (cancelled) return;
         if (dbUser) { setUser(dbUser); if (dbUser.langPref) setLang(dbUser.langPref); setPendingApproval(false); return; }
 
-        const allUsers = await dbRead("users");
+        // No user record → call Cloud Function to provision.
+        const res = await callProvisionUser();
         if (cancelled) return;
-        const isFirst = !allUsers || Object.keys(allUsers).length === 0;
-        const email = authUser.email || "";
-        const isInstDomain = email.endsWith("@instrumental.com");
-
-        if (isFirst) {
-          const { projects, progress, docData } = getDefault();
-          // Store projects as object keyed by ID (v3.1.0 schema)
-          const projectsObj = {};
-          projects.forEach(p => { if (p?.id) projectsObj[p.id] = p; });
-          const nu = { id: authUser.uid, name: authUser.displayName || email, email, photoURL: authUser.photoURL || null, role: "admin", partyId: "instrumental", projects: projects.map(p => p.id), createdAt: new Date().toISOString() };
-          await dbWrite("appState/projects", projectsObj);
-          await dbWrite("appState/progress", progress);
-          await dbWrite("appState/docData", docData);
-          await dbWrite("appState/statusMessage", "");
-          await dbWrite(`users/${authUser.uid}`, nu);
-          await dbWrite("_schemaVersion", "v3.1.0");
-          if (!cancelled) { setUser(nu); setPendingApproval(false); }
-        } else if (isInstDomain) {
-          // Auto-approve @instrumental.com users as instrumental party — admin must be explicitly granted
-          const allProj = await dbRead("appState/projects") || {};
-          const projIds = projectsToArray(allProj).map(p => p.id);
-          const nu = { id: authUser.uid, name: authUser.displayName || email, email, photoURL: authUser.photoURL || null, role: "user", partyId: "instrumental", projects: projIds, createdAt: new Date().toISOString() };
-          await dbWrite(`users/${authUser.uid}`, nu);
-          if (!cancelled) { setUser(nu); setPendingApproval(false); }
+        const status = res?.data?.status;
+        if (status === "provisioned_instrumental" || status === "exists") {
+          setUser(res.data.user);
+          setPendingApproval(false);
+        } else if (status === "pending") {
+          setPendingApproval(true);
         } else {
-          // External user — needs approval
-          await dbWrite(`pendingUsers/${authUser.uid}`, { id: authUser.uid, name: authUser.displayName || email, email, photoURL: authUser.photoURL || null, requestedAt: new Date().toISOString() });
-          if (!cancelled) setPendingApproval(true);
+          setLoginErr("Provisioning failed. Please contact an admin.");
         }
-      } catch (e) { console.error(e); if (!cancelled) setLoginErr("Database error. Please refresh."); }
+      } catch (e) {
+        console.error(e);
+        if (!cancelled) setLoginErr("Sign-in error: " + (e.message || "please refresh."));
+      }
     };
     init();
     return () => { cancelled = true; };
@@ -2356,11 +2993,35 @@ export default function App() {
     unsubs.push(onValue(ref(db, "appState/statusMessage"), (s) => { setState(prev => ({ ...prev, statusMessage: s.val() || "" })); }, (e) => console.error(e)));
     if (isAdminOrInst) {
       unsubs.push(onValue(ref(db, "appState/demandCustomTypes"), (s) => { setState(prev => ({ ...prev, demandCustomTypes: s.val() || {} })); }, (e) => console.error(e)));
+      unsubs.push(onValue(ref(db, "appState/projectOverview"), (s) => { setState(prev => ({ ...prev, projectOverview: s.val() || {} })); }, (e) => console.error(e)));
+    } else {
+      // Non-admin external: per-project overview subscription
+      (user.projects || []).forEach(pid => {
+        unsubs.push(onValue(ref(db, `appState/projectOverview/${pid}`), (s) => {
+          setState(prev => ({ ...prev, projectOverview: { ...(prev.projectOverview||{}), [pid]: s.val() || {} } }));
+        }, (e) => console.error(e)));
+      });
     }
-    // Commercial access map — readable by all auth users
-    unsubs.push(onValue(ref(db, "commercialAccess"), (s) => { setState(prev => ({ ...prev, commercialAccess: s.val() || {} })); }, (e) => console.error(e)));
-    unsubs.push(onValue(ref(db, "users"), (s) => { const v = s.val(); if (v) setState(prev => ({ ...prev, users: Object.values(v) })); }, (e) => console.error(e)));
-    if (user.role === "admin") { unsubs.push(onValue(ref(db, "pendingUsers"), (s) => { const v = s.val(); setPendingUsers(v ? Object.values(v) : []); }, (e) => console.error(e))); }
+    // v4.0.0: scope reads by role. Admin sees everything. Non-admin sees only own records + per-project entries for projects they have access to.
+    if (user.role === "admin") {
+      unsubs.push(onValue(ref(db, "commercialAccess"), (s) => { setState(prev => ({ ...prev, commercialAccess: s.val() || {} })); }, (e) => console.error(e)));
+      unsubs.push(onValue(ref(db, "users"), (s) => { const v = s.val(); if (v) setState(prev => ({ ...prev, users: Object.values(v) })); }, (e) => console.error(e)));
+      unsubs.push(onValue(ref(db, "pendingUsers"), (s) => { const v = s.val(); setPendingUsers(v ? Object.values(v) : []); }, (e) => console.error(e)));
+    } else {
+      // Non-admin: only own user record + own commercialAccess entries per project they can see.
+      unsubs.push(onValue(ref(db, `users/${user.id}`), (s) => { const v = s.val(); if (v) setState(prev => ({ ...prev, users: [v] })); }, (e) => console.error(e)));
+      (user.projects || []).forEach(pid => {
+        unsubs.push(onValue(ref(db, `commercialAccess/${pid}/${user.id}`), (s) => {
+          const v = s.val();
+          setState(prev => {
+            const next = { ...(prev.commercialAccess || {}) };
+            if (v) next[pid] = { ...(next[pid] || {}), [user.id]: true };
+            else if (next[pid]) { const p = { ...next[pid] }; delete p[user.id]; next[pid] = p; }
+            return { ...prev, commercialAccess: next };
+          });
+        }, (e) => console.error(e)));
+      });
+    }
     setLoaded(true);
     return () => unsubs.forEach(u => { try { u(); } catch(e) {} });
   }, [user]);
@@ -2420,14 +3081,22 @@ export default function App() {
         dbWrite("appState/projects", obj).catch(console.error);
       }
       if (next.docData !== prev.docData) dbWrite("appState/docData", next.docData).catch(console.error);
-      if (next.progress !== prev.progress) dbWrite("appState/progress", next.progress).catch(console.error);
+      // v4.0.0: per-user progress write (rules require $uid === auth.uid on progress/$uid).
+      if (next.progress !== prev.progress && user?.id && next.progress?.[user.id] !== prev.progress?.[user.id]) {
+        dbWrite(`appState/progress/${user.id}`, next.progress[user.id] || null).catch(console.error);
+      }
       if (next.statusMessage !== prev.statusMessage) dbWrite("appState/statusMessage", next.statusMessage).catch(console.error);
       if (next.demandCustomTypes !== prev.demandCustomTypes) dbWrite("appState/demandCustomTypes", next.demandCustomTypes || null).catch(console.error);
-      if (next.commercialAccess !== prev.commercialAccess) dbWrite("commercialAccess", next.commercialAccess || null).catch(console.error);
-      if (next.users !== prev.users && Array.isArray(next.users)) next.users.forEach(u => { if (u.id) dbWrite(`users/${u.id}`, u).catch(console.error); });
+      // v4.0.0 projectOverview — per-project writes
+      if (next.projectOverview !== prev.projectOverview) {
+        const po = next.projectOverview || {};
+        const poPrev = prev.projectOverview || {};
+        Object.keys(po).forEach(pid => { if (po[pid] !== poPrev[pid]) dbWrite(`appState/projectOverview/${pid}`, po[pid] || null).catch(console.error); });
+      }
+      // v4.0.0: commercialAccess and users/* writes go through admin callables — no direct writes from save().
       return next;
     });
-  }, []);
+  }, [user]);
 
   const onLogout = async () => { await signOut(auth); setUser(null); setAuthUser(null); setProject(null); setView("dashboard"); setLoaded(false); };
 
@@ -2453,8 +3122,9 @@ export default function App() {
   const hasCommAccess = user.role === "admin" || (project && state.commercialAccess?.[project.id]?.[user.id]);
 
   const renderMain = () => {
+    if (view === "chat") return <ChatView user={user} />;
     if (view === "projects_overview" && admin) return <ProjectsOverviewView state={state} setState={save} user={user} lang={lang} />;
-    if (!hasProjectAccess && view !== "projects_overview" && view !== "admin" && view !== "manage") {
+    if (!hasProjectAccess && view !== "projects_overview" && view !== "admin" && view !== "manage" && view !== "chat") {
       return <div style={S.page}><div style={S.empty}>Access denied — you are not assigned to this project.</div></div>;
     }
     if (view === "project_details") {
@@ -2491,7 +3161,11 @@ export default function App() {
           ::selection { background: #00C9A733; }
         `}</style>
         <Sidebar view={view} setView={setView} user={user} project={project} projects={userProjects} setProject={setProject} onLogout={onLogout} lang={lang} setLang={setLang} hasCommercialAccess={hasCommAccess} />
-        <main style={S.main}>{renderMain()}</main>
+        <main style={{ ...S.main, padding: 0 }}>
+          <GlobalBotBar user={user} />
+          <div style={{ padding: "32px 40px" }}>{renderMain()}</div>
+        </main>
+        <ProjectBotChat project={project} user={user} />
       </div>
     </div>
   );
