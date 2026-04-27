@@ -1,6 +1,6 @@
 # Deployment Portal
 
-**Version:** v4.0.0
+**Version:** v4.0.1
 
 A React 18 web application serving as a consolidated PMO-style frontend UI for the Customer Experience team to track and proactively manage risks/issues with CMs and customers. Speaks directly to HubSpot to provide real-time information on all projects in the deployment and sales pipeline. Coordinates documentation, milestones, and program details across Instrumental, Systems Integrator (SI), Customer, and CM stakeholders via a unified Project Details / Commercial / Training model.
 
@@ -180,6 +180,7 @@ New users sign in with Google and land in a pending queue until an admin approve
 | v3.2.0 | Remove 4-party system, unified Project Details/Commercial/Training, new checklist template, searchable dropdown |
 | v3.3.0 | Security lockdowns, Manage Projects overhaul, SI Kanban, Gantt chart, hardware demand forecast, App Scripts links, AI Project Bot, URL redirect |
 | v4.0.0 | **Security review response** (7 findings) — `users/` read locked to admin + own; `access/` and `commercialAccess/` reads scoped; client-side bootstrap removed (manual admin seed); `provisionUser` Cloud Function for sign-in; admin callables (`adminApprove`/`Deny`/`Delete`/`SetRole`/`SetProjectAccess`/`SetCommercialAccess`) with **audit log** on all sensitive ops; URL validation (https-only, `javascript:`/`data:`/`file:` blocked). **Hardware manual override** (HubSpot value = suggestion; Instrumental users can override per-field, override wins in Demand Plan). **Project Overview** section with 8 fields — CAD Complete, CAD Actual Finish, Actual Service Start, Target Build, Actual Deploy (webapp source of truth) + Target Build at Deal Close + CS Program ID (HubSpot pull-only) + Project Status/Next Steps (Bot-drafted). **AI-drafted Project Status** button wires to existing Project Bot. Folds in uncommitted v3.2.0 + v3.3.0 + Apr 22 sign-in hotfixes. |
+| v4.0.1 | **HubSpot Sync history log** (Admin Panel → HubSpot Sync) — every sync (manual or scheduled) writes an entry to `hubspotSync/log/` with type, actor, state, counts, duration; rendered as a table in the admin UI. **SI Kanban now driven by HubSpot** — added "SI Partner Deployment" pipeline (ID `2206979797`) with 8 stages (SIRD → DFM → Quote → PO → Build → FAT → SAT → Live). Projects in this pipeline auto-populate `siStage` from HubSpot's stage on every sync. SI Kanban filters by pipeline membership (no longer by `[SI]` name pattern), so `[SI]` projects in Hardware Deployment Pipeline stay in Hardware. `hubspotSync/.read` tightened to admin-only. |
 
 ---
 

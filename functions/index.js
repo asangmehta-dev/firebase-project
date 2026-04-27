@@ -26,6 +26,22 @@ const PIPELINES = {
   "682405760": { label: "Station Return", order: 3 },
   "684527408": { label: "Image Source Deployment Pipeline", order: 4 },
   "1919898345": { label: "Data Analytics", order: 5 },
+  // v4.0.1 — SI Partner Deployment pipeline.
+  "2206979797": { label: "SI Partner Deployment", order: 6 },
+};
+
+// v4.0.1 — SI Partner Deployment pipeline ID + stage mapping.
+const SI_PARTNER_PIPELINE_ID = "2206979797";
+// Map: HubSpot stage ID → SI Kanban stage key (sird|dfm|quote|po|build|fat|sat|live)
+const SI_PARTNER_STAGE_MAP = {
+  "3539976891": "sird",
+  "3539976892": "dfm",
+  "3545524981": "quote",
+  "3545524982": "po",
+  "3545524983": "build",
+  "3545524984": "fat",
+  "3545524985": "sat",
+  "3545525946": "live",
 };
 
 const STAGES = {
@@ -76,6 +92,15 @@ const STAGES = {
   "3039176431": { label: "Kick-off", closed: false, order: 1 },
   "3039176432": { label: "In Progress", closed: false, order: 2 },
   "3040887545": { label: "Completed", closed: true, order: 3 },
+  // v4.0.1 — SI Partner Deployment pipeline stages
+  "3539976891": { label: "SIRD",  closed: false, order: 0 },
+  "3539976892": { label: "DFM",   closed: false, order: 1 },
+  "3545524981": { label: "Quote", closed: false, order: 2 },
+  "3545524982": { label: "PO",    closed: false, order: 3 },
+  "3545524983": { label: "Build", closed: false, order: 4 },
+  "3545524984": { label: "FAT",   closed: false, order: 5 },
+  "3545524985": { label: "SAT",   closed: false, order: 6 },
+  "3545525946": { label: "Live",  closed: false, order: 7 },
 };
 
 const CODENAME_MAP = {
@@ -138,7 +163,12 @@ function mapHubspotToProject(obj) {
   const stationsFromField = p.number_of_stations__c ? parseInt(p.number_of_stations__c) : null;
   const stationsFromName = extractStationsFromName(name);
   const stations = stationsFromField || stationsFromName || 0;
-  const isSI = /\[SI\]/i.test(name);
+  // v4.0.1 — SI flag now combines: name contains [SI] OR project lives in SI Partner Deployment pipeline.
+  const isFromSiPartner = pipelineId === SI_PARTNER_PIPELINE_ID;
+  const isSI = isFromSiPartner || /\[SI\]/i.test(name);
+  // siStage is set ONLY for projects in SI Partner Deployment pipeline (drives the Kanban).
+  // Falls back to "sird" if a stage ID isn't in the map yet.
+  const siStage = isFromSiPartner ? (SI_PARTNER_STAGE_MAP[stageId] || "sird") : null;
   const isClosed = stage.closed === true;
 
   return {
@@ -150,6 +180,7 @@ function mapHubspotToProject(obj) {
     appProjectId: p.app_project_id__c || null,
     stations,
     isSI,
+    siStage,
     hubspotPipelineId: pipelineId || null,
     hubspotPipelineLabel: pipeline.label || null,
     hubspotStageId: stageId || null,
@@ -204,10 +235,19 @@ async function fetchAllHubspotObjects(token) {
   return all;
 }
 
+/* ═══ SYNC LOG — v4.0.1: append-only history of all syncs ═══ */
+async function writeSyncLogEntry(entry) {
+  const id = `${entry.startedAt}_${Math.random().toString(36).slice(2, 7)}`;
+  await db.ref(`hubspotSync/log/${id}`).set(entry);
+}
+
 /* ═══ CORE SYNC LOGIC ═══ */
-async function runSync(token, commit) {
+// syncCtx: { type: "manual" | "scheduled", actorUid?: string, actorEmail?: string }
+async function runSync(token, commit, syncCtx) {
   const startedAt = new Date().toISOString();
-  await db.ref("hubspotSync/status").set({ state: "running", startedAt });
+  const startedAtMs = Date.now();
+  const ctx = syncCtx || { type: "scheduled" };
+  await db.ref("hubspotSync/status").set({ state: "running", startedAt, type: ctx.type });
 
   try {
     const objects = await fetchAllHubspotObjects(token);
@@ -236,6 +276,12 @@ async function runSync(token, commit) {
       incoming.forEach(p => { previewMap[p.hubspotId] = p; });
       await db.ref("hubspotPreview").set({ projects: previewMap, summary });
       await db.ref("hubspotSync/status").set({ state: "preview_ready", ...summary });
+      await writeSyncLogEntry({
+        startedAt, finishedAt: new Date().toISOString(), durationMs: Date.now() - startedAtMs,
+        type: ctx.type, mode: "preview",
+        actorUid: ctx.actorUid || "system", actorEmail: ctx.actorEmail || null,
+        state: "preview_ready", total: incoming.length, newCount: newProjects.length, updatedCount: updatedProjects.length, error: null,
+      });
       return { success: true, preview: true, ...summary };
     }
 
@@ -255,6 +301,9 @@ async function runSync(token, commit) {
           appProjectId: incoming_p.appProjectId,
           stations: incoming_p.stations || merged[idx].stations,
           isSI: incoming_p.isSI,
+          // v4.0.1: only overwrite siStage when the incoming project is from the SI Partner pipeline.
+          // Hardware Deployment [SI] projects shouldn't have their siStage clobbered to null.
+          siStage: incoming_p.siStage != null ? incoming_p.siStage : merged[idx].siStage,
           hubspotPipelineId: incoming_p.hubspotPipelineId,
           hubspotPipelineLabel: incoming_p.hubspotPipelineLabel,
           hubspotStageId: incoming_p.hubspotStageId,
@@ -303,11 +352,23 @@ async function runSync(token, commit) {
 
     await db.ref("hubspotPreview").set(null);
     await db.ref("hubspotSync/status").set({ state: "success", ...summary });
+    await writeSyncLogEntry({
+      startedAt, finishedAt: new Date().toISOString(), durationMs: Date.now() - startedAtMs,
+      type: ctx.type, mode: "apply",
+      actorUid: ctx.actorUid || "system", actorEmail: ctx.actorEmail || null,
+      state: "success", total: incoming.length, newCount: newProjects.length, updatedCount: updatedProjects.length, error: null,
+    });
 
     return { success: true, preview: false, ...summary };
   } catch (err) {
     console.error("HubSpot sync error:", err);
     await db.ref("hubspotSync/status").set({ state: "error", error: err.message, startedAt });
+    await writeSyncLogEntry({
+      startedAt, finishedAt: new Date().toISOString(), durationMs: Date.now() - startedAtMs,
+      type: (syncCtx || {}).type || "scheduled", mode: commit ? "apply" : "preview",
+      actorUid: (syncCtx || {}).actorUid || "system", actorEmail: (syncCtx || {}).actorEmail || null,
+      state: "error", total: 0, newCount: 0, updatedCount: 0, error: String(err.message || err).slice(0, 500),
+    });
     throw err;
   }
 }
@@ -342,7 +403,7 @@ exports.scheduledHubspotSync = functions.pubsub
   .onRun(async () => {
     const token = process.env.HUBSPOT_TOKEN;
     if (!token) { console.error("HubSpot token not configured"); return; }
-    await runSync(token, true);
+    await runSync(token, true, { type: "scheduled", actorUid: "system", actorEmail: null });
   });
 
 /* ═══ MANUAL SYNC — callable from Admin Panel ═══ */
@@ -359,7 +420,11 @@ exports.manualHubspotSync = functions.https.onCall(async (data, context) => {
   if (!token) throw new functions.https.HttpsError("internal", "HubSpot token not configured.");
 
   const commit = data?.commit === true;
-  return await runSync(token, commit);
+  return await runSync(token, commit, {
+    type: "manual",
+    actorUid: context.auth.uid,
+    actorEmail: (context.auth.token?.email || user?.email || null),
+  });
 });
 
 /* ═══ APPLY CHECKLIST — callable from Admin Panel ═══ */

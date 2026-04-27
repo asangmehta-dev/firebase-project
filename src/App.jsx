@@ -46,21 +46,30 @@ const LANGUAGES = [
   { id: "zh-cn", label: "简体中文", flag: "🇨🇳", short: "简" },
 ];
 const HW_TYPES = ["Camera", "Lens", "Station Computer"];
+// v4.0.1: 8-stage SI Partner Deployment pipeline (matches HubSpot's "SI Partner Deployment" pipeline)
 const SI_PIPELINE_STAGES = [
-  { id: "sird_drafting", label: "SIRD Drafting", color: "#00C9A7" },
-  { id: "sird_approved", label: "SIRD Approved", color: "#3B82F6" },
-  { id: "dfm_si", label: "DFM (SI)", color: "#F59E0B" },
-  { id: "dfm_approved", label: "DFM Approved", color: "#A855F7" },
-  { id: "quote_received", label: "Quote Received", color: "#0284C7" },
-  { id: "quote_approved", label: "Quote Approved", color: "#DC2626" },
-  { id: "po_issued", label: "PO Issued", color: "#64748B" },
-  { id: "build", label: "Build", color: "#059669" },
-  { id: "fat", label: "FAT", color: "#F59E0B" },
-  { id: "shipped", label: "Shipped", color: "#3B82F6" },
-  { id: "sat", label: "SAT", color: "#A855F7" },
-  { id: "warranty", label: "Warranty / Legal", color: "#DC2626" },
-  { id: "complete", label: "Deployment Complete", color: "#059669" },
+  { id: "sird",  label: "SIRD",  color: "#00C9A7" },
+  { id: "dfm",   label: "DFM",   color: "#3B82F6" },
+  { id: "quote", label: "Quote", color: "#F59E0B" },
+  { id: "po",    label: "PO",    color: "#A855F7" },
+  { id: "build", label: "Build", color: "#0284C7" },
+  { id: "fat",   label: "FAT",   color: "#DC2626" },
+  { id: "sat",   label: "SAT",   color: "#059669" },
+  { id: "live",  label: "Live",  color: "#10B981" },
 ];
+// HubSpot pipeline ID for "SI Partner Deployment". Mirrored in functions/index.js.
+const SI_PARTNER_PIPELINE_ID = "2206979797";
+// Backward-compat: map legacy 13-stage siStage keys to the new 8-stage keys (for projects that had old stage saved).
+const LEGACY_SI_STAGE_MAP = {
+  sird_drafting: "sird", sird_approved: "sird",
+  dfm_si: "dfm", dfm_approved: "dfm",
+  quote_received: "quote", quote_approved: "quote",
+  po_issued: "po",
+  build: "build", fat: "fat",
+  shipped: "sat", sat: "sat",
+  warranty: "live", complete: "live",
+};
+const normalizeSiStage = (s) => LEGACY_SI_STAGE_MAP[s] || s || "sird";
 const SEED_PROJECTS = [
   { id: "proj_nvidia_1", name: "NVIDIA — HGX B200 Inspection", customer: "NVIDIA", status: "active", stations: 0, isSI: true },
   { id: "proj_aws_1", name: "AWS — Trainium Board QC", customer: "AWS", status: "active", stations: 0, isSI: false },
@@ -614,7 +623,7 @@ function DashboardView({ user, project, state, setState, lang = "en", setView })
       {project.isSI && (
         <div style={{ ...S.card, marginTop: 16, borderLeft: "3px solid #3B82F6" }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: "#3B82F6", fontFamily: F, marginBottom: 8 }}>SI Deployment Details</div>
-          <div style={S.miniStat}><span>SI Pipeline Stage</span><strong>{SI_PIPELINE_STAGES.find(s => s.id === (project.siStage || "sird_drafting"))?.label || "SIRD Drafting"}</strong></div>
+          <div style={S.miniStat}><span>SI Pipeline Stage</span><strong>{SI_PIPELINE_STAGES.find(s => s.id === normalizeSiStage(project.siStage))?.label || "SIRD"}</strong></div>
           <div style={S.miniStat}><span>Checklist Completion</span><strong>{(() => { const cats = getProjectDetails(state.docData, project.id); const all = cats.filter(c => c.type === "checklist").flatMap(c => (c.milestones||[]).flatMap(ms => ms.checklist||[])); const active = all.filter(ck => !ck.na); const done = active.filter(ck => ck.checked); return active.length > 0 ? `${Math.round(done.length / active.length * 100)}% (${done.length}/${active.length})` : "—"; })()}</strong></div>
           <div style={S.miniStat}><span>Stations</span><strong>{project.stations || 0}</strong></div>
         </div>
@@ -1566,15 +1575,20 @@ function ProjectBotChat({ project, user }) {
   );
 }
 
-/* ═══ SI KANBAN — shows SI-flagged projects across SI pipeline stages ═══ */
+/* ═══ SI KANBAN — v4.0.1: shows projects from the HubSpot "SI Partner Deployment" pipeline only ═══ */
+/* Stage comes from HubSpot sync (project.siStage). Drag-and-drop is local-only until v4.1.0 writeback. */
 function SIKanbanView({ projects, state, setState }) {
-  const siProjects = projects.filter(p => p.isSI && p.status === "active");
+  // Filter: projects in the SI Partner Deployment pipeline. Exclude [SI]-tagged Hardware Deployment projects.
+  const siProjects = projects.filter(p =>
+    p.status === "active" &&
+    p.hubspotPipelineId === SI_PARTNER_PIPELINE_ID
+  );
   const [draggingId, setDraggingId] = useState(null);
   const [dragOverStage, setDragOverStage] = useState(null);
 
   if (siProjects.length === 0) return null;
 
-  const getStage = (proj) => proj.siStage || "sird_drafting";
+  const getStage = (proj) => normalizeSiStage(proj.siStage);
   const setStage = (pid, stageId) => setState(prev => ({ ...prev, projects: (prev.projects||[]).map(p => p.id !== pid ? p : { ...p, siStage: stageId, updatedAt: new Date().toISOString() }) }));
 
   const onDragStart = (e, projId) => { setDraggingId(projId); e.dataTransfer.effectAllowed = "move"; };
@@ -2495,10 +2509,16 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
   const [syncPreview, setSyncPreview] = useState(null);
   const [syncStatus, setSyncStatus] = useState(null);
   const [applyLoading, setApplyLoading] = useState(false);
+  const [syncLog, setSyncLog] = useState([]); // v4.0.1 — sync history
 
   useEffect(() => {
-    const unsub = onValue(ref(db, "hubspotSync/status"), s => setSyncStatus(s.val()), { onlyOnce: false });
-    return () => unsub();
+    const unsubStatus = onValue(ref(db, "hubspotSync/status"), s => setSyncStatus(s.val()), { onlyOnce: false });
+    const unsubLog = onValue(ref(db, "hubspotSync/log"), s => {
+      const v = s.val() || {};
+      const arr = Object.values(v).sort((a, b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
+      setSyncLog(arr);
+    }, { onlyOnce: false });
+    return () => { unsubStatus(); unsubLog(); };
   }, []);
 
   const runPreview = async () => {
@@ -2719,6 +2739,63 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
               {syncPreview.length > 50 && <p style={{ fontSize: 13, color: "#94A3B8", marginTop: 8, fontFamily: F }}>…and {syncPreview.length - 50} more</p>}
             </div>
           )}
+
+          {/* v4.0.1 — Sync History */}
+          <div style={{ ...S.card, marginTop: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F }}>Sync History</div>
+              <span style={{ fontSize: 12, color: "#94A3B8", fontFamily: F }}>{syncLog.length} entries</span>
+            </div>
+            <p style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginBottom: 12 }}>Every sync (manual or scheduled) logs an entry below. Newest first.</p>
+            {syncLog.length === 0 ? (
+              <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>No syncs recorded yet. Run a sync above to populate.</div>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: F }}>
+                <thead>
+                  <tr>
+                    <th style={{ ...S.th, fontSize: 11 }}>When</th>
+                    <th style={{ ...S.th, fontSize: 11 }}>Type</th>
+                    <th style={{ ...S.th, fontSize: 11 }}>Mode</th>
+                    <th style={{ ...S.th, fontSize: 11 }}>Result</th>
+                    <th style={{ ...S.th, fontSize: 11, textAlign: "right" }}>Total</th>
+                    <th style={{ ...S.th, fontSize: 11, textAlign: "right" }}>New</th>
+                    <th style={{ ...S.th, fontSize: 11, textAlign: "right" }}>Updated</th>
+                    <th style={{ ...S.th, fontSize: 11, textAlign: "right" }}>Duration</th>
+                    <th style={{ ...S.th, fontSize: 11 }}>Actor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {syncLog.slice(0, 50).map((e, i) => {
+                    const stateColor = e.state === "success" ? { bg: "#ECFDF5", fg: "#059669" } : e.state === "error" ? { bg: "#FEE2E2", fg: "#B91C1C" } : { bg: "#FEF3C7", fg: "#D97706" };
+                    const typeBadge = e.type === "manual" ? { bg: "#EFF6FF", fg: "#3B82F6", label: "Manual" } : { bg: "#F3E8FF", fg: "#9333EA", label: "Scheduled" };
+                    return (
+                      <tr key={i} style={{ borderBottom: "1px solid #F1F5F9" }}>
+                        <td style={{ ...S.td, fontSize: 12 }}>{e.startedAt ? new Date(e.startedAt).toLocaleString() : "—"}</td>
+                        <td style={S.td}><Chip small color={typeBadge.bg} fg={typeBadge.fg}>{typeBadge.label}</Chip></td>
+                        <td style={{ ...S.td, fontSize: 12, color: "#64748B" }}>{e.mode || "—"}</td>
+                        <td style={S.td}><Chip small color={stateColor.bg} fg={stateColor.fg}>{e.state}</Chip></td>
+                        <td style={{ ...S.td, fontSize: 12, textAlign: "right" }}>{e.total ?? "—"}</td>
+                        <td style={{ ...S.td, fontSize: 12, textAlign: "right", color: "#059669" }}>{e.newCount ?? "—"}</td>
+                        <td style={{ ...S.td, fontSize: 12, textAlign: "right", color: "#3B82F6" }}>{e.updatedCount ?? "—"}</td>
+                        <td style={{ ...S.td, fontSize: 12, textAlign: "right", color: "#94A3B8" }}>{e.durationMs != null ? `${(e.durationMs / 1000).toFixed(1)}s` : "—"}</td>
+                        <td style={{ ...S.td, fontSize: 12, color: "#64748B" }}>{e.actorEmail || e.actorUid || "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+            {syncLog.some(e => e.error) && (
+              <div style={{ marginTop: 10, padding: 10, background: "#FEF2F2", borderLeft: "3px solid #DC2626", borderRadius: 6 }}>
+                <div style={{ fontSize: 11, color: "#B91C1C", fontFamily: F, fontWeight: 600, marginBottom: 4 }}>Recent errors</div>
+                {syncLog.filter(e => e.error).slice(0, 3).map((e, i) => (
+                  <div key={i} style={{ fontSize: 12, color: "#7F1D1D", fontFamily: F, marginBottom: 4 }}>
+                    {new Date(e.startedAt).toLocaleString()} — {e.error}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
