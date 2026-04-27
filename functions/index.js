@@ -236,9 +236,9 @@ async function fetchAllHubspotObjects(token) {
 }
 
 /* ═══ SYNC LOG — v4.0.1: append-only history of all syncs ═══ */
+/* Use push() — Firebase auto-IDs are path-safe and sortable; ISO timestamps contain "." which is forbidden in DB paths. */
 async function writeSyncLogEntry(entry) {
-  const id = `${entry.startedAt}_${Math.random().toString(36).slice(2, 7)}`;
-  await db.ref(`hubspotSync/log/${id}`).set(entry);
+  await db.ref("hubspotSync/log").push(entry);
 }
 
 /* ═══ CORE SYNC LOGIC ═══ */
@@ -541,11 +541,11 @@ exports.askProjectBot = functions.https.onCall(async (data, context) => {
 /* ═══ v4.0.0 SECURITY ═══ */
 
 // Audit log writer — server-only. Rules block client writes (auditLog/.write: false).
-// Shape: auditLog/{isoTs_random}: { ts, actor, action, target, meta }
+// Shape: auditLog/{firebasePushId}: { ts, actor, action, target, meta }
+// Use push() — Firebase auto-IDs are path-safe and chronologically sortable.
 async function writeAuditEntry(actor, action, target, meta) {
   const ts = new Date().toISOString();
-  const id = `${ts}_${Math.random().toString(36).slice(2, 8)}`;
-  await db.ref(`auditLog/${id}`).set({ ts, actor, action, target: target || null, meta: meta || null });
+  await db.ref("auditLog").push({ ts, actor, action, target: target || null, meta: meta || null });
 }
 
 // URL validator — reject empty, non-https, javascript:, data: URIs.

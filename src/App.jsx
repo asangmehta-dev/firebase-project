@@ -2699,7 +2699,7 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
           <div style={{ ...S.card, marginBottom: 16, borderLeft: "3px solid #FF7A59" }}>
             <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 8 }}>HubSpot Sync</div>
             <p style={{ fontSize: 14, color: "#64748B", fontFamily: F, marginBottom: 12 }}>
-              Syncs all projects from all 6 HubSpot pipelines. Preview first, then confirm to apply changes to the webapp.
+              Syncs all projects from all 7 HubSpot pipelines (Hardware Deployment, Data Source, MES Integration, Station Return, Image Source, Data Analytics, SI Partner Deployment). Preview first, then confirm to apply changes to the webapp.
               Auto-sync runs every Tuesday and Friday at 9am PDT.
             </p>
             {syncStatus && (

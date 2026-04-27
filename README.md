@@ -1,6 +1,6 @@
 # Deployment Portal
 
-**Version:** v4.0.1
+**Version:** v4.0.2
 
 A React 18 web application serving as a consolidated PMO-style frontend UI for the Customer Experience team to track and proactively manage risks/issues with CMs and customers. Speaks directly to HubSpot to provide real-time information on all projects in the deployment and sales pipeline. Coordinates documentation, milestones, and program details across Instrumental, Systems Integrator (SI), Customer, and CM stakeholders via a unified Project Details / Commercial / Training model.
 
@@ -29,7 +29,7 @@ The goal of this Webapp is to have a consolidated "PMO" Style frontend UI that t
 - **Multi-language UI** — English, Español, Tiếng Việt, 繁體中文, 简体中文
 - **Site status banner** — Admin-editable broadcast message shown to all users
 - **Inline editing** — Admins can edit milestone descriptions and checklist labels in place
-- **HubSpot CRM sync** — Auto-imports all projects from 6 HubSpot pipelines (Tue/Fri 9am PDT); admin preview + manual trigger
+- **HubSpot CRM sync** — Auto-imports all projects from 7 HubSpot pipelines (Tue/Fri 9am PDT); admin preview + manual trigger
 - **Projects Overview** — Instrumental/admin-only summary view showing all **active** projects: Demand Plan (aggregated hardware requirements), per-pipeline stage-distribution bar charts, and stage-by-stage project breakdown
 - **Per-project hardware section** — HubSpot-synced hardware values shown read-only; Instrumental users can add custom manual hardware types per project
 - **DB-level access control** — External users can only read projects they've been explicitly assigned to (enforced at Firebase Realtime Database rules level, not just UI)
@@ -48,7 +48,7 @@ The goal of this Webapp is to have a consolidated "PMO" Style frontend UI that t
 | Hosting | Firebase Hosting |
 | Cloud Functions | Firebase Functions (Node 20) — HubSpot sync, AI Bot (Claude), admin callables, provisioning |
 | AI | Anthropic Claude API (`claude-sonnet-4-20250514`) — Project Bot, drafted project status |
-| CRM | HubSpot Custom Objects API (v3), 6 pipelines |
+| CRM | HubSpot Custom Objects API (v3), 7 pipelines |
 | Legacy hosting | Docker + Nginx on Google Cloud Run (with IAP) |
 | Styles | Inline styles only (no CSS files) |
 
@@ -181,6 +181,7 @@ New users sign in with Google and land in a pending queue until an admin approve
 | v3.3.0 | Security lockdowns, Manage Projects overhaul, SI Kanban, Gantt chart, hardware demand forecast, App Scripts links, AI Project Bot, URL redirect |
 | v4.0.0 | **Security review response** (7 findings) — `users/` read locked to admin + own; `access/` and `commercialAccess/` reads scoped; client-side bootstrap removed (manual admin seed); `provisionUser` Cloud Function for sign-in; admin callables (`adminApprove`/`Deny`/`Delete`/`SetRole`/`SetProjectAccess`/`SetCommercialAccess`) with **audit log** on all sensitive ops; URL validation (https-only, `javascript:`/`data:`/`file:` blocked). **Hardware manual override** (HubSpot value = suggestion; Instrumental users can override per-field, override wins in Demand Plan). **Project Overview** section with 8 fields — CAD Complete, CAD Actual Finish, Actual Service Start, Target Build, Actual Deploy (webapp source of truth) + Target Build at Deal Close + CS Program ID (HubSpot pull-only) + Project Status/Next Steps (Bot-drafted). **AI-drafted Project Status** button wires to existing Project Bot. Folds in uncommitted v3.2.0 + v3.3.0 + Apr 22 sign-in hotfixes. |
 | v4.0.1 | **HubSpot Sync history log** (Admin Panel → HubSpot Sync) — every sync (manual or scheduled) writes an entry to `hubspotSync/log/` with type, actor, state, counts, duration; rendered as a table in the admin UI. **SI Kanban now driven by HubSpot** — added "SI Partner Deployment" pipeline (ID `2206979797`) with 8 stages (SIRD → DFM → Quote → PO → Build → FAT → SAT → Live). Projects in this pipeline auto-populate `siStage` from HubSpot's stage on every sync. SI Kanban filters by pipeline membership (no longer by `[SI]` name pattern), so `[SI]` projects in Hardware Deployment Pipeline stay in Hardware. `hubspotSync/.read` tightened to admin-only. |
+| v4.0.2 | **Hotfix**: `writeSyncLogEntry` and `writeAuditEntry` were building DB keys from ISO timestamps (containing `.`), which Firebase Realtime Database forbids in path segments. Both now use `db.ref(...).push(entry)` — Firebase auto-generates path-safe, time-sortable keys. Also updated admin panel copy from "6 HubSpot pipelines" → "7" to reflect the SI Partner Deployment addition. |
 
 ---
 
