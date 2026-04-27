@@ -235,6 +235,16 @@ async function fetchAllHubspotObjects(token) {
   return all;
 }
 
+/* v4.0.3: Firebase Realtime DB rejects `undefined` in .set() values — recursively swap to null. */
+function sanitizeForFirebase(value) {
+  if (value === undefined) return null;
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(sanitizeForFirebase);
+  const out = {};
+  for (const k of Object.keys(value)) out[k] = sanitizeForFirebase(value[k]);
+  return out;
+}
+
 /* ═══ SYNC LOG — v4.0.1: append-only history of all syncs ═══ */
 /* Use push() — Firebase auto-IDs are path-safe and sortable; ISO timestamps contain "." which is forbidden in DB paths. */
 async function writeSyncLogEntry(entry) {
@@ -303,7 +313,8 @@ async function runSync(token, commit, syncCtx) {
           isSI: incoming_p.isSI,
           // v4.0.1: only overwrite siStage when the incoming project is from the SI Partner pipeline.
           // Hardware Deployment [SI] projects shouldn't have their siStage clobbered to null.
-          siStage: incoming_p.siStage != null ? incoming_p.siStage : merged[idx].siStage,
+          // v4.0.3: coerce undefined → null. Firebase Realtime DB rejects undefined values in .set() calls.
+          siStage: incoming_p.siStage != null ? incoming_p.siStage : (merged[idx].siStage ?? null),
           hubspotPipelineId: incoming_p.hubspotPipelineId,
           hubspotPipelineLabel: incoming_p.hubspotPipelineLabel,
           hubspotStageId: incoming_p.hubspotStageId,
@@ -325,7 +336,7 @@ async function runSync(token, commit, syncCtx) {
     // Write as object keyed by project ID (v3.1.0 schema — enables per-project DB rules)
     const mergedObj = {};
     merged.forEach(p => { if (p && p.id) mergedObj[p.id] = p; });
-    await db.ref("appState/projects").set(mergedObj);
+    await db.ref("appState/projects").set(sanitizeForFirebase(mergedObj));
     // Ensure schema version is set so the app-side migration can skip
     await db.ref("_schemaVersion").set("v3.2.0");
 
