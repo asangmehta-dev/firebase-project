@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
-import { auth, db, functions, googleProvider } from "./firebase";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { auth, db, functions, storage, googleProvider } from "./firebase";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { ref, onValue, set } from "firebase/database";
 import { httpsCallable } from "firebase/functions";
+import { ref as sRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { PIPELINES, STAGES, PIPELINE_LIST } from "./hubspotConfig";
 
 /* ═══ DB HELPERS ═══ */
@@ -25,6 +26,19 @@ const commitUrl = (raw) => {
   const clean = sanitizeUrl(raw);
   if (clean === null) { alert("Invalid URL. Must start with https:// — javascript:, data:, and file: are blocked."); return null; }
   return clean;
+};
+
+/* v4.0.3 — PDF upload to Firebase Storage. Returns the download URL on success, null on cancel/error. */
+const MAX_PDF_BYTES = 50 * 1024 * 1024;
+const uploadPdfToStorage = async (file, projectId) => {
+  if (!file) return null;
+  if (file.type !== "application/pdf") { alert("Only PDF files are allowed."); return null; }
+  if (file.size > MAX_PDF_BYTES) { alert(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max 50 MB.`); return null; }
+  const safeName = (file.name || "upload.pdf").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
+  const path = `uploads/${projectId || "global"}/${Date.now()}_${safeName}`;
+  const fileRef = sRef(storage, path);
+  await uploadBytes(fileRef, file, { contentType: "application/pdf" });
+  return await getDownloadURL(fileRef);
 };
 
 /* Cloud Function callables — v4.0.0 admin + provisioning */
@@ -376,6 +390,45 @@ const Chip = ({ children, color = "#F1F5F9", fg = "#475569", small }) => (
   <span style={{ display: "inline-flex", alignItems: "center", padding: small ? "2px 8px" : "4px 12px", borderRadius: 8, background: color, color: fg, fontSize: small ? 11 : 12, fontWeight: 600, fontFamily: F }}>{children}</span>
 );
 
+/* v4.0.3 — PDF upload button. Wraps a hidden <input type="file"> with progress feedback. */
+function PdfUploadButton({ projectId, onUploaded, label = "📎 Upload PDF", style }) {
+  const inputRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const handleChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (file) e.target.value = ""; // reset so same file can be re-selected
+    if (!file) return;
+    setBusy(true);
+    try {
+      const url = await uploadPdfToStorage(file, projectId);
+      if (url) onUploaded(url, file.name);
+    } catch (err) {
+      console.error("PDF upload failed:", err);
+      alert("Upload failed: " + (err?.message || String(err)));
+    }
+    setBusy(false);
+  };
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        disabled={busy}
+        style={{
+          padding: "6px 12px", fontSize: 12, fontWeight: 600,
+          border: "1px solid #C7D2FE", borderRadius: 6,
+          background: busy ? "#E0E7FF" : "#EEF2FF", color: "#4338CA",
+          cursor: busy ? "wait" : "pointer", fontFamily: F,
+          ...style,
+        }}
+      >
+        {busy ? "Uploading…" : label}
+      </button>
+      <input ref={inputRef} type="file" accept="application/pdf" onChange={handleChange} style={{ display: "none" }} />
+    </>
+  );
+}
+
 /* ═══ LOGIN ═══ */
 function Login({ err }) {
   const [loading, setLoading] = useState(false);
@@ -422,8 +475,11 @@ function PendingApproval({ authUser, onLogout }) {
 function Sidebar({ view, setView, user, project, projects, setProject, onLogout, lang, setLang, hasCommercialAccess }) {
   const admin = isInst(user);
   const dropdownProjects = admin ? projects.filter(p => p.status !== "inactive") : projects.filter(p => p.status === "active");
+  // v4.0.2 — single-control combobox replaces the old <input>+<select> pair (which was glitchy on macOS browsers).
   const [projSearch, setProjSearch] = useState("");
+  const [projOpen, setProjOpen] = useState(false);
   const filteredProjects = projSearch.trim() ? dropdownProjects.filter(p => p.name.toLowerCase().includes(projSearch.trim().toLowerCase())) : dropdownProjects;
+  const pickProject = (p) => { setProject(p); setProjSearch(""); setProjOpen(false); };
   const navActive = (v) => view === v ? { background: "rgba(255,255,255,.1)", color: "#F1F5F9", borderLeftColor: "#00C9A7" } : {};
   return (
     <aside style={S.side}>
@@ -434,14 +490,35 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
           <button onClick={() => setView("projects_overview")} style={{ ...S.navBtn, fontSize: 20, fontWeight: 800, padding: "16px 16px", ...(view === "projects_overview" ? { background: "rgba(0,201,167,.15)", color: "#00C9A7", borderLeftColor: "#00C9A7" } : {}) }}>🌐 All Projects Overview</button>
         </div>
       )}
-      {/* Project dropdown with search */}
-      <div style={{ padding: "0 18px 12px" }}>
+      {/* Project combobox — single control: type to filter, click row to select. */}
+      <div style={{ padding: "0 18px 12px", position: "relative" }}>
         <label style={S.sideLabel}>{t("Project", lang)}</label>
-        <input style={{ ...S.projSelect, marginBottom: 6, padding: "8px 12px", fontSize: 12 }} placeholder="Search projects..." value={projSearch} onChange={e => setProjSearch(e.target.value)} />
-        <select style={S.projSelect} value={project?.id || ""} onChange={e => { setProject(filteredProjects.find(p => p.id === e.target.value) || dropdownProjects.find(p => p.id === e.target.value)); setProjSearch(""); }}>
-          {filteredProjects.length === 0 && <option value="">No projects{projSearch ? " matching search" : ""}</option>}
-          {filteredProjects.map(p => <option key={p.id} value={p.id}>{p.name}{p.status === "deprecated" ? " (Past)" : ""}</option>)}
-        </select>
+        <input
+          style={{ ...S.projSelect, padding: "8px 12px", fontSize: 13 }}
+          placeholder={project ? "" : "Search projects…"}
+          value={projOpen ? projSearch : (project?.name || "")}
+          onChange={e => { setProjSearch(e.target.value); if (!projOpen) setProjOpen(true); }}
+          onFocus={() => { setProjSearch(""); setProjOpen(true); }}
+          onBlur={() => setTimeout(() => setProjOpen(false), 180)}
+        />
+        {projOpen && (
+          <div style={{ position: "absolute", top: "100%", left: 18, right: 18, marginTop: 4, maxHeight: 280, overflowY: "auto", background: "#1E293B", border: "1px solid #334155", borderRadius: 6, zIndex: 100, boxShadow: "0 4px 12px rgba(0,0,0,.35)" }}>
+            {filteredProjects.length === 0 ? (
+              <div style={{ padding: "10px 12px", color: "#64748B", fontSize: 12, fontFamily: F, fontStyle: "italic" }}>No projects{projSearch ? " matching search" : ""}</div>
+            ) : filteredProjects.slice(0, 50).map(p => (
+              <button
+                key={p.id}
+                onMouseDown={() => pickProject(p)}
+                style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: project?.id === p.id ? "rgba(0,201,167,.18)" : "transparent", border: "none", color: "#F1F5F9", fontSize: 13, fontFamily: F, cursor: "pointer", borderBottom: "1px solid rgba(255,255,255,.04)" }}
+                onMouseOver={e => { if (project?.id !== p.id) e.currentTarget.style.background = "rgba(255,255,255,.06)"; }}
+                onMouseOut={e => { if (project?.id !== p.id) e.currentTarget.style.background = "transparent"; }}
+              >
+                {p.name}{p.status === "deprecated" ? " (Past)" : p.status === "inactive" ? " (Inactive)" : ""}
+              </button>
+            ))}
+            {filteredProjects.length > 50 && <div style={{ padding: "6px 12px", fontSize: 11, color: "#94A3B8", fontStyle: "italic" }}>{filteredProjects.length - 50} more — refine your search</div>}
+          </div>
+        )}
       </div>
       <nav style={S.navList}>
         {/* Overview — slightly bigger font */}
@@ -930,12 +1007,16 @@ function ProjectDetailsView({ user, project, state, setState, lang = "en" }) {
                 <div style={{ marginTop: 12, padding: 14, background: "#F8FAFC", borderRadius: 10 }}>
                   <label style={S.lbl}>Name</label>
                   <input style={S.inp} value={itemForm.name} onChange={e => setItemForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Pin Inspection Spec v2.1" />
-                  <label style={S.lbl}>URL</label>
-                  <input style={S.inp} value={itemForm.url} onChange={e => setItemForm(f => ({ ...f, url: e.target.value }))} placeholder="https://..." />
-                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <label style={S.lbl}>URL <span style={{ color: "#94A3B8", fontWeight: 400 }}>(or upload PDF below)</span></label>
+                  <input style={S.inp} value={itemForm.url} onChange={e => setItemForm(f => ({ ...f, url: e.target.value, type: "link" }))} placeholder="https://..." />
+                  <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
                     <button style={{ ...S.btnMain, width: "auto", padding: "10px 18px", marginTop: 0 }} onClick={() => addItem(cat.id)}>Add</button>
+                    <PdfUploadButton projectId={pid} onUploaded={(url, fileName) => {
+                      setItemForm(f => ({ ...f, url, type: "pdf", name: f.name?.trim() || fileName.replace(/\.pdf$/i, "") }));
+                    }} />
                     <button style={{ ...S.btnFlat, width: "auto" }} onClick={() => { setAddingItem(null); setItemForm({ name: "", url: "", type: "link", lang: "en" }); }}>Cancel</button>
                   </div>
+                  {itemForm.url && itemForm.type === "pdf" && <div style={{ fontSize: 12, color: "#059669", fontFamily: F, marginTop: 8 }}>✓ PDF uploaded — click Add to save.</div>}
                 </div>
               ) : (
                 <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
@@ -970,100 +1051,144 @@ function ProjectDetailsView({ user, project, state, setState, lang = "en" }) {
 }
 
 /* Checklist Section — renders milestone groups with the v3.2.0 item schema */
+// v4.0.3 — ChecklistSection: clean checkbox + label rows. Instrumental users can add/delete tasks.
+// All hooks declared at top level — no IIFE/conditional hooks (the v3.x bug that crashed Chrome).
 function ChecklistSection({ cat, cats, updateCats, user, canEdit, pid, lang }) {
   const [expanded, setExpanded] = useState({});
+  const [addingTo, setAddingTo] = useState(null); // milestone id currently showing the "Add task" input
+  const [newTaskLabel, setNewTaskLabel] = useState("");
   const toggleExpand = (msId) => setExpanded(prev => ({ ...prev, [msId]: !prev[msId] }));
 
   const updateMilestone = (msId, updater) => {
     updateCats(cats.map(c => c.id !== cat.id ? c : { ...c, milestones: (c.milestones||[]).map(ms => ms.id !== msId ? ms : updater(ms)) }));
   };
   const toggleCheck = (msId, ckId) => updateMilestone(msId, ms => ({ ...ms, checklist: ms.checklist.map(ck => ck.id !== ckId ? ck : { ...ck, checked: !ck.checked }) }));
-  const toggleNA = (msId, ckId) => updateMilestone(msId, ms => ({ ...ms, checklist: ms.checklist.map(ck => ck.id !== ckId ? ck : { ...ck, na: !ck.na, checked: ck.na ? ck.checked : false }) }));
-  const updateField = (msId, ckId, field, val) => updateMilestone(msId, ms => ({ ...ms, checklist: ms.checklist.map(ck => ck.id !== ckId ? ck : { ...ck, [field]: val }) }));
-  const addItem = (msId, label) => updateMilestone(msId, ms => ({ ...ms, checklist: [...ms.checklist, { id: genId(), label, checked: false, na: false, ownership: "", startDate: null, projectedDate: null, actualDate: null, sopLink: null }] }));
+  const addTask = (msId, label) => {
+    const trimmed = (label || "").trim();
+    if (!trimmed) return;
+    updateMilestone(msId, ms => ({
+      ...ms,
+      checklist: [...(ms.checklist || []), {
+        id: genId(), label: trimmed, checked: false, na: false,
+        ownership: "", startDate: null, projectedDate: null, actualDate: null, sopLink: null,
+        addedBy: user.name, addedAt: new Date().toISOString(),
+      }],
+    }));
+    setNewTaskLabel("");
+    setAddingTo(null);
+  };
+  const deleteTask = (msId, ckId) => {
+    if (!confirm("Delete this task?")) return;
+    updateMilestone(msId, ms => ({ ...ms, checklist: ms.checklist.filter(ck => ck.id !== ckId) }));
+  };
+
+  const canCheck = canEdit || isInst(user); // Instrumental users can tick + add/delete tasks
 
   return (
     <div style={{ ...S.card, marginBottom: 12, borderLeft: "3px solid #6366F1" }}>
       <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 12 }}>{cat.name}</div>
-      {(cat.milestones||[]).map(ms => {
-        const activeChecks = ms.checklist.filter(ck => !ck.na);
+      {(cat.milestones || []).map(ms => {
+        const items = ms.checklist || [];
+        const activeChecks = items.filter(ck => !ck.na);
         const doneCount = activeChecks.filter(ck => ck.checked).length;
         const pct = activeChecks.length > 0 ? Math.round((doneCount / activeChecks.length) * 100) : 0;
-        const isOpen = expanded[ms.id];
+        const isOpen = !!expanded[ms.id];
+
         return (
           <div key={ms.id} style={{ marginBottom: 10, background: "#F8FAFC", borderRadius: 12, border: "1px solid #F1F5F9", overflow: "hidden" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", cursor: "pointer" }} onClick={() => toggleExpand(ms.id)}>
-              <div style={{ width: 8, height: 8, borderRadius: 4, background: ms.color || "#00C9A7" }} />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A", fontFamily: F }}>{ms.name}</div>
-                {ms.description && <div style={{ fontSize: 12, color: "#64748B", fontFamily: F }}>{ms.description}</div>}
-                {ms.gatedBy && <div style={{ fontSize: 11, color: "#94A3B8", fontFamily: F }}>Gated by: {ms.gatedBy}</div>}
+            {/* Milestone header — click to expand/collapse */}
+            <button
+              type="button"
+              onClick={() => toggleExpand(ms.id)}
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", cursor: "pointer", width: "100%", border: "none", background: "transparent", textAlign: "left", fontFamily: F }}
+            >
+              <div style={{ width: 8, height: 8, borderRadius: 4, background: ms.color || "#00C9A7", flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A" }}>{ms.name}</div>
+                {ms.description && <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{ms.description}</div>}
               </div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: pct === 100 ? "#059669" : "#64748B", fontFamily: F }}>{doneCount}/{activeChecks.length} ({pct}%)</div>
-              <Bar value={pct} color={ms.color || "#00C9A7"} h={4} />
-              <span style={{ fontSize: 12, color: "#94A3B8" }}>{isOpen ? "▼" : "▶"}</span>
-            </div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: pct === 100 ? "#059669" : "#64748B", flexShrink: 0 }}>
+                {doneCount}/{activeChecks.length}{activeChecks.length > 0 ? ` (${pct}%)` : ""}
+              </div>
+              <span style={{ fontSize: 12, color: "#94A3B8", flexShrink: 0 }}>{isOpen ? "▼" : "▶"}</span>
+            </button>
+
+            {/* Tasks list — checkbox + label per row, with Add task + delete affordances for Instrumental */}
             {isOpen && (
-              <div style={{ padding: "0 16px 12px" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, fontFamily: F }}>
-                  <thead>
-                    <tr>
-                      <th style={{ ...S.th, fontSize: 10, padding: "6px 4px", width: 30 }}></th>
-                      <th style={{ ...S.th, fontSize: 10, padding: "6px 4px" }}>Item</th>
-                      <th style={{ ...S.th, fontSize: 10, padding: "6px 4px", width: 80 }}>Owner</th>
-                      <th style={{ ...S.th, fontSize: 10, padding: "6px 4px", width: 90 }}>Proj. Date</th>
-                      <th style={{ ...S.th, fontSize: 10, padding: "6px 4px", width: 90 }}>Actual</th>
-                      <th style={{ ...S.th, fontSize: 10, padding: "6px 4px", width: 50 }}>SOP</th>
-                      <th style={{ ...S.th, fontSize: 10, padding: "6px 4px", width: 40 }}>N/A</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ms.checklist.map(ck => (
-                      <tr key={ck.id} style={{ opacity: ck.na ? 0.4 : 1, textDecoration: ck.na ? "line-through" : "none" }}>
-                        <td style={{ ...S.td, padding: "6px 4px", textAlign: "center" }}>
-                          <div onClick={() => !ck.na && (canEdit || isInst(user)) && toggleCheck(ms.id, ck.id)} style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${ck.checked ? "#00C9A7" : "#CBD5E1"}`, background: ck.checked ? "#00C9A7" : "#FFF", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#FFF", fontWeight: 800, cursor: ck.na ? "default" : "pointer" }}>{ck.checked ? "✓" : ""}</div>
-                        </td>
-                        <td style={{ ...S.td, padding: "6px 4px", fontSize: 13 }}>{ck.label}</td>
-                        <td style={{ ...S.td, padding: "6px 4px" }}>
-                          {canEdit ? <input style={{ ...S.inp, padding: "2px 4px", fontSize: 11, width: "100%" }} value={ck.ownership || ""} onChange={e => updateField(ms.id, ck.id, "ownership", e.target.value)} /> : <span style={{ fontSize: 11 }}>{ck.ownership || "—"}</span>}
-                        </td>
-                        <td style={{ ...S.td, padding: "6px 4px" }}>
-                          {canEdit ? <input type="date" style={{ ...S.inp, padding: "2px 4px", fontSize: 11, width: "100%" }} value={ck.projectedDate || ""} onChange={e => updateField(ms.id, ck.id, "projectedDate", e.target.value)} /> : <span style={{ fontSize: 11 }}>{ck.projectedDate || "—"}</span>}
-                        </td>
-                        <td style={{ ...S.td, padding: "6px 4px" }}>
-                          {canEdit ? <input type="date" style={{ ...S.inp, padding: "2px 4px", fontSize: 11, width: "100%" }} value={ck.actualDate || ""} onChange={e => updateField(ms.id, ck.id, "actualDate", e.target.value)} /> : <span style={{ fontSize: 11 }}>{ck.actualDate || "—"}</span>}
-                        </td>
-                        <td style={{ ...S.td, padding: "6px 4px", textAlign: "center" }}>
-                          {ck.sopLink ? <a href={ck.sopLink} target="_blank" rel="noopener noreferrer" style={{ color: "#0284C7", fontSize: 11 }}>Link</a> : (canEdit ? <input style={{ ...S.inp, padding: "2px 4px", fontSize: 11, width: "100%" }} defaultValue="" onBlur={e => { const v = e.target.value; if (!v) return; const clean = commitUrl(v); if (clean) updateField(ms.id, ck.id, "sopLink", clean); else e.target.value = ""; }} placeholder="https://..." /> : "—")}
-                        </td>
-                        <td style={{ ...S.td, padding: "6px 4px", textAlign: "center" }}>
-                          {canEdit && <button style={{ border: "none", background: ck.na ? "#FEF3C7" : "#F1F5F9", color: ck.na ? "#D97706" : "#94A3B8", fontSize: 10, borderRadius: 4, padding: "2px 6px", cursor: "pointer", fontFamily: F }} onClick={() => toggleNA(ms.id, ck.id)}>{ck.na ? "N/A" : "—"}</button>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {canEdit && (() => {
-                  const [newLabel, setNewLabel] = useState("");
-                  return (
-                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                      <input style={{ ...S.inp, flex: 1, padding: "6px 10px", fontSize: 12 }} value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder="Add checklist item..." onKeyDown={e => { if (e.key === "Enter" && newLabel.trim()) { addItem(ms.id, newLabel.trim()); setNewLabel(""); } }} />
-                      <button style={{ ...S.btnMain, width: "auto", padding: "6px 14px", fontSize: 12, marginTop: 0 }} onClick={() => { if (newLabel.trim()) { addItem(ms.id, newLabel.trim()); setNewLabel(""); } }}>+ Add</button>
-                    </div>
-                  );
-                })()}
-                {/* Signatures */}
-                {(ms.signatures||[]).length > 0 && (
-                  <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #F1F5F9" }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B", fontFamily: F, marginBottom: 6 }}>Signatures</div>
-                    {ms.signatures.map(sig => (
-                      <div key={sig.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13, fontFamily: F }}>
-                        <div onClick={() => canEdit && updateMilestone(ms.id, m => ({ ...m, signatures: m.signatures.map(s => s.id !== sig.id ? s : { ...s, signed: !s.signed, signedAt: s.signed ? null : new Date().toISOString(), name: s.signed ? "" : user.name, email: s.signed ? "" : user.email }) }))} style={{ width: 16, height: 16, borderRadius: 3, border: `2px solid ${sig.signed ? "#059669" : "#CBD5E1"}`, background: sig.signed ? "#059669" : "#FFF", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "#FFF", cursor: canEdit ? "pointer" : "default" }}>{sig.signed ? "✓" : ""}</div>
-                        <span style={{ color: "#475569" }}>{sig.role}</span>
-                        {sig.signed && <span style={{ color: "#059669", fontSize: 11 }}> — {sig.name} ({fmtDate(sig.signedAt)})</span>}
+              <div style={{ padding: "4px 16px 14px" }}>
+                {items.length === 0 ? (
+                  <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", padding: "6px 0" }}>No tasks in this section.</div>
+                ) : (
+                  items.map(ck => {
+                    const disabled = ck.na || !canCheck;
+                    return (
+                      <div key={ck.id} style={{ display: "flex", alignItems: "center", borderBottom: "1px solid #F1F5F9" }}>
+                        <button
+                          type="button"
+                          disabled={disabled}
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (!disabled) toggleCheck(ms.id, ck.id); }}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 10,
+                            flex: 1, padding: "8px 6px",
+                            background: "transparent", border: "none",
+                            textAlign: "left", fontFamily: F, fontSize: 13,
+                            color: ck.na ? "#94A3B8" : "#1E293B",
+                            textDecoration: ck.na ? "line-through" : "none",
+                            cursor: disabled ? "default" : "pointer",
+                          }}
+                        >
+                          <div style={{
+                            width: 18, height: 18, flexShrink: 0,
+                            borderRadius: 4,
+                            border: `2px solid ${ck.checked ? "#00C9A7" : "#CBD5E1"}`,
+                            background: ck.checked ? "#00C9A7" : "#FFF",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            fontSize: 11, color: "#FFF", fontWeight: 800,
+                          }}>{ck.checked ? "✓" : ""}</div>
+                          <span style={{ flex: 1 }}>{ck.label}</span>
+                          {ck.ownership && <span style={{ fontSize: 11, color: "#94A3B8" }}>· {ck.ownership}</span>}
+                        </button>
+                        {canCheck && (
+                          <button
+                            type="button"
+                            title="Delete task"
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); deleteTask(ms.id, ck.id); }}
+                            style={{ border: "none", background: "transparent", color: "#CBD5E1", padding: "4px 10px", cursor: "pointer", fontSize: 16, fontFamily: F, lineHeight: 1 }}
+                            onMouseOver={e => e.currentTarget.style.color = "#DC2626"}
+                            onMouseOut={e => e.currentTarget.style.color = "#CBD5E1"}
+                          >×</button>
+                        )}
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })
+                )}
+
+                {/* Add task UI — Instrumental users only */}
+                {canCheck && (
+                  addingTo === ms.id ? (
+                    <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                      <input
+                        autoFocus
+                        type="text"
+                        value={newTaskLabel}
+                        onChange={e => setNewTaskLabel(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === "Enter") { e.preventDefault(); addTask(ms.id, newTaskLabel); }
+                          if (e.key === "Escape") { setAddingTo(null); setNewTaskLabel(""); }
+                        }}
+                        placeholder="Type a new task and press Enter"
+                        style={{ flex: 1, padding: "6px 10px", fontSize: 13, fontFamily: F, border: "1px solid #C7D2FE", borderRadius: 6, outline: "none" }}
+                      />
+                      <button type="button" onClick={() => addTask(ms.id, newTaskLabel)} style={{ padding: "6px 14px", fontSize: 12, fontWeight: 600, border: "none", borderRadius: 6, background: "#00C9A7", color: "#FFF", cursor: "pointer", fontFamily: F }}>Add</button>
+                      <button type="button" onClick={() => { setAddingTo(null); setNewTaskLabel(""); }} style={{ padding: "6px 12px", fontSize: 12, border: "1px solid #E2E8F0", borderRadius: 6, background: "#FFF", color: "#64748B", cursor: "pointer", fontFamily: F }}>Cancel</button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => { setAddingTo(ms.id); setNewTaskLabel(""); }}
+                      style={{ marginTop: 10, padding: "6px 12px", fontSize: 12, fontWeight: 600, border: "1px dashed #C7D2FE", borderRadius: 6, background: "transparent", color: "#4338CA", cursor: "pointer", fontFamily: F }}
+                    >+ Add task</button>
+                  )
                 )}
               </div>
             )}
@@ -1211,11 +1336,16 @@ function CommercialView({ user, project, state, setState, lang = "en" }) {
             {canEdit && (addingItem === cat.id ? (
               <div style={{ marginTop: 12, padding: 14, background: "#F8FAFC", borderRadius: 10 }}>
                 <label style={S.lbl}>Name</label><input style={S.inp} value={itemForm.name} onChange={e => setItemForm(f => ({ ...f, name: e.target.value }))} />
-                <label style={S.lbl}>URL</label><input style={S.inp} value={itemForm.url} onChange={e => setItemForm(f => ({ ...f, url: e.target.value }))} placeholder="https://..." />
-                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <label style={S.lbl}>URL <span style={{ color: "#94A3B8", fontWeight: 400 }}>(or upload PDF below)</span></label>
+                <input style={S.inp} value={itemForm.url} onChange={e => setItemForm(f => ({ ...f, url: e.target.value, type: "link" }))} placeholder="https://..." />
+                <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
                   <button style={{ ...S.btnMain, width: "auto", padding: "10px 18px", marginTop: 0 }} onClick={() => addItem(cat.id)}>Add</button>
+                  <PdfUploadButton projectId={pid} onUploaded={(url, fileName) => {
+                    setItemForm(f => ({ ...f, url, type: "pdf", name: f.name?.trim() || fileName.replace(/\.pdf$/i, "") }));
+                  }} />
                   <button style={{ ...S.btnFlat, width: "auto" }} onClick={() => setAddingItem(null)}>Cancel</button>
                 </div>
+                {itemForm.url && itemForm.type === "pdf" && <div style={{ fontSize: 12, color: "#059669", fontFamily: F, marginTop: 8 }}>✓ PDF uploaded — click Add to save.</div>}
               </div>
             ) : <button style={S.btnAddItem} onClick={() => setAddingItem(cat.id)}>+ Add Document</button>)}
           </div>
@@ -1330,11 +1460,16 @@ function TrainingView({ user, project, state, setState, lang = "en" }) {
               {["white","blue","black"].map(b => <button key={b} onClick={() => setMatForm(f => ({...f, belt: b}))} style={{ ...S.typeBtn, ...(matForm.belt === b ? S.typeBtnActive : {}) }}>{BELT_LEVELS[b].icon} {BELT_LEVELS[b].name}</button>)}
             </div>
             <label style={S.lbl}>Title</label><input style={S.inp} value={matForm.name} onChange={e => setMatForm(f => ({...f, name: e.target.value}))} />
-            <label style={S.lbl}>URL</label><input style={S.inp} value={matForm.url} onChange={e => setMatForm(f => ({...f, url: e.target.value}))} placeholder="https://..." />
-            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <label style={S.lbl}>URL <span style={{ color: "#94A3B8", fontWeight: 400 }}>(or upload PDF below)</span></label>
+            <input style={S.inp} value={matForm.url} onChange={e => setMatForm(f => ({...f, url: e.target.value}))} placeholder="https://..." />
+            <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
               <button style={{ ...S.btnMain, width: "auto", padding: "8px 16px", marginTop: 0 }} onClick={addMaterial}>Add</button>
+              <PdfUploadButton projectId={pid} onUploaded={(url, fileName) => {
+                setMatForm(f => ({ ...f, url, name: f.name?.trim() || fileName.replace(/\.pdf$/i, "") }));
+              }} />
               <button style={{ ...S.btnFlat, width: "auto" }} onClick={() => setAddMat(false)}>Cancel</button>
             </div>
+            {matForm.url && /firebasestorage/.test(matForm.url) && <div style={{ fontSize: 12, color: "#059669", fontFamily: F, marginTop: 8 }}>✓ PDF uploaded — click Add to save.</div>}
           </div>
         )}
       </>)}
@@ -1598,12 +1733,28 @@ function SIKanbanView({ projects, state, setState }) {
   const onDrop = (e, stageId) => { e.preventDefault(); if (draggingId) setStage(draggingId, stageId); setDraggingId(null); setDragOverStage(null); };
 
   return (
-    <div style={{ marginBottom: 24 }}>
-      <h3 style={{ ...S.h3, marginBottom: 6 }}>SI Deployment Kanban (Active SI Projects)</h3>
-      <p style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginBottom: 14 }}>Drag project cards between stages to update their position. {siProjects.length} SI project{siProjects.length !== 1 ? "s" : ""} tracked.</p>
+    <div style={{
+      marginTop: 24,
+      marginBottom: 32,
+      padding: "20px 22px",
+      background: "linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)",
+      border: "2px solid #3B82F6",
+      borderRadius: 12,
+      boxShadow: "0 4px 12px rgba(59, 130, 246, 0.12)",
+      position: "relative",
+    }}>
+      {/* Distinct top label so this section is clearly NOT the Hardware Deployment data */}
+      <div style={{ position: "absolute", top: -12, left: 16, padding: "2px 10px", background: "#3B82F6", color: "#FFF", fontSize: 11, fontWeight: 700, letterSpacing: 1, borderRadius: 4, fontFamily: F }}>
+        SI PARTNER DEPLOYMENT PIPELINE
+      </div>
+      <h3 style={{ ...S.h3, marginTop: 4, marginBottom: 6, color: "#1E40AF" }}>🤝 SI Deployment Kanban</h3>
+      <p style={{ fontSize: 13, color: "#1E40AF", fontFamily: F, marginBottom: 14 }}>
+        <b>Separate from Hardware Deployment.</b> Only shows projects in HubSpot's "SI Partner Deployment" pipeline. Drag cards between stages to update locally.
+        &nbsp;{siProjects.length} SI project{siProjects.length !== 1 ? "s" : ""} tracked.
+      </p>
 
       {/* SI Process link */}
-      <a href="https://script.google.com/a/macros/instrumental.com/s/AKfycbxOAtRNRm2_-XIPPK1fPKW-O55uVtMhMZSDcdZiR4xRqRBmtYgqURhAZ8MPg3RVsvNG/exec" target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, background: "#EFF6FF", color: "#3B82F6", fontSize: 12, fontWeight: 600, textDecoration: "none", fontFamily: F, marginBottom: 14 }}>
+      <a href="https://script.google.com/a/macros/instrumental.com/s/AKfycbxOAtRNRm2_-XIPPK1fPKW-O55uVtMhMZSDcdZiR4xRqRBmtYgqURhAZ8MPg3RVsvNG/exec" target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, background: "#FFF", color: "#3B82F6", fontSize: 12, fontWeight: 600, textDecoration: "none", fontFamily: F, marginBottom: 14 }}>
         SI Process, RACI & Principles ↗
       </a>
 
@@ -1939,564 +2090,6 @@ function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
   );
 }
 
-/* ═══ MILESTONE CARD (reused from existing) ═══ */
-function MilestoneCard({ milestone: ms, catId, isAdmin, projectId, onToggleCheck, onAddCheckItem, onDeleteCheckItem, onAddLink, onDeleteLink, onUpdateSignature, onToggleSignature, onAddSignature, onDeleteSignature, onUpdateDesc, onUpdateCheckLabel, lang = "en" }) {
-  const [expanded, setExpanded] = useState(false);
-  const [newCheck, setNewCheck] = useState("");
-  const [newLinkName, setNewLinkName] = useState("");
-  const [newLinkUrl, setNewLinkUrl] = useState("");
-  const [editingDesc, setEditingDesc] = useState(false);
-  const [descDraft, setDescDraft] = useState(ms.description || "");
-  const [editingCk, setEditingCk] = useState(null);
-  const [ckDraft, setCkDraft] = useState("");
-  const doneCt = ms.checklist.filter(c => c.checked).length;
-  const totalCt = ms.checklist.length;
-  const pct = totalCt > 0 ? Math.round((doneCt / totalCt) * 100) : 0;
-
-  return (
-    <div style={{ ...S.card, marginBottom: 12, borderLeft: `3px solid ${ms.color}` }}>
-      <button style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", border: "none", background: "none", cursor: "pointer", textAlign: "left", fontFamily: F, padding: 0 }} onClick={() => setExpanded(!expanded)}>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F }}>{ms.name}</div>
-        </div>
-        <div style={{ textAlign: "right", minWidth: 60 }}>
-          <div style={{ fontSize: 20, fontWeight: 800, color: ms.color }}>{pct}%</div>
-          <div style={{ fontSize: 11, color: "#94A3B8" }}>{doneCt}/{totalCt}</div>
-        </div>
-        <span style={{ color: "#94A3B8" }}>{expanded ? "▾" : "▸"}</span>
-      </button>
-      {/* Description — editable by admins */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, marginBottom: 6 }}>
-        {isAdmin && editingDesc ? (
-          <input style={{ ...S.inp, flex: 1, fontSize: 13, padding: "4px 8px" }} value={descDraft} onChange={e => setDescDraft(e.target.value)} onBlur={() => { onUpdateDesc(catId, ms.id, descDraft); setEditingDesc(false); }} onKeyDown={e => { if (e.key === "Enter") { onUpdateDesc(catId, ms.id, descDraft); setEditingDesc(false); } if (e.key === "Escape") setEditingDesc(false); }} autoFocus />
-        ) : (
-          <>
-            <span style={{ fontSize: 13, color: "#64748B", fontFamily: F }}>{t(ms.description, lang)}</span>
-            {isAdmin && <button style={{ fontSize: 10, color: "#94A3B8", border: "none", background: "none", cursor: "pointer", padding: "0 2px", lineHeight: 1 }} onClick={() => { setDescDraft(ms.description || ""); setEditingDesc(true); }}>✎</button>}
-          </>
-        )}
-      </div>
-      <Bar value={pct} color={ms.color} h={4} />
-
-      {expanded && (
-        <div style={{ marginTop: 14 }}>
-          {/* Checklist */}
-          {ms.checklist.map(ck => (
-            <div key={ck.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid #F1F5F9" }}>
-              <div onClick={() => isAdmin && onToggleCheck(catId, ms.id, ck.id)} style={{ width: 22, height: 22, borderRadius: 6, border: `2px solid ${ck.checked ? ms.color : "#CBD5E1"}`, background: ck.checked ? ms.color : "#FFF", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: "#FFF", cursor: isAdmin ? "pointer" : "default", flexShrink: 0 }}>{ck.checked ? "✓" : ""}</div>
-              {isAdmin && editingCk === ck.id ? (
-                <input style={{ ...S.inp, flex: 1, fontSize: 14, padding: "4px 8px" }} value={ckDraft} onChange={e => setCkDraft(e.target.value)} onBlur={() => { if (ckDraft.trim()) onUpdateCheckLabel(catId, ms.id, ck.id, ckDraft.trim()); setEditingCk(null); }} onKeyDown={e => { if (e.key === "Enter") { if (ckDraft.trim()) onUpdateCheckLabel(catId, ms.id, ck.id, ckDraft.trim()); setEditingCk(null); } if (e.key === "Escape") setEditingCk(null); }} autoFocus />
-              ) : (
-                <span style={{ flex: 1, fontSize: 14, color: "#1E293B", fontFamily: F, textDecoration: ck.checked ? "line-through" : "none", opacity: ck.checked ? .6 : 1 }}>{t(ck.label, lang)}</span>
-              )}
-              {isAdmin && editingCk !== ck.id && <button style={{ fontSize: 10, color: "#94A3B8", border: "none", background: "none", cursor: "pointer", padding: "0 2px", lineHeight: 1 }} onClick={() => { setCkDraft(ck.label); setEditingCk(ck.id); }}>✎</button>}
-              {isAdmin && editingCk !== ck.id && <button style={{ ...S.btnDel, padding: "2px 6px", fontSize: 10 }} onClick={() => onDeleteCheckItem(catId, ms.id, ck.id)}>✕</button>}
-            </div>
-          ))}
-          {isAdmin && (
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <input style={{ ...S.inp, flex: 1, padding: "8px 10px", fontSize: 13 }} value={newCheck} onChange={e => setNewCheck(e.target.value)} placeholder={t("Add a checklist item...", lang)} onKeyDown={e => { if (e.key === "Enter" && newCheck.trim()) { onAddCheckItem(catId, ms.id, newCheck.trim()); setNewCheck(""); } }} />
-              <button style={{ ...S.btnMain, width: "auto", padding: "8px 14px", fontSize: 12, marginTop: 0 }} onClick={() => { if (newCheck.trim()) { onAddCheckItem(catId, ms.id, newCheck.trim()); setNewCheck(""); } }}>+</button>
-            </div>
-          )}
-
-          {/* Links */}
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#64748B", fontFamily: F, marginBottom: 6 }}>{t("Linked Resources", lang)}</div>
-            {(ms.links || []).map(lk => (
-              <div key={lk.id} style={S.docItemRow}>
-                <span>🔗</span>
-                <div style={{ flex: 1 }}>{lk.url ? <a href={lk.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 14, color: "#0284C7", textDecoration: "none", fontFamily: F }}>{lk.name}</a> : <span style={{ fontSize: 14, fontFamily: F }}>{lk.name}</span>}</div>
-                {isAdmin && <button style={{ ...S.btnDel, padding: "2px 6px", fontSize: 10 }} onClick={() => onDeleteLink(catId, ms.id, lk.id)}>✕</button>}
-              </div>
-            ))}
-            {isAdmin && (
-              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                <input style={{ ...S.inp, flex: 1, padding: "6px 10px", fontSize: 12 }} value={newLinkName} onChange={e => setNewLinkName(e.target.value)} placeholder="Link name" />
-                <input style={{ ...S.inp, flex: 1, padding: "6px 10px", fontSize: 12 }} value={newLinkUrl} onChange={e => setNewLinkUrl(e.target.value)} placeholder="URL" />
-                <button style={{ ...S.btnMain, width: "auto", padding: "6px 12px", fontSize: 12, marginTop: 0 }} onClick={() => { if (newLinkName.trim()) { onAddLink(catId, ms.id, newLinkName.trim(), newLinkUrl.trim()); setNewLinkName(""); setNewLinkUrl(""); } }}>+</button>
-              </div>
-            )}
-          </div>
-
-          {/* Signatures */}
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#64748B", fontFamily: F, marginBottom: 6 }}>{t("Signatures", lang)}</div>
-            {(ms.signatures || []).map(sig => (
-              <div key={sig.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "1px solid #F8FAFC" }}>
-                <span style={{ fontSize: 13, color: sig.signed ? "#16A34A" : "#CBD5E1" }}>{sig.signed ? "✓" : "○"}</span>
-                <span style={{ flex: 1, fontSize: 13, fontFamily: F, color: "#1E293B" }}>{sig.role}{sig.name ? ` — ${sig.name}` : ""}</span>
-                {sig.signed && <span style={{ fontSize: 11, color: "#94A3B8" }}>{fmtDate(sig.signedAt)}</span>}
-                {isAdmin && !sig.signed && <button style={{ ...S.btnEdit, padding: "2px 8px", fontSize: 10 }} onClick={() => onToggleSignature(catId, ms.id, sig.id)}>Sign</button>}
-                {isAdmin && sig.signed && <button style={{ ...S.btnEdit, padding: "2px 8px", fontSize: 10 }} onClick={() => onToggleSignature(catId, ms.id, sig.id)}>Unsign</button>}
-              </div>
-            ))}
-            {isAdmin && (
-              <button style={{ ...S.btnAddItem, marginTop: 6, fontSize: 12 }} onClick={() => onAddSignature(catId, ms.id)}>{t("+ Add Signature", lang)}</button>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ═══ SI VALIDATION SECTION (FAT/SAT) ═══ */
-function SIValidation({ project, state, setState, isAdmin }) {
-  const pid = project?.id;
-  const val = state.docData?.[pid]?._siValidation || { fat: { criteria: "", signatures: [], docs: [] }, sat: { criteria: "", signatures: [], docs: [] } };
-
-  const update = (newVal) => {
-    if (!pid) return;
-    setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid] || {}), _siValidation: newVal } } }));
-  };
-
-  const renderSection = (key, label) => {
-    const sec = val[key] || { criteria: "", signatures: [], docs: [] };
-    return (
-      <div style={{ ...S.card, marginBottom: 12, borderLeft: `3px solid ${key === "fat" ? "#3B82F6" : "#F59E0B"}` }}>
-        <h3 style={{ ...S.h3, fontSize: 17, marginBottom: 10 }}>{label}</h3>
-        {/* Criteria */}
-        <label style={S.lbl}>Criteria</label>
-        {isAdmin ? (
-          <textarea style={{ ...S.inp, minHeight: 60, resize: "vertical" }} value={sec.criteria} onChange={e => update({ ...val, [key]: { ...sec, criteria: e.target.value } })} placeholder={`Enter ${label} criteria...`} />
-        ) : (
-          <p style={{ fontSize: 14, color: "#1E293B", fontFamily: F, whiteSpace: "pre-wrap", padding: "10px 14px", background: "#F8FAFC", borderRadius: 10, border: "1px solid #E2E8F0" }}>{sec.criteria || "No criteria defined yet."}</p>
-        )}
-        {/* Signatures */}
-        <label style={{ ...S.lbl, marginTop: 14 }}>Signatures (Instrumental & SI only)</label>
-        {(sec.signatures || []).map((sig, i) => (
-          <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}>
-            <span style={{ color: sig.signed ? "#16A34A" : "#CBD5E1" }}>{sig.signed ? "✓" : "○"}</span>
-            <span style={{ flex: 1, fontSize: 14, fontFamily: F }}>{sig.role}{sig.name ? ` — ${sig.name}` : ""}</span>
-            {isAdmin && <button style={{ ...S.btnEdit, padding: "2px 8px", fontSize: 10 }} onClick={() => {
-              const newSigs = [...sec.signatures]; newSigs[i] = { ...newSigs[i], signed: !newSigs[i].signed, signedAt: !newSigs[i].signed ? new Date().toISOString() : null };
-              update({ ...val, [key]: { ...sec, signatures: newSigs } });
-            }}>{sig.signed ? "Unsign" : "Sign"}</button>}
-            {isAdmin && <button style={{ ...S.btnDel, padding: "2px 6px", fontSize: 10 }} onClick={() => {
-              update({ ...val, [key]: { ...sec, signatures: sec.signatures.filter((_, j) => j !== i) } });
-            }}>✕</button>}
-          </div>
-        ))}
-        {isAdmin && <button style={{ ...S.btnAddItem, fontSize: 12, marginTop: 6 }} onClick={() => {
-          const role = prompt("Signature role (e.g. 'SI Lead Engineer'):");
-          if (!role) return;
-          update({ ...val, [key]: { ...sec, signatures: [...(sec.signatures||[]), { role, name: "", signed: false, signedAt: null }] } });
-        }}>+ Add Signature</button>}
-        {/* Documents */}
-        <label style={{ ...S.lbl, marginTop: 14 }}>Documents (PDF only)</label>
-        {(sec.docs || []).map((doc, i) => (
-          <div key={i} style={S.docItemRow}>
-            <span>📄</span>
-            <div style={{ flex: 1 }}>{doc.url ? <a href={doc.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 14, color: "#0284C7", fontFamily: F, textDecoration: "none" }}>{doc.name}</a> : <span style={{ fontSize: 14, fontFamily: F }}>{doc.name}</span>}</div>
-            {isAdmin && <button style={{ ...S.btnDel, padding: "2px 6px", fontSize: 10 }} onClick={() => { update({ ...val, [key]: { ...sec, docs: sec.docs.filter((_, j) => j !== i) } }); }}>✕</button>}
-          </div>
-        ))}
-        {isAdmin && <button style={{ ...S.btnAddItem, fontSize: 12, marginTop: 6 }} onClick={() => {
-          const name = prompt("Document name:"); if (!name) return;
-          const rawUrl = prompt("PDF URL (https://...):");
-          const url = commitUrl(rawUrl || ""); if (url === null) return;
-          update({ ...val, [key]: { ...sec, docs: [...(sec.docs||[]), { id: genId(), name, url, type: "pdf" }] } });
-        }}>+ Add PDF Document</button>}
-      </div>
-    );
-  };
-
-  return (
-    <div style={{ marginTop: 24 }}>
-      <h3 style={{ ...S.h3, marginBottom: 12 }}>Validation</h3>
-      {renderSection("fat", "Factory Acceptance Test (FAT)")}
-      {renderSection("sat", "Site Acceptance Test (SAT)")}
-    </div>
-  );
-}
-
-/* ═══ SI APPROVED HARDWARE ═══ */
-function SIHardware({ project, state, setState, isAdmin }) {
-  const pid = project?.id;
-  const hw = state.docData?.[pid]?._siHardware || [];
-
-  const updateHW = (newHw) => {
-    if (!pid) return;
-    setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid] || {}), _siHardware: newHw } } }));
-  };
-
-  return (
-    <div style={{ marginTop: 24 }}>
-      <h3 style={{ ...S.h3, marginBottom: 12 }}>Approved Hardware</h3>
-      <div style={S.card}>
-        <table style={S.table}>
-          <thead><tr><th style={S.th}>Type</th><th style={S.th}>Serial Number</th><th style={S.th}>Instrumental Asset Tag</th>{isAdmin && <th style={S.th}></th>}</tr></thead>
-          <tbody>
-            {hw.length === 0 && <tr><td colSpan={isAdmin ? 4 : 3} style={{ ...S.td, color: "#94A3B8", textAlign: "center", fontFamily: F }}>No hardware entries yet.</td></tr>}
-            {hw.map((item, i) => (
-              <tr key={i}>
-                <td style={{ ...S.td, fontFamily: F }}>{item.type}</td>
-                <td style={{ ...S.td, fontFamily: F }}>{item.serial || "—"}</td>
-                <td style={{ ...S.td, fontFamily: F }}>{item.assetTag || "—"}</td>
-                {isAdmin && <td style={S.td}><button style={{ ...S.btnDel, padding: "2px 8px", fontSize: 10 }} onClick={() => updateHW(hw.filter((_, j) => j !== i))}>✕</button></td>}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {isAdmin && (
-          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-            {HW_TYPES.map(type => (
-              <button key={type} style={S.btnAddItem} onClick={() => {
-                const serial = prompt(`Serial Number for ${type}:`) || "";
-                const tag = prompt(`Instrumental Asset Tag for ${type}:`) || "";
-                updateHW([...hw, { id: genId(), type, serial, assetTag: tag }]);
-              }}>+ {type}</button>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ═══ PROGRAM DETAILS — tasks + milestones with dates ═══ */
-function ProgramDetails({ project, state, setState, isAdmin }) {
-  const pid = project?.id;
-  const prog = state.docData?.[pid]?._programDetails || { tasks: [], docs: [] };
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: "", type: "task", startDate: "", endDate: "", date: "" });
-  const [dragIdx, setDragIdx] = useState(null);
-
-  const updateProg = (p) => { if (!pid) return; setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid] || {}), _programDetails: p } } })); };
-
-  const addItem = () => {
-    if (!form.name.trim()) return;
-    const item = { id: genId(), name: form.name.trim(), type: form.type, startDate: form.type === "task" ? form.startDate : "", endDate: form.type === "task" ? form.endDate : "", date: form.type === "milestone" ? form.date : "", createdAt: new Date().toISOString() };
-    updateProg({ ...prog, tasks: [...(prog.tasks || []), item] });
-    setForm({ name: "", type: "task", startDate: "", endDate: "", date: "" }); setShowForm(false);
-  };
-
-  return (
-    <div style={{ marginTop: 24 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <h3 style={S.h3}>Program Details</h3>
-        {isAdmin && <button style={S.btnAddItem} onClick={() => setShowForm(!showForm)}>{showForm ? "Cancel" : "+ Add Task / Milestone"}</button>}
-      </div>
-
-      {showForm && isAdmin && (
-        <div style={{ ...S.card, marginBottom: 12, background: "#F8FAFC" }}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-            <button onClick={() => setForm(f => ({ ...f, type: "task" }))} style={{ ...S.typeBtn, ...(form.type === "task" ? S.typeBtnActive : {}) }}>📋 Task</button>
-            <button onClick={() => setForm(f => ({ ...f, type: "milestone" }))} style={{ ...S.typeBtn, ...(form.type === "milestone" ? S.typeBtnActive : {}) }}>🏁 Milestone</button>
-          </div>
-          <label style={S.lbl}>Name</label>
-          <input style={S.inp} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder={form.type === "task" ? "e.g. Hardware integration" : "e.g. FAT Complete"} />
-          {form.type === "task" ? (<>
-            <div style={{ display: "flex", gap: 12 }}>
-              <div style={{ flex: 1 }}><label style={S.lbl}>Start Date</label><input type="date" style={S.inp} value={form.startDate} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} /></div>
-              <div style={{ flex: 1 }}><label style={S.lbl}>End Date</label><input type="date" style={S.inp} value={form.endDate} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} /></div>
-            </div>
-          </>) : (<>
-            <label style={S.lbl}>Date</label><input type="date" style={S.inp} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
-          </>)}
-          <button style={{ ...S.btnMain, width: "auto", padding: "10px 20px", marginTop: 12 }} onClick={addItem}>Add {form.type === "task" ? "Task" : "Milestone"}</button>
-        </div>
-      )}
-
-      <div style={S.card}>
-        {(prog.tasks || []).length === 0 && <p style={{ fontSize: 14, color: "#94A3B8", fontFamily: F }}>No tasks or milestones yet.</p>}
-        {(prog.tasks || []).map((item, i) => (
-          <div key={item.id}
-            draggable={isAdmin}
-            onDragStart={() => setDragIdx(i)}
-            onDragOver={e => e.preventDefault()}
-            onDrop={() => { if (dragIdx === null || dragIdx === i) return; const r = [...prog.tasks]; const [m] = r.splice(dragIdx, 1); r.splice(i, 0, m); updateProg({ ...prog, tasks: r }); setDragIdx(null); }}
-            onDragEnd={() => setDragIdx(null)}
-            style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: "1px solid #F1F5F9", opacity: dragIdx === i ? 0.4 : 1, cursor: isAdmin ? "grab" : "default" }}>
-            {isAdmin && <span style={{ color: "#CBD5E1", fontSize: 14, cursor: "grab" }}>⠿</span>}
-            <span style={{ fontSize: 14 }}>{item.type === "task" ? "📋" : "🏁"}</span>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 15, fontWeight: 600, color: "#0F172A", fontFamily: F }}>{item.name}</div>
-              <div style={{ fontSize: 12, color: "#64748B", fontFamily: F }}>
-                {item.type === "task" ? `${fmtDay(item.startDate)} → ${fmtDay(item.endDate)}` : fmtDay(item.date)}
-              </div>
-            </div>
-            <Chip small color={item.type === "task" ? "#EFF6FF" : "#FEF3C7"} fg={item.type === "task" ? "#3B82F6" : "#D97706"}>{item.type}</Chip>
-            {isAdmin && <button style={{ ...S.btnDel, padding: "2px 8px", fontSize: 10 }} onClick={() => updateProg({ ...prog, tasks: prog.tasks.filter((_, j) => j !== i) })}>✕</button>}
-          </div>
-        ))}
-      </div>
-
-      {/* RACI / docs upload */}
-      <div style={{ marginTop: 12 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "#64748B", fontFamily: F, marginBottom: 6 }}>RACI & Program Documents</div>
-        {(prog.docs || []).map((doc, i) => (
-          <div key={i} style={S.docItemRow}>
-            <span>📄</span>
-            <div style={{ flex: 1 }}>{doc.url ? <a href={doc.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 14, color: "#0284C7", fontFamily: F, textDecoration: "none" }}>{doc.name}</a> : <span style={{ fontSize: 14, fontFamily: F }}>{doc.name}</span>}</div>
-            {isAdmin && <button style={{ ...S.btnDel, padding: "2px 6px", fontSize: 10 }} onClick={() => updateProg({ ...prog, docs: prog.docs.filter((_, j) => j !== i) })}>✕</button>}
-          </div>
-        ))}
-        {isAdmin && <button style={{ ...S.btnAddItem, fontSize: 12, marginTop: 6 }} onClick={() => {
-          const name = prompt("Document name (e.g. RACI Matrix):"); if (!name) return;
-          const rawUrl = prompt("URL (https://...):");
-          const url = commitUrl(rawUrl || ""); if (url === null) return;
-          updateProg({ ...prog, docs: [...(prog.docs||[]), { id: genId(), name, url }] });
-        }}>+ Add Document</button>}
-      </div>
-    </div>
-  );
-}
-
-/* ═══ DOCS VIEW — read-only for non-instrumental, PDF-only uploads, training inside ═══ */
-function DocsView({ partyId, user, project, state, setState, lang }) {
-  const pd = PARTY_DEFS[partyId];
-  const displayName = getPN(project, partyId);
-  const pid = project?.id;
-  const cats = pid ? getDocCats(state.docData, pid, partyId) : (SEED_DOC_CATEGORIES[partyId] || []);
-  const [expanded, setExpanded] = useState(null);
-  const [addingItem, setAddingItem] = useState(null);
-  const [itemForm, setItemForm] = useState({ name: "", url: "", type: "link", lang: "en" });
-  const [addingFolder, setAddingFolder] = useState(false);
-  const [msDragIdx, setMsDragIdx] = useState(null);
-  const [folderForm, setFolderForm] = useState({ name: "", accessLevel: "open" });
-  const admin = isInst(user);
-  const canEdit = isInst(user); // all Instrumental users (partyId: instrumental) + admins can edit
-
-  const canAccess = (cat) => {
-    if (cat.accessLevel !== "restricted") return true;
-    if (admin) return true;
-    // Check restricted access grants
-    const grants = state.docData?.[pid]?._restrictedAccess || {};
-    return grants[cat.id]?.includes(user.id);
-  };
-
-  const ensureCats = () => {
-    if (!pid) return cats;
-    if (state.docData?.[pid]?.[partyId]) return state.docData[pid][partyId];
-    const seeded = JSON.parse(JSON.stringify(SEED_DOC_CATEGORIES[partyId] || []));
-    setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid] || {}), [partyId]: seeded } } }));
-    return seeded;
-  };
-  const updateCats = (nc) => { if (!pid) return; setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid] || {}), [partyId]: nc } } })); };
-
-  const addItem = (catId) => {
-    if (!itemForm.name.trim()) return;
-    const url = commitUrl(itemForm.url); if (url === null) return;
-    const c = ensureCats();
-    updateCats(c.map(cat => cat.id !== catId ? cat : { ...cat, items: [...(cat.items||[]), { id: genId(), name: itemForm.name.trim(), url: url || null, type: itemForm.type, lang: itemForm.lang, addedAt: new Date().toISOString(), addedBy: user.name }] }));
-    setItemForm({ name: "", url: "", type: "link", lang: "en" }); setAddingItem(null);
-  };
-  const delItem = (catId, itemId) => { const c = ensureCats(); updateCats(c.map(cat => cat.id !== catId ? cat : { ...cat, items: (cat.items||[]).filter(i => i.id !== itemId) })); };
-  const addFolder = () => { if (!folderForm.name.trim()) return; const c = ensureCats(); updateCats([...c, { id: genId(), name: folderForm.name.trim(), accessLevel: folderForm.accessLevel, items: [] }]); setFolderForm({ name: "", accessLevel: "open" }); setAddingFolder(false); };
-  const delFolder = (catId) => { const c = ensureCats(); updateCats(c.filter(cat => cat.id !== catId)); };
-
-  // Milestone handlers
-  const toggleCheck = (catId, msId, ckId) => { const c = ensureCats(); updateCats(c.map(cat => { if (cat.id !== catId || !cat.milestones) return cat; return { ...cat, milestones: cat.milestones.map(ms => ms.id !== msId ? ms : { ...ms, checklist: ms.checklist.map(ck => ck.id !== ckId ? ck : { ...ck, checked: !ck.checked }) }) }; })); };
-  const addCheckItem = (catId, msId, label) => { const c = ensureCats(); updateCats(c.map(cat => { if (cat.id !== catId) return cat; return { ...cat, milestones: cat.milestones.map(ms => ms.id !== msId ? ms : { ...ms, checklist: [...ms.checklist, { id: genId(), label, checked: false }] }) }; })); };
-  const delCheckItem = (catId, msId, ckId) => { const c = ensureCats(); updateCats(c.map(cat => { if (cat.id !== catId) return cat; return { ...cat, milestones: cat.milestones.map(ms => ms.id !== msId ? ms : { ...ms, checklist: ms.checklist.filter(ck => ck.id !== ckId) }) }; })); };
-  const addMsLink = (catId, msId, name, url) => { const c = ensureCats(); updateCats(c.map(cat => { if (cat.id !== catId) return cat; return { ...cat, milestones: cat.milestones.map(ms => ms.id !== msId ? ms : { ...ms, links: [...(ms.links||[]), { id: genId(), name, url, type: "link", addedBy: user.name, addedAt: new Date().toISOString() }] }) }; })); };
-  const delMsLink = (catId, msId, lkId) => { const c = ensureCats(); updateCats(c.map(cat => { if (cat.id !== catId) return cat; return { ...cat, milestones: cat.milestones.map(ms => ms.id !== msId ? ms : { ...ms, links: (ms.links||[]).filter(l => l.id !== lkId) }) }; })); };
-  const toggleSig = (catId, msId, sigId) => { const c = ensureCats(); updateCats(c.map(cat => { if (cat.id !== catId) return cat; return { ...cat, milestones: cat.milestones.map(ms => ms.id !== msId ? ms : { ...ms, signatures: (ms.signatures||[]).map(s => s.id !== sigId ? s : { ...s, signed: !s.signed, name: !s.signed ? user.name : "", signedAt: !s.signed ? new Date().toISOString() : null }) }) }; })); };
-  const addSig = (catId, msId) => { const role = prompt("Signature role:"); if (!role) return; const c = ensureCats(); updateCats(c.map(cat => { if (cat.id !== catId) return cat; return { ...cat, milestones: cat.milestones.map(ms => ms.id !== msId ? ms : { ...ms, signatures: [...(ms.signatures||[]), { id: genId(), role, name: "", email: "", signed: false, signedAt: null }] }) }; })); };
-  const delSig = (catId, msId, sigId) => { const c = ensureCats(); updateCats(c.map(cat => { if (cat.id !== catId) return cat; return { ...cat, milestones: cat.milestones.map(ms => ms.id !== msId ? ms : { ...ms, signatures: (ms.signatures||[]).filter(s => s.id !== sigId) }) }; })); };
-  const reorderMilestones = (catId, newMilestones) => { const c = ensureCats(); updateCats(c.map(cat => cat.id !== catId ? cat : { ...cat, milestones: newMilestones })); };
-  const updateMsDesc = (catId, msId, desc) => { const c = ensureCats(); updateCats(c.map(cat => { if (cat.id !== catId || !cat.milestones) return cat; return { ...cat, milestones: cat.milestones.map(ms => ms.id !== msId ? ms : { ...ms, description: desc }) }; })); };
-  const updateCheckLabel = (catId, msId, ckId, label) => { const c = ensureCats(); updateCats(c.map(cat => { if (cat.id !== catId) return cat; return { ...cat, milestones: cat.milestones.map(ms => ms.id !== msId ? ms : { ...ms, checklist: ms.checklist.map(ck => ck.id !== ckId ? ck : { ...ck, label }) }) }; })); };
-
-  return (
-    <div style={S.page}>
-      <h2 style={S.h2}>{displayName}</h2>
-      <p style={S.sub}>{project?.name || "Select a project"}</p>
-
-      {/* Add folder (admin only) */}
-      {canEdit && pid && !addingFolder && <button style={{ ...S.btnAddItem, marginBottom: 16 }} onClick={() => setAddingFolder(true)}>{t("+ Add Folder", lang)}</button>}
-      {canEdit && addingFolder && (
-        <div style={{ ...S.card, marginBottom: 16, background: "#F8FAFC" }}>
-          <label style={S.lbl}>{t("Folder Name", lang)}</label>
-          <input style={S.inp} value={folderForm.name} onChange={e => setFolderForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Specifications" />
-          <label style={S.lbl}>{t("Access", lang)}</label>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={() => setFolderForm(f => ({ ...f, accessLevel: "open" }))} style={{ ...S.typeBtn, ...(folderForm.accessLevel === "open" ? S.typeBtnActive : {}) }}>{t("Open", lang)}</button>
-            <button onClick={() => setFolderForm(f => ({ ...f, accessLevel: "restricted" }))} style={{ ...S.typeBtn, ...(folderForm.accessLevel === "restricted" ? { background: "#FEF2F2", borderColor: "#DC2626", color: "#DC2626" } : {}) }}>{t("Restricted", lang)}</button>
-          </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-            <button style={{ ...S.btnMain, width: "auto", padding: "10px 20px", marginTop: 0 }} onClick={addFolder}>{t("Create", lang)}</button>
-            <button style={S.btnFlat} onClick={() => setAddingFolder(false)}>{t("Cancel", lang)}</button>
-          </div>
-        </div>
-      )}
-
-      {/* Document folders */}
-      {cats.map(cat => {
-        const locked = !canAccess(cat);
-        const isExp = expanded === cat.id;
-        const isChecklist = cat.type === "checklist";
-        const isProgram = cat.type === "program";
-        const items = cat.items || [];
-        const langItem = LANGUAGES.find(l => l.id === (cat.lang || "en"));
-
-        return (
-          <div key={cat.id} style={{ ...S.card, marginBottom: 10, opacity: locked ? .5 : 1 }}>
-            <button onClick={() => !locked && setExpanded(isExp ? null : cat.id)} style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", border: "none", background: "none", cursor: locked ? "not-allowed" : "pointer", textAlign: "left", padding: 0, fontFamily: F }}>
-              <span style={{ fontSize: 15, color: pd.accent }}>{locked ? "🔒" : isChecklist ? "☑" : isProgram ? "📋" : "📁"}</span>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F }}>{t(cat.name, lang)}</div>
-                {locked && <div style={{ fontSize: 12, color: "#DC2626", fontFamily: F }}>{t("Restricted — contact admin for access", lang)}</div>}
-              </div>
-              {!locked && <span style={{ fontSize: 12, color: "#94A3B8" }}>{isChecklist ? (cat.milestones?.length || 0) : isProgram ? (state.docData?.[pid]?._programDetails?.tasks?.length || prog?.tasks?.length || 0) : items.length} {t("items", lang)}</span>}
-              {!locked && <span style={{ color: "#94A3B8" }}>{isExp ? "▾" : "▸"}</span>}
-            </button>
-
-            {isExp && !locked && isChecklist && cat.milestones && (
-              <div style={{ marginTop: 14 }}>
-                {cat.milestones.map((ms, msI) => (
-                  <div key={ms.id}
-                    draggable={canEdit}
-                    onDragStart={() => setMsDragIdx(msI)}
-                    onDragOver={e => e.preventDefault()}
-                    onDrop={() => { if (msDragIdx === null || msDragIdx === msI) return; const r = [...cat.milestones]; const [m] = r.splice(msDragIdx, 1); r.splice(msI, 0, m); reorderMilestones(cat.id, r); setMsDragIdx(null); }}
-                    onDragEnd={() => setMsDragIdx(null)}
-                    style={{ opacity: msDragIdx === msI ? 0.4 : 1, cursor: canEdit ? "grab" : "default" }}>
-                    <MilestoneCard milestone={ms} catId={cat.id} isAdmin={canEdit} projectId={pid} onToggleCheck={toggleCheck} onAddCheckItem={addCheckItem} onDeleteCheckItem={delCheckItem} onAddLink={addMsLink} onDeleteLink={delMsLink} onUpdateSignature={() => {}} onToggleSignature={toggleSig} onAddSignature={addSig} onDeleteSignature={delSig} onUpdateDesc={updateMsDesc} onUpdateCheckLabel={updateCheckLabel} lang={lang} />
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {isExp && !locked && isProgram && (
-              <div style={{ marginTop: 14 }}>
-                <ProgramDetails project={project} state={state} setState={setState} isAdmin={canEdit} />
-              </div>
-            )}
-
-            {isExp && !locked && !isChecklist && !isProgram && (
-              <div style={{ marginTop: 14 }}>
-                {items.length === 0 && !canEdit && <p style={{ fontSize: 14, color: "#94A3B8", fontFamily: F }}>{t("No documents yet.", lang)}</p>}
-                {items.map(item => {
-                  const il = LANGUAGES.find(l => l.id === item.lang) || LANGUAGES[0];
-                  return (
-                    <div key={item.id} style={S.docItemRow}>
-                      <span style={{ fontSize: 14, color: item.type === "link" ? "#3B82F6" : "#A855F7" }}>{item.type === "link" ? "🔗" : "📄"}</span>
-                      <div style={{ flex: 1 }}>
-                        {item.url ? <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 15, fontWeight: 500, color: "#0284C7", textDecoration: "none", fontFamily: F }}>{item.name}</a> : <span style={{ fontSize: 15, fontFamily: F, color: "#1E293B" }}>{item.name}</span>}
-                        <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F }}>{item.type === "link" ? t("Link", lang) : "PDF"} · {item.addedBy} · {fmtDate(item.addedAt)}</div>
-                      </div>
-                      <span style={{ padding: "2px 8px", borderRadius: 6, background: "#F1F5F9", fontSize: 11, fontWeight: 700, color: "#64748B" }}>{il.flag} {il.short}</span>
-                      {canEdit && <button style={{ ...S.btnDel, padding: "3px 8px", fontSize: 11 }} onClick={() => delItem(cat.id, item.id)}>✕</button>}
-                    </div>
-                  );
-                })}
-                {/* Add item form — admin only */}
-                {canEdit && pid && (<>
-                  {addingItem === cat.id ? (
-                    <div style={{ marginTop: 12, padding: 14, background: "#F8FAFC", borderRadius: 10 }}>
-                      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                        <button onClick={() => setItemForm(f => ({ ...f, type: "link" }))} style={{ ...S.typeBtn, ...(itemForm.type === "link" ? S.typeBtnActive : {}) }}>🔗 Link (any format)</button>
-                        <button onClick={() => setItemForm(f => ({ ...f, type: "pdf" }))} style={{ ...S.typeBtn, ...(itemForm.type === "pdf" ? S.typeBtnActive : {}) }}>📄 PDF Document</button>
-                      </div>
-                      <label style={S.lbl}>{t("Name", lang)}</label>
-                      <input style={S.inp} value={itemForm.name} onChange={e => setItemForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Pin Inspection Spec v2.1" />
-                      <label style={S.lbl}>{itemForm.type === "link" ? t("URL (any format)", lang) : t("PDF URL (must be .pdf)", lang)}</label>
-                      <input style={S.inp} value={itemForm.url} onChange={e => setItemForm(f => ({ ...f, url: e.target.value }))} placeholder={itemForm.type === "link" ? "https://docs.google.com/..." : "https://...file.pdf"} />
-                      <label style={S.lbl}>{t("Document Language", lang)}</label>
-                      <select style={S.inp} value={itemForm.lang} onChange={e => setItemForm(f => ({ ...f, lang: e.target.value }))}>
-                        {LANGUAGES.map(l => <option key={l.id} value={l.id}>{l.flag} {l.label}</option>)}
-                      </select>
-                      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                        <button style={{ ...S.btnMain, width: "auto", padding: "10px 18px", marginTop: 0 }} onClick={() => addItem(cat.id)}>{t("Add", lang)}</button>
-                        <button style={{ ...S.btnFlat, width: "auto" }} onClick={() => { setAddingItem(null); setItemForm({ name: "", url: "", type: "link", lang: "en" }); }}>{t("Cancel", lang)}</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                      <button style={S.btnAddItem} onClick={() => setAddingItem(cat.id)}>{t("+ Add Link or PDF", lang)}</button>
-                      <button style={{ ...S.btnDel, fontSize: 11, padding: "4px 10px" }} onClick={() => delFolder(cat.id)}>{t("Delete Folder", lang)}</button>
-                    </div>
-                  )}
-                </>)}
-              </div>
-            )}
-          </div>
-        );
-      })}
-
-      {/* SI-specific: Validation + Hardware */}
-      {partyId === "si" && (<>
-        <SIValidation project={project} state={state} setState={setState} isAdmin={canEdit} />
-        <SIHardware project={project} state={state} setState={setState} isAdmin={canEdit} />
-      </>)}
-
-      {/* Training section inside each party */}
-      {(() => {
-        const td = state.docData?.[pid]?._training?.[partyId] || {};
-        const enabled = td.enabled || false;
-        const links = td.links || [];
-        const [addTL, setAddTL] = useState(false);
-        const [tlForm, setTlForm] = useState({ name: "", url: "", belt: "white" });
-        const toggleT = () => { if (!pid) return; setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), _training: { ...(prev.docData?.[pid]?._training||{}), [partyId]: { ...td, enabled: !enabled } } } } })); };
-        const addTLink = () => { if (!tlForm.name.trim()) return; const url = commitUrl(tlForm.url); if (url === null) return; const nl = { id: genId(), ...tlForm, url, addedAt: new Date().toISOString(), addedBy: user.name }; setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), _training: { ...(prev.docData?.[pid]?._training||{}), [partyId]: { ...td, links: [...links, nl] } } } } })); setTlForm({ name: "", url: "", belt: "white" }); setAddTL(false); };
-        const delTLink = (id) => { setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), _training: { ...(prev.docData?.[pid]?._training||{}), [partyId]: { ...td, links: links.filter(l => l.id !== id) } } } } })); };
-        const toggleBeltNA = (belt) => { const k = `${belt}_disabled`; setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), _training: { ...(prev.docData?.[pid]?._training||{}), [partyId]: { ...td, [k]: !td[k] } } } } })); };
-
-        return (
-          <div style={{ marginTop: 28 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-              <h3 style={S.h3}>{t("Training", lang)}</h3>
-              {canEdit && pid && (
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 13, color: "#64748B", fontFamily: F }}>{enabled ? t("Enabled", lang) : t("Disabled", lang)}</span>
-                  <div onClick={toggleT} style={{ width: 44, height: 24, borderRadius: 12, background: enabled ? "#00C9A7" : "#CBD5E1", cursor: "pointer", position: "relative", transition: "background .2s" }}>
-                    <div style={{ width: 18, height: 18, borderRadius: 9, background: "#FFF", position: "absolute", top: 3, left: enabled ? 23 : 3, transition: "left .2s" }} />
-                  </div>
-                </div>
-              )}
-            </div>
-            {!enabled && <div style={S.empty}>{canEdit ? t("Training is disabled for this party. Toggle above to enable.", lang) : t("Training is not required.", lang)}</div>}
-            {enabled && (
-              <div style={{ ...S.card, borderLeft: `3px solid ${pd.accent}` }}>
-                {["white", "blue", "black"].map(belt => {
-                  const bl = links.filter(l => l.belt === belt);
-                  const bi = BELT_LEVELS[belt];
-                  const dis = td[`${belt}_disabled`];
-                  return (
-                    <div key={belt} style={{ marginBottom: 16, opacity: dis ? .4 : 1 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                        <span>{bi.icon}</span>
-                        <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F }}>{bi.name}</span>
-                        {dis && <Chip small color="#F1F5F9" fg="#94A3B8">{t("N/A", lang)}</Chip>}
-                        {canEdit && <button style={{ ...S.btnEdit, padding: "2px 8px", fontSize: 10, marginLeft: "auto" }} onClick={() => toggleBeltNA(belt)}>{dis ? t("Enable", lang) : t("N/A", lang)}</button>}
-                      </div>
-                      {!dis && bl.map(lk => (
-                        <div key={lk.id} style={{ ...S.docItemRow, marginLeft: 24 }}>
-                          <span>🔗</span>
-                          <div style={{ flex: 1 }}>{lk.url ? <a href={lk.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 14, color: "#0284C7", fontFamily: F, textDecoration: "none" }}>{lk.name}</a> : <span style={{ fontSize: 14, fontFamily: F }}>{lk.name}</span>}</div>
-                          {canEdit && <button style={{ ...S.btnDel, padding: "2px 6px", fontSize: 10 }} onClick={() => delTLink(lk.id)}>✕</button>}
-                        </div>
-                      ))}
-                      {!dis && bl.length === 0 && <p style={{ fontSize: 13, color: "#94A3B8", marginLeft: 24, fontFamily: F }}>{t("No materials yet.", lang)}</p>}
-                    </div>
-                  );
-                })}
-                {canEdit && pid && !addTL && <button style={S.btnAddItem} onClick={() => setAddTL(true)}>{t("+ Add Training Material", lang)}</button>}
-                {canEdit && addTL && (
-                  <div style={{ padding: 14, background: "#F8FAFC", borderRadius: 10, marginTop: 8 }}>
-                    <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                      {["white","blue","black"].map(b => <button key={b} onClick={() => setTlForm(f => ({...f, belt: b}))} style={{ ...S.typeBtn, ...(tlForm.belt === b ? S.typeBtnActive : {}) }}>{BELT_LEVELS[b].icon} {BELT_LEVELS[b].name}</button>)}
-                    </div>
-                    <label style={S.lbl}>{t("Title", lang)}</label><input style={S.inp} value={tlForm.name} onChange={e => setTlForm(f => ({...f, name: e.target.value}))} placeholder="e.g. White Belt Module 1" />
-                    <label style={S.lbl}>URL</label><input style={S.inp} value={tlForm.url} onChange={e => setTlForm(f => ({...f, url: e.target.value}))} placeholder="https://..." />
-                    <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                      <button style={{ ...S.btnMain, width: "auto", padding: "8px 16px", marginTop: 0 }} onClick={addTLink}>{t("Add", lang)}</button>
-                      <button style={{ ...S.btnFlat, width: "auto" }} onClick={() => setAddTL(false)}>{t("Cancel", lang)}</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })()}
-    </div>
-  );
-}
-
 /* ═══ ADMIN VIEW — restricted access management, pending approvals for external users ═══ */
 function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) {
   const { users } = state;
@@ -2510,6 +2103,9 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
   const [syncStatus, setSyncStatus] = useState(null);
   const [applyLoading, setApplyLoading] = useState(false);
   const [syncLog, setSyncLog] = useState([]); // v4.0.1 — sync history
+  // v4.0.2 — Backfill Checklists (decoupled from HubSpot sync)
+  const [backfillLoading, setBackfillLoading] = useState(false);
+  const [backfillMsg, setBackfillMsg] = useState("");
 
   useEffect(() => {
     const unsubStatus = onValue(ref(db, "hubspotSync/status"), s => setSyncStatus(s.val()), { onlyOnce: false });
@@ -2722,6 +2318,34 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
             {syncMsg && <p style={{ fontSize: 14, color: syncMsg.startsWith("Error") ? "#DC2626" : "#059669", marginTop: 12, fontFamily: F }}>{syncMsg}</p>}
           </div>
 
+          {/* v4.0.2 — Backfill Checklists — independent of HubSpot sync */}
+          <div style={{ ...S.card, marginBottom: 16, borderLeft: "3px solid #00C9A7" }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 8 }}>📋 Backfill Project Checklists</div>
+            <p style={{ fontSize: 14, color: "#64748B", fontFamily: F, marginBottom: 12 }}>
+              Apply Internal + External (or SI) checklist templates from <code>functions/checklists.js</code> to every project that's missing them.
+              Preserves any folders or checklists already present. <b>No HubSpot involved</b> — uses each project's already-stored pipeline ID to pick the right template.
+            </p>
+            <button
+              style={{ ...S.btnMain, width: "auto", padding: "10px 20px", marginTop: 0, opacity: backfillLoading ? .5 : 1, background: "#00C9A7" }}
+              disabled={backfillLoading}
+              onClick={async () => {
+                if (!confirm("Apply checklist templates to all projects missing them? Existing folders/checklists will be preserved. May take a couple of minutes.")) return;
+                setBackfillLoading(true); setBackfillMsg("Working… this can take 1–3 minutes for ~750 projects.");
+                try {
+                  // v4.0.2 — bump client timeout from default 60s to 9 minutes; backend cap is 5 min.
+                  const fn = httpsCallable(functions, "backfillChecklists", { timeout: 540000 });
+                  const res = await fn({});
+                  const s = res.data || {};
+                  setBackfillMsg(`✓ Backfill complete: ${s.builtFresh || 0} built fresh, ${s.appendedChecklist || 0} had checklists appended, ${s.alreadyComplete || 0} already complete, ${s.addedCommercial || 0} commercial folders added (${s.total || 0} total projects).`);
+                } catch(e) { setBackfillMsg("Error: " + (e.message || String(e))); }
+                setBackfillLoading(false);
+              }}
+            >
+              {backfillLoading ? "Backfilling…" : "Backfill Checklists Now"}
+            </button>
+            {backfillMsg && <p style={{ fontSize: 13, color: backfillMsg.startsWith("Error") ? "#DC2626" : "#059669", marginTop: 12, fontFamily: F }}>{backfillMsg}</p>}
+          </div>
+
           {syncPreview && (
             <div style={S.card}>
               <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 12 }}>Preview — {syncPreview.length} projects</div>
@@ -2785,16 +2409,22 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
                 </tbody>
               </table>
             )}
-            {syncLog.some(e => e.error) && (
-              <div style={{ marginTop: 10, padding: 10, background: "#FEF2F2", borderLeft: "3px solid #DC2626", borderRadius: 6 }}>
-                <div style={{ fontSize: 11, color: "#B91C1C", fontFamily: F, fontWeight: 600, marginBottom: 4 }}>Recent errors</div>
-                {syncLog.filter(e => e.error).slice(0, 3).map((e, i) => (
-                  <div key={i} style={{ fontSize: 12, color: "#7F1D1D", fontFamily: F, marginBottom: 4 }}>
-                    {new Date(e.startedAt).toLocaleString()} — {e.error}
-                  </div>
-                ))}
-              </div>
-            )}
+            {/* v4.0.2 — only show errors from the last 24 hours (stale errors disappear automatically). */}
+            {(() => {
+              const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+              const recent = syncLog.filter(e => e.error && new Date(e.startedAt).getTime() > cutoff).slice(0, 3);
+              if (recent.length === 0) return null;
+              return (
+                <div style={{ marginTop: 10, padding: 10, background: "#FEF2F2", borderLeft: "3px solid #DC2626", borderRadius: 6 }}>
+                  <div style={{ fontSize: 11, color: "#B91C1C", fontFamily: F, fontWeight: 600, marginBottom: 4 }}>Recent errors (last 24h)</div>
+                  {recent.map((e, i) => (
+                    <div key={i} style={{ fontSize: 12, color: "#7F1D1D", fontFamily: F, marginBottom: 4 }}>
+                      {new Date(e.startedAt).toLocaleString()} — {e.error}
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -2893,10 +2523,13 @@ function ManageProjects({ state, setState }) {
               </button>
             )}
             {!isPast && !isInactive && <button style={{ ...S.btnEdit, borderColor: "#00C9A7", color: "#00C9A7" }} onClick={async () => {
-              if (!confirm(`Apply checklist template to "${proj.name}"?${proj.isSI ? " (SI Deployment Checklist)" : " (Internal + External Checklist)"}`)) return;
+              // v4.0.2 — use SI Partner pipeline membership (not loose isSI flag).
+              // [SI]-tagged Hardware Deployment projects should get the regular Internal+External checklist.
+              const useSiChecklist = proj.hubspotPipelineId === SI_PARTNER_PIPELINE_ID;
+              if (!confirm(`Apply checklist template to "${proj.name}"?${useSiChecklist ? " (SI Deployment Checklist)" : " (Internal + External Checklist)"}`)) return;
               try {
                 const fn = httpsCallable(functions, "applyChecklistTemplate");
-                await fn({ projectId: proj.id, isSI: proj.isSI });
+                await fn({ projectId: proj.id, isSI: useSiChecklist });
                 alert("Checklist template applied.");
               } catch(e) { alert("Error: " + (e.message || String(e))); }
             }}>☑ Apply Checklist</button>}

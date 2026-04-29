@@ -163,9 +163,10 @@ function mapHubspotToProject(obj) {
   const stationsFromField = p.number_of_stations__c ? parseInt(p.number_of_stations__c) : null;
   const stationsFromName = extractStationsFromName(name);
   const stations = stationsFromField || stationsFromName || 0;
-  // v4.0.1 — SI flag now combines: name contains [SI] OR project lives in SI Partner Deployment pipeline.
+  // v4.0.2 — isSI is STRICTLY pipeline-based: only projects in SI Partner Deployment are SI.
+  // Hardware Deployment projects with "[SI]" in the name are regular Hardware — the tag is just a label.
   const isFromSiPartner = pipelineId === SI_PARTNER_PIPELINE_ID;
-  const isSI = isFromSiPartner || /\[SI\]/i.test(name);
+  const isSI = isFromSiPartner;
   // siStage is set ONLY for projects in SI Partner Deployment pipeline (drives the Kanban).
   // Falls back to "sird" if a stage ID isn't in the map yet.
   const siStage = isFromSiPartner ? (SI_PARTNER_STAGE_MAP[stageId] || "sird") : null;
@@ -340,25 +341,42 @@ async function runSync(token, commit, syncCtx) {
     // Ensure schema version is set so the app-side migration can skip
     await db.ref("_schemaVersion").set("v3.2.0");
 
-    // Create project templates for new projects (v3.2.0 unified structure)
+    // v4.0.2 — Backfill project templates for ALL projects, not just new ones.
+    // Reason: many projects synced before v3.2.0/v4.0.0 don't have projectDetails or have folders without checklists.
+    // Also: use SI Partner pipeline membership (not the loose isSI flag) — [SI]-tagged Hardware Deployment projects
+    // should get the regular Internal+External checklist per spec.
     const docDataSnap = await db.ref("appState/docData").once("value");
     const docData = docDataSnap.val() || {};
+    let docDataChanged = false;
 
-    for (const np of newProjects) {
+    for (const np of incoming) {
       const pid = np.id;
-      if (!docData[pid]) {
-        docData[pid] = {};
+      const useSiChecklist = np.hubspotPipelineId === SI_PARTNER_PIPELINE_ID;
+      if (!docData[pid]) { docData[pid] = {}; docDataChanged = true; }
+
+      const existingPd = docData[pid].projectDetails;
+      const existingArr = Array.isArray(existingPd) ? existingPd : (existingPd && typeof existingPd === "object" ? Object.values(existingPd) : []);
+      const hasChecklist = existingArr.some(c => c && c.type === "checklist");
+
+      if (!existingPd || existingArr.length === 0) {
+        docData[pid].projectDetails = buildProjectDetails(useSiChecklist);
+        docDataChanged = true;
+      } else if (!hasChecklist) {
+        // Preserve existing folders, append the checklist sections only.
+        const newCats = buildProjectDetails(useSiChecklist);
+        const checklistCats = newCats.filter(c => c.type === "checklist");
+        docData[pid].projectDetails = [...existingArr, ...checklistCats];
+        docDataChanged = true;
       }
-      if (!docData[pid].projectDetails) {
-        docData[pid].projectDetails = buildProjectDetails(np.isSI);
-      }
+
       if (!docData[pid].commercial) {
         docData[pid].commercial = buildCommercialFolders();
+        docDataChanged = true;
       }
     }
 
-    if (newProjects.length > 0) {
-      await db.ref("appState/docData").set(docData);
+    if (docDataChanged) {
+      await db.ref("appState/docData").set(sanitizeForFirebase(docData));
     }
 
     await db.ref("hubspotPreview").set(null);
@@ -383,6 +401,71 @@ async function runSync(token, commit, syncCtx) {
     throw err;
   }
 }
+
+/* ═══ BACKFILL CHECKLISTS — v4.0.2: standalone, no HubSpot involved ═══ */
+/* Iterates all projects in the DB and applies checklist templates from functions/checklists.js */
+/* (which mirror the Internal + External + SI Excel files). Preserves existing folders. */
+/* Uses SI Partner pipeline membership to choose SI vs Internal+External checklist. */
+exports.backfillChecklists = functions
+  .runWith({ timeoutSeconds: 300, memory: "1GB" })
+  .https.onCall(async (data, context) => {
+    if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+    const userSnap = await db.ref(`users/${context.auth.uid}`).once("value");
+    const user = userSnap.val();
+    if (user?.role !== "admin") throw new functions.https.HttpsError("permission-denied", "Admins only.");
+
+    const [projSnap, docSnap] = await Promise.all([
+      db.ref("appState/projects").once("value"),
+      db.ref("appState/docData").once("value"),
+    ]);
+    const projects = projSnap.val() || {};
+    const docData = docSnap.val() || {};
+
+    const stats = { total: 0, builtFresh: 0, appendedChecklist: 0, alreadyComplete: 0, addedCommercial: 0, skipped: 0 };
+    const updates = {}; // multi-path update — only touches specific paths, won't clobber other docData fields
+
+    for (const pid of Object.keys(projects)) {
+      const p = projects[pid];
+      if (!p || !p.id) { stats.skipped++; continue; }
+      stats.total++;
+
+      const useSiChecklist = p.hubspotPipelineId === SI_PARTNER_PIPELINE_ID;
+
+      const existingPd = docData[pid]?.projectDetails;
+      const existingArr = Array.isArray(existingPd) ? existingPd : (existingPd && typeof existingPd === "object" ? Object.values(existingPd) : []);
+      const hasChecklist = existingArr.some(c => c && c.type === "checklist");
+
+      if (!existingPd || existingArr.length === 0) {
+        updates[`appState/docData/${pid}/projectDetails`] = sanitizeForFirebase(buildProjectDetails(useSiChecklist));
+        stats.builtFresh++;
+      } else if (!hasChecklist) {
+        const newCats = buildProjectDetails(useSiChecklist);
+        const checklistCats = newCats.filter(c => c.type === "checklist");
+        updates[`appState/docData/${pid}/projectDetails`] = sanitizeForFirebase([...existingArr, ...checklistCats]);
+        stats.appendedChecklist++;
+      } else {
+        stats.alreadyComplete++;
+      }
+
+      if (!docData[pid]?.commercial) {
+        updates[`appState/docData/${pid}/commercial`] = sanitizeForFirebase(buildCommercialFolders());
+        stats.addedCommercial++;
+      }
+    }
+
+    // v4.0.2 — batch writes in chunks to avoid huge single payload + slow client timeout.
+    const allPaths = Object.keys(updates);
+    const CHUNK = 100;
+    for (let i = 0; i < allPaths.length; i += CHUNK) {
+      const slice = allPaths.slice(i, i + CHUNK);
+      const batch = {};
+      for (const p of slice) batch[p] = updates[p];
+      await db.ref().update(batch);
+    }
+
+    await writeAuditEntry(context.auth.uid, "backfill_checklists", null, stats);
+    return stats;
+  });
 
 /* ═══ APPLY CHECKLIST TEMPLATE to existing project (v3.2.0 unified structure) ═══ */
 async function applyChecklistToProject(projectId, isSI) {
