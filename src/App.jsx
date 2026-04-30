@@ -1478,13 +1478,6 @@ function ProjectDetailsView({ user, project, state, setState, lang = "en" }) {
     return { ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), projectDetails: newCats } } };
   });
 
-  // Server-side atomic migration: CF adds ALL missing standard categories in one write (no race condition)
-  useEffect(() => {
-    if (!canEdit || !pid || cats.length === 0) return;
-    httpsCallable(functions, "ensureProjectTemplate")({ projectId: pid })
-      .catch(e => console.warn("ensureProjectTemplate:", e.message));
-  }, [pid]); // eslint-disable-line react-hooks/exhaustive-deps
-
   if (!project) return <div style={S.page}><div style={S.empty}>Select a project from the sidebar.</div></div>;
 
   const addFolder = () => {
@@ -3565,7 +3558,11 @@ export default function App() {
   const [state, setState] = useState(getDefault());
   const [authUser, setAuthUser] = useState(null);
   const [user, setUser] = useState(null);
-  const [view, setView] = useState(() => localStorage.getItem("dp_last_view") || "project_details");
+  const VALID_VIEWS = new Set(["dashboard", "project_details", "commercial", "training", "chat", "projects_overview", "all_si_projects", "admin", "manage"]);
+  const [view, setView] = useState(() => {
+    const saved = localStorage.getItem("dp_last_view");
+    return (saved && VALID_VIEWS.has(saved)) ? saved : "project_details";
+  });
   const [project, setProject] = useState(null);
   const [loginErr, setLoginErr] = useState("");
   const [pendingApproval, setPendingApproval] = useState(false);
@@ -3791,6 +3788,14 @@ export default function App() {
       }
     }
   }, [user, state.projects]);
+
+  // Server-side template migration — runs once per project change. Moved here from ProjectDetailsView
+  // so it doesn't re-fire on every tab click (which remounts ProjectDetailsView via key={detailTabKey}).
+  useEffect(() => {
+    if (!user || !isInst(user) || !project?.id) return;
+    httpsCallable(functions, "ensureProjectTemplate")({ projectId: project.id })
+      .catch(e => console.warn("ensureProjectTemplate:", e.message));
+  }, [project?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Render gates
   if (!authChecked) return <div style={S.loginWrap}><p style={{ color: "#94A3B8", fontFamily: F }}>Loading…</p></div>;
