@@ -1,6 +1,6 @@
 # Deployment Portal
 
-**Version:** v4.0.3
+**Version:** v4.1.0
 
 A React 18 web application serving as a consolidated PMO-style frontend UI for the Customer Experience team to track and proactively manage risks/issues with CMs and customers. Speaks directly to HubSpot to provide real-time information on all projects in the deployment and sales pipeline. Coordinates documentation, milestones, and program details across Instrumental, Systems Integrator (SI), Customer, and CM stakeholders via a unified Project Details / Commercial / Training model.
 
@@ -35,6 +35,16 @@ The goal of this Webapp is to have a consolidated "PMO" Style frontend UI that t
 - **DB-level access control** — External users can only read projects they've been explicitly assigned to (enforced at Firebase Realtime Database rules level, not just UI)
 - **Checklist templates** — New projects auto-get Internal + External checklist folders; SI projects get SI Deployment Checklist; optional apply to existing projects
 - **Codename decoding** — HubSpot candy codenames automatically mapped to real customer names
+- **HubSpot writeback** — Editing date fields (CAD Complete, CAD Actual Finish, Actual Service Start, Target Build, Actual Deploy) in Project Overview patches the HubSpot custom object record automatically on save, with "↑ Syncing / ✓ HubSpot updated / ⚠ failed — saved locally" indicator
+- **`si_admin` role** — New role between `user` and `admin`; grants edit access to the All SI Projects tracker without full admin powers
+- **All SI Projects view** — Sidebar sub-tab under All Projects Overview (Instrumental-visible, si_admin-editable); shows only SI Partner Deployment pipeline projects with per-project risk flag, last contact, next milestone, notes, and custom columns; includes the SI Kanban at the top
+- **Sidebar sub-navigation** — Project Details categories listed as collapsible sub-items in the left sidebar; external users see only Design Specs & Integration Docs, CAD & Drawings, and Hardware & MES Deployment Requirements
+- **Non-PDF file uploads** — Upload button extended to DOCX, XLSX, PPTX, images, CSV, and `.lbx` label files (50 MB cap); per-file icon by type
+- **Gantt chart toggle** — "📊 Show Gantt Chart" button on Project Overview; disabled with tooltip if < 3 dates available
+- **HubSpot project hyperlinks** — 🔗 icons on project names in Overview, Manage Projects, and All Projects; open HubSpot record in new tab
+- **Scheduled maintenance** — Runs Tue & Fri at 3 PM PT; sweeps old sync/audit/writeback logs; evaluates 3 agentic rules (bug threshold, sync error rate, circuit breaker); results in Admin Panel → 🔧 Maintenance tab
+- **Pre-uploaded deployment requirement docs** — 10 master files auto-linked into every project's "Hardware & MES Deployment Requirements" folder at first open; external users can download
+- **Performance** — Code-split bundle (react-vendor + firebase-vendor chunks); function memory bumps; memoized heavy views
 
 ---
 
@@ -149,10 +159,9 @@ npx firebase-tools target:apply hosting deployment-portal-instrumental deploymen
 |------|-----|--------|
 | SuperAdmin | One designated user (`superAdmin: true` in DB) | All admin powers + can promote others to admin |
 | Admin | Explicitly granted by SuperAdmin | Full read/write, user management, all parties |
-| User — Instrumental | Manually approved, `partyId: instrumental` | Overview + Instrumental docs |
-| User — Customer | Manually approved, `partyId: customer` | Overview + Customer docs |
-| User — SI | Manually approved, `partyId: si` | SI docs only |
-| User — CM | Manually approved, `partyId: cm` | CM docs only |
+| SI Admin | Granted by Admin (`role: "si_admin"`) | Edit SI tracker; same Instrumental read-access elsewhere |
+| User — Instrumental | Auto-provisioned `@instrumental.com` | All projects read + write for Instrumental-owned fields |
+| User — External | Manually approved by admin | Assigned projects only; read-only for Design Specs, CAD, Deployment Docs |
 
 New users sign in with Google and land in a pending queue until an admin approves them and assigns a party.
 
@@ -182,13 +191,16 @@ New users sign in with Google and land in a pending queue until an admin approve
 | v4.0.0 | **Security review response** (7 findings) — `users/` read locked to admin + own; `access/` and `commercialAccess/` reads scoped; client-side bootstrap removed (manual admin seed); `provisionUser` Cloud Function for sign-in; admin callables (`adminApprove`/`Deny`/`Delete`/`SetRole`/`SetProjectAccess`/`SetCommercialAccess`) with **audit log** on all sensitive ops; URL validation (https-only, `javascript:`/`data:`/`file:` blocked). **Hardware manual override** (HubSpot value = suggestion; Instrumental users can override per-field, override wins in Demand Plan). **Project Overview** section with 8 fields — CAD Complete, CAD Actual Finish, Actual Service Start, Target Build, Actual Deploy (webapp source of truth) + Target Build at Deal Close + CS Program ID (HubSpot pull-only) + Project Status/Next Steps (Bot-drafted). **AI-drafted Project Status** button wires to existing Project Bot. Folds in uncommitted v3.2.0 + v3.3.0 + Apr 22 sign-in hotfixes. |
 | v4.0.1 | **HubSpot Sync history log** (Admin Panel → HubSpot Sync) — every sync (manual or scheduled) writes an entry to `hubspotSync/log/` with type, actor, state, counts, duration; rendered as a table in the admin UI. **SI Kanban now driven by HubSpot** — added "SI Partner Deployment" pipeline (ID `2206979797`) with 8 stages (SIRD → DFM → Quote → PO → Build → FAT → SAT → Live). Projects in this pipeline auto-populate `siStage` from HubSpot's stage on every sync. SI Kanban filters by pipeline membership (no longer by `[SI]` name pattern), so `[SI]` projects in Hardware Deployment Pipeline stay in Hardware. `hubspotSync/.read` tightened to admin-only. |
 | v4.0.2 | **Hotfixes**: (1) `writeSyncLogEntry` and `writeAuditEntry` were building DB keys from ISO timestamps (containing `.`), which Firebase Realtime Database forbids in path segments. Both now use `db.ref(...).push(entry)` — Firebase auto-generates path-safe, time-sortable keys. (2) HubSpot sync apply errored with `set failed: value argument contains undefined in property '...siStage'` for legacy projects (synced before SI Partner pipeline support) where both `incoming_p.siStage` and `merged[idx].siStage` were missing — coerced fallback to `?? null` and added `sanitizeForFirebase()` recursive helper applied to project writes (defensive guard against any future undefined-value writes). (3) Admin panel copy updated from "6 HubSpot pipelines" → "7" to reflect the SI Partner Deployment addition. |
+| v4.0.4 | **HubSpot sync bug fixes**: (1) "Last sync Never" — UI read `syncStatus.lastSync`/`.count` but CF writes `syncedAt`/`total`; field names corrected. (2) Preview always showed "2 projects found" — `Object.values(data)` on `{ projects, summary }` returned 2 entries; fixed to `Object.values(data.projects \|\| {})`. (3) "Error: internal" on any sync failure — `manualHubspotSync` propagated plain JS errors as opaque Firebase "internal"; now wrapped in try/catch that rethrows with real message. (4) Hardware tracking not populating — `fetchAllStationKits` used v3 inline association key `2-39524389` which doesn't reliably map for custom-to-custom objects; replaced with `fetchKitsForProjects` using v4 batch associations API (project → kit direction). **Validation tab**: FAT/SAT status fields now have × clear buttons (Instrumental only) to reset back to "Not started". |
+| v4.1.0 | **Major feature release** — 9 workstreams shipped: (1) **Sidebar sub-nav**: all Project Details categories listed as collapsible sub-items; external users scoped to 3 folders. (2) **Non-PDF uploads**: DOCX/XLSX/PPTX/images/CSV/.lbx allowed; external users read-only. (3) **Gantt toggle**: "📊 Show Gantt" button, disabled <3 dates. (4) **HubSpot project links**: 🔗 on project names in 4 views. (5) **Pre-uploaded deployment docs**: 10 system docs auto-linked per project via `ensureProjectTemplate` CF. (6) **`si_admin` role + All SI Projects view**: editable SI tracker (risk, contact, milestone, notes), SI Kanban moved here, sub-item under All Projects Overview. (7) **HubSpot writeback**: date field saves PATCH HubSpot custom object; `getHubspotCustomObjectSchema` diagnostic CF; fail-safe local save. (8) **Scheduled maintenance CF** (Tue/Fri 3 PM PT): sweeps old logs, evaluates 3 agentic rules (bug count, sync error rate, circuit breaker auto-pause); Admin Panel → 🔧 Maintenance tab. (9) **Performance**: code-split vendor chunks (react/firebase), memoization, function memory bumps. |
 | v4.0.3 | **Critical UX fix — Checklists**: previous `ChecklistSection` had a Rules of Hooks violation (`useState` inside an IIFE inside a conditional render). When milestones expanded/collapsed, React's hook order shifted between renders → state corruption → infinite re-render loops → Chrome tab crashes (and one user reported the tab recovering into a Google search). Rewritten cleanly: each task is now a `<button type="button">` row with checkbox + label, no broken hooks. **Editable checklists** — Instrumental users can now `+ Add task` per milestone (inline input) and delete tasks via the × button. Add/delete tasks persist to `docData/{pid}/projectDetails`. **PDF uploads to Firebase Storage** — new `PdfUploadButton` component wired into the three file-add forms (Project Details, Commercial, Training). Files go to `gs://<bucket>/uploads/{projectId}/...` (50 MB max, content-type enforced). New `storage.rules` gates writes to authenticated users + PDF-only + size cap; client-side validator mirrors the same limits. **Strict-SI**: `isSI` is now ONLY true for projects in the SI Partner Deployment pipeline. **Dead-code purge**: removed ~558 lines of unreachable v3.x components (`DocsView`, `MilestoneCard`, `SIValidation`, `SIHardware`, `ProgramDetails`) that referenced the long-deleted `PARTY_DEFS` constant. **Sync log polish**: "Recent errors" panel filters to last 24h. **SI Kanban barricade**: blue gradient panel with "SI PARTNER DEPLOYMENT PIPELINE" label tab. **Standalone checklist backfill**: new `backfillChecklists` Cloud Function + Admin Panel button applies templates to all projects missing them — no HubSpot sync required. Multi-path Firebase update batched in chunks of 100; client timeout bumped to 9 minutes. |
 
 ---
 
 ## Documentation
 
-- [HOW_TO_USE_GUIDE_4.0.3.md](HOW_TO_USE_GUIDE_4.0.3.md) — End-user guide (current)
+- [HOW_TO_USE_GUIDE_4.1.0.md](HOW_TO_USE_GUIDE_4.1.0.md) — End-user guide (current)
+- [HOW_TO_USE_GUIDE_4.0.3.md](HOW_TO_USE_GUIDE_4.0.3.md) — End-user guide (previous)
 - [SECURITY_REVIEW_4.0.0.md](SECURITY_REVIEW_4.0.0.md) — Response to 4/24 security review
 - [REBUILD_4.0.0.md](REBUILD_4.0.0.md) — Step-by-step guide to rebuilding the project from scratch
 - [PRE_DEPLOY_RUNBOOK_4.0.0.md](PRE_DEPLOY_RUNBOOK_4.0.0.md) — Admin seed instructions + pre-deploy test checklist

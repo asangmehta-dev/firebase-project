@@ -373,14 +373,203 @@ const SI_CHECKLIST = {
   ],
 };
 
+/* ═══ v4.1.0 TABLE TEMPLATES & DEPLOYMENT REQUIREMENT DOCS ═══ */
+
+const storageBaseUrl = (filename) =>
+  `https://firebasestorage.googleapis.com/v0/b/deploymentportal-5ec3a.appspot.com/o/${encodeURIComponent("templates/deployment_requirements/" + filename)}?alt=media`;
+
+const DEPLOYMENT_REQUIREMENTS_FOLDER = {
+  id: "pd_deployment_requirements",
+  name: "Hardware & MES Deployment Requirements",
+  type: "folder",
+  accessLevel: "open",
+  items: [
+    { id: "doc_self_deploy",       name: "Self-Deploy Main Installation Document",        url: storageBaseUrl("3 Self-Deploy_Main Installation Document - 250708.pdf"),           source: "system", type: "pdf" },
+    { id: "doc_internet_req",      name: "Instrumental Internet Requirements",              url: storageBaseUrl("Instrumental Internet Requirements.pdf"),                         source: "system", type: "pdf" },
+    { id: "doc_space_req",         name: "Instrumental Station Space Requirements",         url: storageBaseUrl("Instrumental Station Space Requirements.pdf"),                    source: "system", type: "pdf" },
+    { id: "doc_mes_questionnaire", name: "MES Questionnaire v4",                            url: storageBaseUrl("MES Questionnaire v4.pdf"),                                       source: "system", type: "pdf" },
+    { id: "doc_network_req",       name: "OPS-00003 — Instrumental Network Requirements",   url: storageBaseUrl("OPS-00003_Rev 00_Instrumental Network Requirements.pdf"),         source: "system", type: "pdf" },
+    { id: "doc_facility_req",      name: "OPS-00004 — Facility Requirements Intro Slides",  url: storageBaseUrl("OPS-00004_Rev01_INST - Facility Requirements Intro Slides.pptx"),  source: "system", type: "pptx" },
+    { id: "doc_pwr_apac",          name: "Site Readiness Spec — APAC 2026.1",               url: storageBaseUrl("PWR-APAC-2026.1_SiteReadinessSpec.pdf"),                          source: "system", type: "pdf" },
+    { id: "doc_pwr_eu",            name: "Site Readiness Spec — EU 2026.1",                 url: storageBaseUrl("PWR-EU-2026.1_SiteReadinessSpec.pdf"),                            source: "system", type: "pdf" },
+    { id: "doc_pwr_us",            name: "Site Readiness Spec — US 2026.2",                 url: storageBaseUrl("PWR-US-2026.2_SiteReadinessSpec.pdf"),                            source: "system", type: "pdf" },
+    { id: "doc_power_slides",      name: "Regional Power Requirements Slides",               url: storageBaseUrl("Regional_Power_Slides.pptx"),                                     source: "system", type: "pptx" },
+  ],
+};
+
+const TABLE_TEMPLATES = [
+  {
+    id: "pd_station_kits", name: "Station Kits", type: "table", accessLevel: "open",
+    columns: [
+      { key: "station_num", label: "Station #", width: 80 },
+      { key: "project", label: "Project", width: 120 },
+      { key: "prj_id", label: "Project ID", width: 100 },
+      { key: "line", label: "Line", width: 80 },
+      { key: "station_name", label: "Station Name", width: 140 },
+      { key: "fixture_name", label: "Fixture Name", width: 160 },
+      { key: "serial_number", label: "Serial #", width: 110 },
+      { key: "model", label: "Model", width: 120 },
+      { key: "status", label: "Status", width: 100 },
+      { key: "location", label: "Location", width: 120 },
+      { key: "ship_date", label: "Ship Date", width: 100, type: "date" },
+      { key: "notes", label: "Notes", width: 200 },
+    ], rows: [],
+  },
+  {
+    id: "pd_in_factory_install", name: "In-Factory Install", type: "table", accessLevel: "open",
+    columns: [
+      { key: "station", label: "Station", width: 80 },
+      { key: "install_date", label: "Install Date", width: 110, type: "date" },
+      { key: "installed_by", label: "Installed By", width: 120 },
+      { key: "network_status", label: "Network Status", width: 120 },
+      { key: "sw_running", label: "SW Running", width: 100, type: "boolean" },
+      { key: "camera_calibrated", label: "Camera Calibrated", width: 130, type: "boolean" },
+      { key: "signed_off", label: "Signed Off", width: 100, type: "boolean" },
+      { key: "notes", label: "Notes", width: 200 },
+    ], rows: [],
+  },
+  {
+    id: "pd_camera_settings", name: "Camera Settings", type: "table", accessLevel: "open",
+    columns: [
+      { key: "station", label: "Station", width: 80 },
+      { key: "camera_id", label: "Camera ID", width: 90 },
+      { key: "camera_model", label: "Camera Model", width: 130 },
+      { key: "serial_num", label: "Serial #", width: 100 },
+      { key: "lens", label: "Lens", width: 100 },
+      { key: "focal_length_mm", label: "Focal Length (mm)", width: 130 },
+      { key: "working_dist_mm", label: "Working Dist (mm)", width: 140 },
+      { key: "aperture", label: "Aperture (f/)", width: 100 },
+      { key: "gain", label: "Gain", width: 70 },
+      { key: "exposure_us", label: "Exposure (μs)", width: 110 },
+      { key: "fps", label: "FPS", width: 60 },
+      { key: "trigger_mode", label: "Trigger Mode", width: 110 },
+      { key: "resolution_w", label: "Res. W", width: 70 },
+      { key: "resolution_h", label: "Res. H", width: 70 },
+      { key: "lighting_type", label: "Lighting Type", width: 110 },
+      { key: "lighting_pos", label: "Lighting Position", width: 130 },
+      { key: "image_quality", label: "Image Quality", width: 110 },
+      { key: "verified_by", label: "Verified By", width: 110 },
+      { key: "verified_date", label: "Verified Date", width: 110, type: "date" },
+    ], rows: [],
+  },
+  {
+    id: "pd_led_settings", name: "LED Settings", type: "table", accessLevel: "open",
+    columns: [
+      { key: "station", label: "Station", width: 80 },
+      { key: "led_id", label: "LED ID", width: 80 },
+      { key: "position", label: "Position", width: 100 },
+      { key: "type", label: "Type", width: 90 },
+      { key: "color", label: "Color", width: 80 },
+      { key: "angle_deg", label: "Angle (°)", width: 80 },
+      { key: "power_w", label: "Power (W)", width: 80 },
+      { key: "intensity_pct", label: "Intensity (%)", width: 100 },
+      { key: "voltage_v", label: "Voltage (V)", width: 80 },
+      { key: "current_a", label: "Current (A)", width: 80 },
+      { key: "frequency_hz", label: "Frequency (Hz)", width: 110 },
+      { key: "ip_rating", label: "IP Rating", width: 80 },
+      { key: "manufacturer", label: "Manufacturer", width: 120 },
+      { key: "model", label: "Model", width: 110 },
+      { key: "serial_num", label: "Serial #", width: 100 },
+      { key: "luminous_flux_lm", label: "Flux (lm)", width: 80 },
+      { key: "color_temp_k", label: "CCT (K)", width: 80 },
+      { key: "cri", label: "CRI", width: 60 },
+      { key: "lifetime_hrs", label: "Lifetime (hrs)", width: 110 },
+      { key: "channel", label: "Channel", width: 80 },
+      { key: "controller", label: "Controller", width: 110 },
+      { key: "install_date", label: "Install Date", width: 100, type: "date" },
+      { key: "notes", label: "Notes", width: 200 },
+    ], rows: [],
+  },
+  {
+    id: "pd_sop_plan", name: "SOP Plan", type: "table", accessLevel: "open",
+    columns: [
+      { key: "location", label: "Location", width: 100 },
+      { key: "line", label: "Line", width: 80 },
+      { key: "station", label: "Station", width: 80 },
+      { key: "sop_number", label: "SOP Number", width: 110 },
+      { key: "image_1", label: "Image 1", width: 120 },
+      { key: "image_2", label: "Image 2", width: 120 },
+      { key: "image_3", label: "Image 3", width: 120 },
+      { key: "sop_created", label: "SOP Created", width: 100, type: "boolean" },
+      { key: "created_by", label: "Created By", width: 110 },
+      { key: "notes", label: "Notes", width: 200 },
+    ], rows: [],
+  },
+  {
+    id: "pd_mes_station_plan", name: "MES Station Plan", type: "table", accessLevel: "open",
+    columns: [
+      { key: "sop_number", label: "SOP Number", width: 110 },
+      { key: "location", label: "Location", width: 100 },
+      { key: "line", label: "Line", width: 80 },
+      { key: "fixture_id", label: "Fixture ID", width: 100 },
+      { key: "station", label: "Station", width: 80 },
+      { key: "mes_station_name", label: "MES Station Name", width: 140 },
+      { key: "qr_code", label: "QR Code", width: 120 },
+      { key: "mes_protocol", label: "MES Protocol", width: 110 },
+      { key: "notes", label: "Notes", width: 200 },
+    ], rows: [],
+  },
+  {
+    id: "pd_serialization", name: "Serialization", type: "table", accessLevel: "open",
+    columns: [
+      { key: "component_type", label: "Component Type", width: 140 },
+      { key: "sn_format", label: "SN Format", width: 130 },
+      { key: "config", label: "Config", width: 130 },
+      { key: "example_sn", label: "Example SN", width: 130 },
+      { key: "notes", label: "Notes", width: 200 },
+    ], rows: [],
+  },
+  {
+    id: "pd_sku_configs", name: "SKU Configs", type: "table", accessLevel: "open",
+    columns: [
+      { key: "sku", label: "SKU", width: 120 },
+      { key: "config_1", label: "Config 1", width: 120 },
+      { key: "config_2", label: "Config 2", width: 120 },
+      { key: "config_3", label: "Config 3", width: 120 },
+      { key: "config_4", label: "Config 4", width: 120 },
+      { key: "config_5", label: "Config 5", width: 120 },
+      { key: "notes", label: "Notes", width: 200 },
+    ], rows: [],
+  },
+  {
+    id: "pd_shipment_details", name: "Shipment Details", type: "table", accessLevel: "open",
+    columns: [
+      { key: "item_num", label: "Item #", width: 70 },
+      { key: "contents", label: "Contents", width: 160 },
+      { key: "box_size_in", label: "Box Size (in)", width: 110 },
+      { key: "box_size_mm", label: "Box Size (mm)", width: 110 },
+      { key: "weight_lbs", label: "Weight (lbs)", width: 100 },
+      { key: "weight_kg", label: "Weight (kg)", width: 90 },
+      { key: "carrier", label: "Carrier", width: 90 },
+      { key: "tracking_num", label: "Tracking #", width: 120 },
+      { key: "ship_date", label: "Ship Date", width: 100, type: "date" },
+      { key: "notes", label: "Notes", width: 200 },
+    ], rows: [],
+  },
+  {
+    id: "pd_team", name: "Team", type: "table", accessLevel: "open",
+    columns: [
+      { key: "role", label: "Role", width: 120 },
+      { key: "name", label: "Name", width: 130 },
+      { key: "email", label: "Email", width: 180 },
+      { key: "company", label: "Company", width: 120 },
+      { key: "location", label: "Location", width: 120 },
+      { key: "phone", label: "Phone", width: 120 },
+      { key: "description", label: "Description", width: 200 },
+    ], rows: [],
+  },
+];
+
 /* ═══ v3.2.0 PROJECT CATEGORIES — unified (no party separation) ═══ */
 
 function buildProjectDetails(isSI) {
   const folders = [
-    { id: "pd_hw", name: "Hardware & MES Deployments", accessLevel: "open", items: [] },
     { id: "pd_specs", name: "Design Specifications & Integration Docs", accessLevel: "open", items: [] },
     { id: "pd_program", name: "Program Details & Timelines", accessLevel: "open", items: [], type: "program" },
     { id: "pd_cad", name: "CAD & Drawings", accessLevel: "open", items: [] },
+    JSON.parse(JSON.stringify(DEPLOYMENT_REQUIREMENTS_FOLDER)),
+    ...TABLE_TEMPLATES.map(t => JSON.parse(JSON.stringify(t))),
+    { id: "pd_reference_info", name: "Reference Info", type: "folder", accessLevel: "open", items: [] },
   ];
   // Checklist: SI projects get SI checklist; standard projects get Internal + External
   if (isSI) {
@@ -405,4 +594,4 @@ function buildInstrumentalCategories(isSI) {
   return buildProjectDetails(isSI);
 }
 
-module.exports = { buildInstrumentalCategories, buildProjectDetails, buildCommercialFolders, INTERNAL_CHECKLIST, EXTERNAL_CHECKLIST, SI_CHECKLIST };
+module.exports = { buildInstrumentalCategories, buildProjectDetails, buildCommercialFolders, INTERNAL_CHECKLIST, EXTERNAL_CHECKLIST, SI_CHECKLIST, TABLE_TEMPLATES, DEPLOYMENT_REQUIREMENTS_FOLDER };

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { auth, db, functions, storage, googleProvider } from "./firebase";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { ref, onValue, set } from "firebase/database";
@@ -28,18 +28,55 @@ const commitUrl = (raw) => {
   return clean;
 };
 
-/* v4.0.3 — PDF upload to Firebase Storage. Returns the download URL on success, null on cancel/error. */
-const MAX_PDF_BYTES = 50 * 1024 * 1024;
-const uploadPdfToStorage = async (file, projectId) => {
+/* v4.1.0 — File upload to Firebase Storage. Returns the download URL on success, null on cancel/error.
+   Accepts PDF, Office (DOCX/XLSX/PPTX/DOC/XLS/PPT), images, text/CSV, and .lbx label files.
+   .lbx files have no standard MIME (browsers send application/octet-stream); accepted by extension. */
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const ALLOWED_MIMES = new Set([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/msword",
+  "application/vnd.ms-excel",
+  "application/vnd.ms-powerpoint",
+  "application/octet-stream",
+  "text/csv",
+  "text/plain",
+]);
+const isAllowedFile = (file) => {
+  if (!file) return false;
+  if (file.type?.startsWith("image/")) return true;
+  if (file.type?.startsWith("text/")) return true;
+  if (ALLOWED_MIMES.has(file.type)) return true;
+  // Fallback: check extension for .lbx (label files often have empty MIME)
+  if ((file.name || "").toLowerCase().endsWith(".lbx")) return true;
+  return false;
+};
+const fileIcon = (filename) => {
+  const ext = (filename || "").toLowerCase().split(".").pop();
+  if (ext === "pdf") return "📄";
+  if (["xlsx", "xls", "csv"].includes(ext)) return "📊";
+  if (["docx", "doc"].includes(ext)) return "📝";
+  if (["pptx", "ppt"].includes(ext)) return "📋";
+  if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) return "🖼️";
+  if (ext === "lbx") return "🏷️";
+  return "📁";
+};
+const uploadFileToStorage = async (file, projectId) => {
   if (!file) return null;
-  if (file.type !== "application/pdf") { alert("Only PDF files are allowed."); return null; }
-  if (file.size > MAX_PDF_BYTES) { alert(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max 50 MB.`); return null; }
-  const safeName = (file.name || "upload.pdf").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
+  if (!isAllowedFile(file)) { alert(`File type not allowed: ${file.type || "unknown"}. Allowed: PDF, Office docs, images, text/CSV, .lbx`); return null; }
+  if (file.size > MAX_FILE_BYTES) { alert(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max 50 MB.`); return null; }
+  const safeName = (file.name || "upload").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
   const path = `uploads/${projectId || "global"}/${Date.now()}_${safeName}`;
   const fileRef = sRef(storage, path);
-  await uploadBytes(fileRef, file, { contentType: "application/pdf" });
+  // For .lbx and other extensionless types, fall back to octet-stream so storage rules accept it
+  const contentType = file.type || "application/octet-stream";
+  await uploadBytes(fileRef, file, { contentType });
   return await getDownloadURL(fileRef);
 };
+// Back-compat alias — older code may still call uploadPdfToStorage
+const uploadPdfToStorage = uploadFileToStorage;
 
 /* Cloud Function callables — v4.0.0 admin + provisioning */
 const callProvisionUser = () => httpsCallable(functions, "provisionUser")();
@@ -59,7 +96,7 @@ const LANGUAGES = [
   { id: "zh-tw", label: "繁體中文", flag: "🇹🇼", short: "繁" },
   { id: "zh-cn", label: "简体中文", flag: "🇨🇳", short: "简" },
 ];
-const HW_TYPES = ["Camera", "Lens", "Station Computer"];
+const HW_TYPES = ["Camera", "Lens", "Station Computer", "Frame", "Monitor", "LED Controller", "Barcode Scanner", "Other"];
 // v4.0.1: 8-stage SI Partner Deployment pipeline (matches HubSpot's "SI Partner Deployment" pipeline)
 const SI_PIPELINE_STAGES = [
   { id: "sird",  label: "SIRD",  color: "#00C9A7" },
@@ -90,11 +127,113 @@ const SEED_PROJECTS = [
 ];
 /* v3.2.0: Default project-details folders (applied to new projects). Checklist templates come from Cloud Functions. */
 const DEFAULT_PROJECT_DETAILS = [
-  { id: "pd_hw", name: "Hardware & MES Deployments", accessLevel: "open", items: [] },
   { id: "pd_specs", name: "Design Specifications & Integration Docs", accessLevel: "open", items: [] },
   { id: "pd_program", name: "Program Details & Timelines", accessLevel: "open", items: [], type: "program" },
   { id: "pd_cad", name: "CAD & Drawings", accessLevel: "open", items: [] },
 ];
+
+/* v4.1.0: Table templates + deployment requirement docs — mirror functions/checklists.js. Used for lazy migration + rendering. */
+const storageBaseUrl = (filename) =>
+  `https://firebasestorage.googleapis.com/v0/b/deploymentportal-5ec3a.appspot.com/o/${encodeURIComponent("templates/deployment_requirements/" + filename)}?alt=media`;
+
+const APP_DEPLOY_REQ_FOLDER = {
+  id: "pd_deployment_requirements", name: "Hardware & MES Deployment Requirements", type: "folder", accessLevel: "open",
+  items: [
+    { id: "doc_self_deploy",       name: "Self-Deploy Main Installation Document",        url: storageBaseUrl("3 Self-Deploy_Main Installation Document - 250708.pdf"),           source: "system", type: "pdf" },
+    { id: "doc_internet_req",      name: "Instrumental Internet Requirements",              url: storageBaseUrl("Instrumental Internet Requirements.pdf"),                         source: "system", type: "pdf" },
+    { id: "doc_space_req",         name: "Instrumental Station Space Requirements",         url: storageBaseUrl("Instrumental Station Space Requirements.pdf"),                    source: "system", type: "pdf" },
+    { id: "doc_mes_questionnaire", name: "MES Questionnaire v4",                            url: storageBaseUrl("MES Questionnaire v4.pdf"),                                       source: "system", type: "pdf" },
+    { id: "doc_network_req",       name: "OPS-00003 — Instrumental Network Requirements",   url: storageBaseUrl("OPS-00003_Rev 00_Instrumental Network Requirements.pdf"),         source: "system", type: "pdf" },
+    { id: "doc_facility_req",      name: "OPS-00004 — Facility Requirements Intro Slides",  url: storageBaseUrl("OPS-00004_Rev01_INST - Facility Requirements Intro Slides.pptx"),  source: "system", type: "pptx" },
+    { id: "doc_pwr_apac",          name: "Site Readiness Spec — APAC 2026.1",               url: storageBaseUrl("PWR-APAC-2026.1_SiteReadinessSpec.pdf"),                          source: "system", type: "pdf" },
+    { id: "doc_pwr_eu",            name: "Site Readiness Spec — EU 2026.1",                 url: storageBaseUrl("PWR-EU-2026.1_SiteReadinessSpec.pdf"),                            source: "system", type: "pdf" },
+    { id: "doc_pwr_us",            name: "Site Readiness Spec — US 2026.2",                 url: storageBaseUrl("PWR-US-2026.2_SiteReadinessSpec.pdf"),                            source: "system", type: "pdf" },
+    { id: "doc_power_slides",      name: "Regional Power Requirements Slides",               url: storageBaseUrl("Regional_Power_Slides.pptx"),                                     source: "system", type: "pptx" },
+  ],
+};
+
+const APP_TABLE_TEMPLATES = [
+  { id: "pd_station_kits", name: "Station Kits", type: "table", accessLevel: "open", columns: [
+    { key: "station_num", label: "Station #", width: 80 }, { key: "project", label: "Project", width: 120 },
+    { key: "prj_id", label: "Project ID", width: 100 }, { key: "line", label: "Line", width: 80 },
+    { key: "station_name", label: "Station Name", width: 140 }, { key: "fixture_name", label: "Fixture Name", width: 160 },
+    { key: "serial_number", label: "Serial #", width: 110 }, { key: "model", label: "Model", width: 120 },
+    { key: "status", label: "Status", width: 100 }, { key: "location", label: "Location", width: 120 },
+    { key: "ship_date", label: "Ship Date", width: 100, type: "date" }, { key: "notes", label: "Notes", width: 200 },
+  ], rows: [] },
+  { id: "pd_in_factory_install", name: "In-Factory Install", type: "table", accessLevel: "open", columns: [
+    { key: "station", label: "Station", width: 80 }, { key: "install_date", label: "Install Date", width: 110, type: "date" },
+    { key: "installed_by", label: "Installed By", width: 120 }, { key: "network_status", label: "Network Status", width: 120 },
+    { key: "sw_running", label: "SW Running", width: 100, type: "boolean" }, { key: "camera_calibrated", label: "Camera Calibrated", width: 130, type: "boolean" },
+    { key: "signed_off", label: "Signed Off", width: 100, type: "boolean" }, { key: "notes", label: "Notes", width: 200 },
+  ], rows: [] },
+  { id: "pd_camera_settings", name: "Camera Settings", type: "table", accessLevel: "open", columns: [
+    { key: "station", label: "Station", width: 80 }, { key: "camera_id", label: "Camera ID", width: 90 },
+    { key: "camera_model", label: "Camera Model", width: 130 }, { key: "serial_num", label: "Serial #", width: 100 },
+    { key: "lens", label: "Lens", width: 100 }, { key: "focal_length_mm", label: "Focal Length (mm)", width: 130 },
+    { key: "working_dist_mm", label: "Working Dist (mm)", width: 140 }, { key: "aperture", label: "Aperture (f/)", width: 100 },
+    { key: "gain", label: "Gain", width: 70 }, { key: "exposure_us", label: "Exposure (μs)", width: 110 },
+    { key: "fps", label: "FPS", width: 60 }, { key: "trigger_mode", label: "Trigger Mode", width: 110 },
+    { key: "resolution_w", label: "Res. W", width: 70 }, { key: "resolution_h", label: "Res. H", width: 70 },
+    { key: "lighting_type", label: "Lighting Type", width: 110 }, { key: "lighting_pos", label: "Lighting Position", width: 130 },
+    { key: "image_quality", label: "Image Quality", width: 110 }, { key: "verified_by", label: "Verified By", width: 110 },
+    { key: "verified_date", label: "Verified Date", width: 110, type: "date" },
+  ], rows: [] },
+  { id: "pd_led_settings", name: "LED Settings", type: "table", accessLevel: "open", columns: [
+    { key: "station", label: "Station", width: 80 }, { key: "led_id", label: "LED ID", width: 80 },
+    { key: "position", label: "Position", width: 100 }, { key: "type", label: "Type", width: 90 },
+    { key: "color", label: "Color", width: 80 }, { key: "angle_deg", label: "Angle (°)", width: 80 },
+    { key: "power_w", label: "Power (W)", width: 80 }, { key: "intensity_pct", label: "Intensity (%)", width: 100 },
+    { key: "voltage_v", label: "Voltage (V)", width: 80 }, { key: "current_a", label: "Current (A)", width: 80 },
+    { key: "frequency_hz", label: "Frequency (Hz)", width: 110 }, { key: "ip_rating", label: "IP Rating", width: 80 },
+    { key: "manufacturer", label: "Manufacturer", width: 120 }, { key: "model", label: "Model", width: 110 },
+    { key: "serial_num", label: "Serial #", width: 100 }, { key: "luminous_flux_lm", label: "Flux (lm)", width: 80 },
+    { key: "color_temp_k", label: "CCT (K)", width: 80 }, { key: "cri", label: "CRI", width: 60 },
+    { key: "lifetime_hrs", label: "Lifetime (hrs)", width: 110 }, { key: "channel", label: "Channel", width: 80 },
+    { key: "controller", label: "Controller", width: 110 }, { key: "install_date", label: "Install Date", width: 100, type: "date" },
+    { key: "notes", label: "Notes", width: 200 },
+  ], rows: [] },
+  { id: "pd_sop_plan", name: "SOP Plan", type: "table", accessLevel: "open", columns: [
+    { key: "location", label: "Location", width: 100 }, { key: "line", label: "Line", width: 80 },
+    { key: "station", label: "Station", width: 80 }, { key: "sop_number", label: "SOP Number", width: 110 },
+    { key: "image_1", label: "Image 1", width: 120 }, { key: "image_2", label: "Image 2", width: 120 },
+    { key: "image_3", label: "Image 3", width: 120 }, { key: "sop_created", label: "SOP Created", width: 100, type: "boolean" },
+    { key: "created_by", label: "Created By", width: 110 }, { key: "notes", label: "Notes", width: 200 },
+  ], rows: [] },
+  { id: "pd_mes_station_plan", name: "MES Station Plan", type: "table", accessLevel: "open", columns: [
+    { key: "sop_number", label: "SOP Number", width: 110 }, { key: "location", label: "Location", width: 100 },
+    { key: "line", label: "Line", width: 80 }, { key: "fixture_id", label: "Fixture ID", width: 100 },
+    { key: "station", label: "Station", width: 80 }, { key: "mes_station_name", label: "MES Station Name", width: 140 },
+    { key: "qr_code", label: "QR Code", width: 120 }, { key: "mes_protocol", label: "MES Protocol", width: 110 },
+    { key: "notes", label: "Notes", width: 200 },
+  ], rows: [] },
+  { id: "pd_serialization", name: "Serialization", type: "table", accessLevel: "open", columns: [
+    { key: "component_type", label: "Component Type", width: 140 }, { key: "sn_format", label: "SN Format", width: 130 },
+    { key: "config", label: "Config", width: 130 }, { key: "example_sn", label: "Example SN", width: 130 },
+    { key: "notes", label: "Notes", width: 200 },
+  ], rows: [] },
+  { id: "pd_sku_configs", name: "SKU Configs", type: "table", accessLevel: "open", columns: [
+    { key: "sku", label: "SKU", width: 120 }, { key: "config_1", label: "Config 1", width: 120 },
+    { key: "config_2", label: "Config 2", width: 120 }, { key: "config_3", label: "Config 3", width: 120 },
+    { key: "config_4", label: "Config 4", width: 120 }, { key: "config_5", label: "Config 5", width: 120 },
+    { key: "notes", label: "Notes", width: 200 },
+  ], rows: [] },
+  { id: "pd_shipment_details", name: "Shipment Details", type: "table", accessLevel: "open", columns: [
+    { key: "item_num", label: "Item #", width: 70 }, { key: "contents", label: "Contents", width: 160 },
+    { key: "box_size_in", label: "Box Size (in)", width: 110 }, { key: "box_size_mm", label: "Box Size (mm)", width: 110 },
+    { key: "weight_lbs", label: "Weight (lbs)", width: 100 }, { key: "weight_kg", label: "Weight (kg)", width: 90 },
+    { key: "carrier", label: "Carrier", width: 90 }, { key: "tracking_num", label: "Tracking #", width: 120 },
+    { key: "ship_date", label: "Ship Date", width: 100, type: "date" }, { key: "notes", label: "Notes", width: 200 },
+  ], rows: [] },
+  { id: "pd_team", name: "Team", type: "table", accessLevel: "open", columns: [
+    { key: "role", label: "Role", width: 120 }, { key: "name", label: "Name", width: 130 },
+    { key: "email", label: "Email", width: 180 }, { key: "company", label: "Company", width: 120 },
+    { key: "location", label: "Location", width: 120 }, { key: "phone", label: "Phone", width: 120 },
+    { key: "description", label: "Description", width: 200 },
+  ], rows: [] },
+];
+
+const APP_REFERENCE_INFO_FOLDER = { id: "pd_reference_info", name: "Reference Info", type: "folder", accessLevel: "open", items: [] };
 const DEFAULT_COMMERCIAL = [
   { id: "comm_agreements", name: "Agreements", accessLevel: "restricted", items: [] },
   { id: "comm_pricing", name: "Pricing Details", accessLevel: "restricted", items: [] },
@@ -367,6 +506,28 @@ const getEffectiveHw = (project, key, docData) => {
   return project?.hardware?.[key];
 };
 const getEffectiveHwCount = (project, key, docData) => parseHwCount(getEffectiveHw(project, key, docData));
+
+// v4.1.0 — HubSpot project record hyperlinks (Instrumental portal — na2 region)
+const HUBSPOT_PORTAL_ID = "46433248";
+const HUBSPOT_HOST = "app-na2.hubspot.com";
+const HUBSPOT_OBJECT_TYPE = "2-39524389";
+const hubspotProjectUrl = (project) =>
+  project?.hubspotId
+    ? `https://${HUBSPOT_HOST}/contacts/${HUBSPOT_PORTAL_ID}/record/${HUBSPOT_OBJECT_TYPE}/${project.hubspotId}`
+    : null;
+const HubspotLinkIcon = ({ project, style }) => {
+  const url = hubspotProjectUrl(project);
+  if (!url) return null;
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer"
+       title="Open in HubSpot"
+       style={{ marginLeft: 6, color: "#FF7A59", textDecoration: "none", fontSize: 13, ...style }}
+       onClick={e => e.stopPropagation()}>
+      🔗
+    </a>
+  );
+};
+
 // Standard HubSpot-synced hardware fields → display labels
 const HUBSPOT_HW_FIELDS = [
   { key: "cameras", label: "Cameras" },
@@ -390,8 +551,9 @@ const Chip = ({ children, color = "#F1F5F9", fg = "#475569", small }) => (
   <span style={{ display: "inline-flex", alignItems: "center", padding: small ? "2px 8px" : "4px 12px", borderRadius: 8, background: color, color: fg, fontSize: small ? 11 : 12, fontWeight: 600, fontFamily: F }}>{children}</span>
 );
 
-/* v4.0.3 — PDF upload button. Wraps a hidden <input type="file"> with progress feedback. */
-function PdfUploadButton({ projectId, onUploaded, label = "📎 Upload PDF", style }) {
+/* v4.1.0 — File upload button. Accepts PDF, Office docs, images, text/CSV, .lbx label files.
+   Wraps a hidden <input type="file"> with progress feedback. */
+function FileUploadButton({ projectId, onUploaded, label = "📎 Upload File", style }) {
   const inputRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const handleChange = async (e) => {
@@ -400,10 +562,10 @@ function PdfUploadButton({ projectId, onUploaded, label = "📎 Upload PDF", sty
     if (!file) return;
     setBusy(true);
     try {
-      const url = await uploadPdfToStorage(file, projectId);
+      const url = await uploadFileToStorage(file, projectId);
       if (url) onUploaded(url, file.name);
     } catch (err) {
-      console.error("PDF upload failed:", err);
+      console.error("File upload failed:", err);
       alert("Upload failed: " + (err?.message || String(err)));
     }
     setBusy(false);
@@ -424,10 +586,18 @@ function PdfUploadButton({ projectId, onUploaded, label = "📎 Upload PDF", sty
       >
         {busy ? "Uploading…" : label}
       </button>
-      <input ref={inputRef} type="file" accept="application/pdf" onChange={handleChange} style={{ display: "none" }} />
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.csv,.txt,.lbx,image/*"
+        onChange={handleChange}
+        style={{ display: "none" }}
+      />
     </>
   );
 }
+// Back-compat alias — older JSX may still use <PdfUploadButton>
+const PdfUploadButton = FileUploadButton;
 
 /* ═══ LOGIN ═══ */
 function Login({ err }) {
@@ -472,8 +642,10 @@ function PendingApproval({ authUser, onLogout }) {
 }
 
 /* ═══ SIDEBAR — v3.2.0: unified sections (no party tabs) ═══ */
-function Sidebar({ view, setView, user, project, projects, setProject, onLogout, lang, setLang, hasCommercialAccess }) {
+function Sidebar({ view, setView, user, project, projects, setProject, onLogout, lang, setLang, hasCommercialAccess, cats, setDetailTab }) {
   const admin = isInst(user);
+  const [subOpen, setSubOpen] = useState(true);
+  const [overviewOpen, setOverviewOpen] = useState(true);
   const dropdownProjects = admin ? projects.filter(p => p.status !== "inactive") : projects.filter(p => p.status === "active");
   // v4.0.2 — single-control combobox replaces the old <input>+<select> pair (which was glitchy on macOS browsers).
   const [projSearch, setProjSearch] = useState("");
@@ -484,10 +656,16 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
   return (
     <aside style={S.side}>
       <div style={S.sideHead}><span style={{ fontSize: 24, color: "#00C9A7" }}>◎</span><span style={S.sideTitle}>{t("Deployment Portal", lang)}</span></div>
-      {/* All Projects Overview — large font, admin/instrumental only */}
+      {/* All Projects Overview — large font, admin/instrumental only, with All SI Projects sub-item */}
       {admin && (
         <div style={{ padding: "0 12px 6px" }}>
-          <button onClick={() => setView("projects_overview")} style={{ ...S.navBtn, fontSize: 20, fontWeight: 800, padding: "16px 16px", ...(view === "projects_overview" ? { background: "rgba(0,201,167,.15)", color: "#00C9A7", borderLeftColor: "#00C9A7" } : {}) }}>🌐 All Projects Overview</button>
+          <div style={{ display: "flex", alignItems: "center" }}>
+            <button onClick={() => setView("projects_overview")} style={{ ...S.navBtn, flex: 1, width: "auto", fontSize: 20, fontWeight: 800, padding: "16px 16px", ...(view === "projects_overview" ? { background: "rgba(0,201,167,.15)", color: "#00C9A7", borderLeftColor: "#00C9A7" } : {}) }}>🌐 All Projects Overview</button>
+            <button onClick={() => setOverviewOpen(o => !o)} style={{ padding: "8px 10px", background: "none", border: "none", color: "#64748B", cursor: "pointer", fontSize: 14, lineHeight: 1, fontFamily: F }}>{overviewOpen ? "▾" : "▸"}</button>
+          </div>
+          {overviewOpen && (
+            <button onClick={() => setView("all_si_projects")} style={{ ...S.navBtn, fontSize: 14, paddingTop: 9, paddingBottom: 9, paddingLeft: 32, ...(view === "all_si_projects" ? { background: "rgba(255,255,255,.1)", color: "#F1F5F9", borderLeftColor: "#00C9A7" } : {}) }}>🤝 All SI Projects</button>
+          )}
         </div>
       )}
       {/* Project combobox — single control: type to filter, click row to select. */}
@@ -524,8 +702,32 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
         {/* Overview — slightly bigger font */}
         <button onClick={() => setView("dashboard")} style={{ ...S.navBtn, fontSize: 17, fontWeight: 600, ...navActive("dashboard") }}>{"⊙ " + t("Overview", lang)}</button>
         <div style={S.divider} />
-        {/* Project Details */}
-        <button onClick={() => setView("project_details")} style={{ ...S.navBtn, ...navActive("project_details") }}>📋 Project Details</button>
+        {/* Project Details — with collapse/expand chevron */}
+        <div style={{ display: "flex", alignItems: "center" }}>
+          <button onClick={() => setView("project_details")} style={{ ...S.navBtn, flex: 1, width: "auto", ...navActive("project_details") }}>📋 Project Details</button>
+          {project && (
+            <button onClick={() => setSubOpen(o => !o)} style={{ padding: "8px 10px", background: "none", border: "none", color: "#64748B", cursor: "pointer", fontSize: 14, lineHeight: 1, fontFamily: F }}>
+              {subOpen ? "▾" : "▸"}
+            </button>
+          )}
+        </div>
+        {/* Sub-nav items. Instrumental sees all; external users see only the 3 open folders. */}
+        {project && subOpen && (() => {
+          const EXTERNAL_VISIBLE = new Set(["pd_specs", "pd_cad", "pd_deployment_requirements"]);
+          const subCats = cats.filter(c => c.type !== "program");
+          const items = (subCats.length > 0 ? subCats : APP_TABLE_TEMPLATES)
+            .filter(c => admin || EXTERNAL_VISIBLE.has(c.id));
+          return items.map(cat => {
+            const icon = cat.type === "table" ? "📊" : cat.type === "checklist" ? "📋" : "📁";
+            const isActive = view === "project_details" && localStorage.getItem(`dp_proj_tab_${project.id}`) === cat.id;
+            return (
+              <button key={cat.id} onClick={() => setDetailTab(cat.id)} style={{
+                ...S.navBtn, fontSize: 13, paddingTop: 9, paddingBottom: 9, paddingLeft: 32,
+                ...(isActive ? { background: "rgba(255,255,255,.1)", color: "#F1F5F9", borderLeftColor: "#00C9A7" } : {}),
+              }}>{icon} {cat.name}</button>
+            );
+          });
+        })()}
         {/* Commercial — restricted indicator */}
         <button onClick={() => setView("commercial")} style={{ ...S.navBtn, ...navActive("commercial"), color: view === "commercial" ? "#F1F5F9" : hasCommercialAccess ? "#94A3B8" : "#64748B" }}>
           {hasCommercialAccess ? "📂" : "🔒"} Commercial
@@ -570,7 +772,7 @@ function DashboardView({ user, project, state, setState, lang = "en", setView })
 
   const progMilestones = (state.docData?.[project.id]?._programDetails?.tasks || []).filter(t => t.type === "milestone").sort((a, b) => new Date(a.date) - new Date(b.date));
 
-  // External users — simplified dashboard (station count + milestones)
+  // External users — show stations, milestones, Project Overview (read-only), Hardware (read-only), and Gantt toggle
   if (isExternal(user)) {
     return (
       <div style={S.page}>
@@ -592,6 +794,10 @@ function DashboardView({ user, project, state, setState, lang = "en", setView })
             ))}
           </div>
         )}
+        {/* v4.1.0: external users now also see Project Overview + Hardware (read-only via canEdit gating) + Gantt */}
+        <ProjectOverviewSection project={project} state={state} setState={setState} user={user} />
+        <ProjectHardwareSection project={project} state={state} setState={setState} user={user} />
+        <GanttChartToggle project={project} state={state} />
       </div>
     );
   }
@@ -625,7 +831,7 @@ function DashboardView({ user, project, state, setState, lang = "en", setView })
         </div>
       )}
 
-      <h2 style={S.h2}>{project.name}</h2>
+      <h2 style={S.h2}>{project.name}<HubspotLinkIcon project={project} /></h2>
       <p style={S.sub}>Deployment overview</p>
 
       {/* Section summary cards */}
@@ -693,8 +899,8 @@ function DashboardView({ user, project, state, setState, lang = "en", setView })
       </div>
 
       {/* Hardware — HubSpot-synced (read-only) + Custom manual entries */}
-      {/* Gantt chart — visible for all projects with dates */}
-      <GanttChart project={project} state={state} />
+      {/* v4.1.0: Gantt is toggleable; disabled if < 3 dates */}
+      <GanttChartToggle project={project} state={state} />
 
       {/* SI-specific details */}
       {project.isSI && (
@@ -708,11 +914,12 @@ function DashboardView({ user, project, state, setState, lang = "en", setView })
 
       <ProjectOverviewSection project={project} state={state} setState={setState} user={user} />
       <ProjectHardwareSection project={project} state={state} setState={setState} user={user} />
+      {/* v4.1.0: HardwareTrackingSection removed — duplicates ProjectHardwareSection */}
     </div>
   );
 }
 
-/* ═══ PROJECT OVERVIEW SECTION — v4.0.0: 8 fields, pull-only from HubSpot, writeback in v4.1.0 ═══ */
+/* ═══ PROJECT OVERVIEW SECTION — v4.1.0: writeback to HubSpot on date field save ═══ */
 function ProjectOverviewSection({ project, state, setState, user }) {
   const canEdit = isInst(user);
   const pid = project?.id;
@@ -720,13 +927,37 @@ function ProjectOverviewSection({ project, state, setState, user }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(overview);
   const [botLoading, setBotLoading] = useState(false);
+  // "idle" | "syncing" | "ok" | "error"
+  const [writebackStatus, setWritebackStatus] = useState("idle");
   useEffect(() => { setDraft(overview); }, [overview, pid]);
 
-  const save = () => {
+  const DATE_KEYS = ["cadCompleteDate", "cadActualFinishDate", "actualServiceStartDate", "targetBuildDate", "actualDeployDate"];
+
+  const save = async () => {
     if (!canEdit || !pid) return;
     const next = { ...draft, updatedAt: new Date().toISOString(), updatedBy: user.name };
     setState(prev => ({ ...prev, projectOverview: { ...(prev.projectOverview||{}), [pid]: next } }));
     setEditing(false);
+
+    // Writeback date fields to HubSpot if the project has a hubspotId
+    const hubspotId = project?.hubspotId;
+    if (!hubspotId) return;
+    const changedFields = {};
+    DATE_KEYS.forEach(k => {
+      if (draft[k] !== overview[k]) changedFields[k] = draft[k] || null;
+    });
+    if (Object.keys(changedFields).length === 0) return;
+
+    setWritebackStatus("syncing");
+    try {
+      const fn = httpsCallable(functions, "writeProjectDateToHubspot");
+      await fn({ hubspotId, fields: changedFields });
+      setWritebackStatus("ok");
+      setTimeout(() => setWritebackStatus("idle"), 4000);
+    } catch (e) {
+      console.error("HubSpot writeback failed:", e);
+      setWritebackStatus("error");
+    }
   };
 
   // v4.0.0: AI-drafted project status. Calls existing askProjectBot CF with a tailored prompt.
@@ -774,7 +1005,12 @@ function ProjectOverviewSection({ project, state, setState, user }) {
   return (
     <div style={{ marginTop: 24 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, paddingBottom: 8, borderBottom: "2px solid #F1F5F9" }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F }}>Project Overview</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F }}>Project Overview</div>
+          {writebackStatus === "syncing" && <span style={{ fontSize: 11, color: "#3B82F6", fontFamily: F }}>↑ Syncing to HubSpot…</span>}
+          {writebackStatus === "ok"      && <span style={{ fontSize: 11, color: "#059669", fontFamily: F }}>✓ HubSpot updated</span>}
+          {writebackStatus === "error"   && <span style={{ fontSize: 11, color: "#DC2626", fontFamily: F }}>⚠ HubSpot writeback failed — saved locally</span>}
+        </div>
         {canEdit && !editing && <button onClick={() => setEditing(true)} style={{ padding: "4px 12px", fontSize: 12, border: "1px solid #E2E8F0", borderRadius: 6, background: "#FFF", cursor: "pointer", fontFamily: F, color: "#3B82F6" }}>✎ Edit</button>}
         {canEdit && editing && (
           <div style={{ display: "flex", gap: 6 }}>
@@ -784,7 +1020,7 @@ function ProjectOverviewSection({ project, state, setState, user }) {
         )}
       </div>
       <div style={{ ...S.card, marginBottom: 12 }}>
-        <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F, marginBottom: 10 }}>Key project dates and status. {canEdit ? "Editable fields are source-of-truth in the webapp; writeback to HubSpot arrives in v4.1.0." : ""}</div>
+        <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F, marginBottom: 10 }}>Key project dates and status. {canEdit && project?.hubspotId ? "Date changes sync to HubSpot automatically on save." : canEdit ? "No HubSpot record linked — dates saved locally only." : ""}</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
           {WRITABLE.map(f => editing ? (
             <div key={f.key} style={{ padding: "10px 14px", background: "#F8FAFC", borderRadius: 8, border: "1px solid #F1F5F9" }}>
@@ -953,85 +1189,289 @@ function ProjectHardwareSection({ project, state, setState, user }) {
   );
 }
 
-/* ═══ PROJECT DETAILS VIEW — v3.2.0 unified folders (replaces party-based DocsView) ═══ */
+/* ═══ v4.1.0 PROJECT TABS HELPERS ═══ */
+const tabIcon = (type) => {
+  if (type === "checklist") return "📋";
+  if (type === "table") return "📊";
+  if (type === "program") return "📅";
+  return "📁";
+};
+
+const tabBadge = (cat) => {
+  if (cat.type === "checklist") {
+    const all = (cat.milestones || []).flatMap(ms => ms.checklist || []);
+    const active = all.filter(ck => !ck.na);
+    if (active.length === 0) return null;
+    const pct = Math.round(all.filter(ck => !ck.na && ck.checked).length / active.length * 100);
+    return `${pct}%`;
+  }
+  if (cat.type === "table") { const n = (cat.rows || []).length; return n > 0 ? `${n}` : null; }
+  if (cat.type === "program") return null;
+  const n = (cat.items || []).filter(i => !i._userDeleted).length;
+  return n > 0 ? `${n}` : null;
+};
+
+/* ═══ TABLE SECTION — inline-editable rows for type:"table" categories ═══ */
+function TableSection({ cat, updateCats, canEdit }) {
+  const [editCell, setEditCell] = useState(null); // { rowId, key }
+  const [editVal, setEditVal] = useState("");
+  const rows = cat.rows || [];
+  const cols = cat.columns || [];
+
+  const updateRow = (rowId, key, value) =>
+    updateCats(cur => cur.map(c => c.id !== cat.id ? c : {
+      ...c, rows: (c.rows || []).map(r => r.id !== rowId ? r : { ...r, [key]: value })
+    }));
+
+  const addRow = () => {
+    const newRow = { id: genId() };
+    cols.forEach(col => { newRow[col.key] = col.type === "boolean" ? false : ""; });
+    updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, rows: [...(c.rows || []), newRow] }));
+  };
+
+  const delRow = (rowId) =>
+    updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, rows: (c.rows || []).filter(r => r.id !== rowId) }));
+
+  const startEdit = (rowId, key, val) => { setEditCell({ rowId, key }); setEditVal(val || ""); };
+  const commitEdit = () => {
+    if (!editCell) return;
+    updateRow(editCell.rowId, editCell.key, editVal);
+    setEditCell(null); setEditVal("");
+  };
+
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ overflowX: "auto", borderRadius: 8, border: "1px solid #E2E8F0" }}>
+        <table style={{ borderCollapse: "collapse", fontSize: 13, fontFamily: F, width: "max-content", minWidth: "100%" }}>
+          <thead>
+            <tr style={{ background: "#F8FAFC" }}>
+              {cols.map(col => (
+                <th key={col.key} style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#64748B", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap", borderBottom: "2px solid #E2E8F0", minWidth: col.width || 100 }}>
+                  {col.label}
+                </th>
+              ))}
+              {canEdit && <th style={{ padding: "8px 12px", borderBottom: "2px solid #E2E8F0", minWidth: 36 }} />}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr><td colSpan={cols.length + (canEdit ? 1 : 0)} style={{ padding: "18px 12px", color: "#CBD5E1", fontStyle: "italic", textAlign: "center", fontFamily: F }}>
+                No rows yet.{canEdit ? " Click '+ Add Row' to begin." : ""}
+              </td></tr>
+            )}
+            {rows.map((row, rowIdx) => (
+              <tr key={row.id} style={{ borderBottom: "1px solid #F1F5F9", background: rowIdx % 2 === 0 ? "#FFF" : "#FAFAFA" }}>
+                {cols.map(col => {
+                  const isEditing = editCell?.rowId === row.id && editCell?.key === col.key;
+                  const val = row[col.key];
+                  if (col.type === "boolean") {
+                    return (
+                      <td key={col.key} style={{ padding: "6px 12px", textAlign: "center" }}>
+                        <input type="checkbox" checked={!!val} disabled={!canEdit}
+                          onChange={e => canEdit && updateRow(row.id, col.key, e.target.checked)}
+                          style={{ width: 16, height: 16, cursor: canEdit ? "pointer" : "default" }} />
+                      </td>
+                    );
+                  }
+                  return (
+                    <td key={col.key} style={{ padding: "4px 6px", minWidth: col.width || 100 }}
+                        onClick={() => canEdit && !isEditing && startEdit(row.id, col.key, val)}>
+                      {isEditing ? (
+                        <input type={col.type === "date" ? "date" : "text"} autoFocus
+                          value={editVal} onChange={e => setEditVal(e.target.value)}
+                          onBlur={commitEdit}
+                          onKeyDown={e => { if (e.key === "Enter") commitEdit(); if (e.key === "Escape") setEditCell(null); }}
+                          style={{ width: "100%", padding: "4px 6px", fontSize: 13, border: "1px solid #3B82F6", borderRadius: 4, outline: "none", fontFamily: F }} />
+                      ) : (
+                        <div style={{ padding: "4px 6px", minHeight: 24, borderRadius: 4, color: val ? "#0F172A" : "#CBD5E1", cursor: canEdit ? "pointer" : "default", fontStyle: val ? "normal" : "italic", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {col.type === "date" && val ? fmtDay(val) : (val || (canEdit ? "click to edit" : "—"))}
+                        </div>
+                      )}
+                    </td>
+                  );
+                })}
+                {canEdit && <td style={{ padding: "4px 6px", textAlign: "center" }}>
+                  <button onClick={() => delRow(row.id)} style={{ ...S.btnDel, padding: "2px 6px", fontSize: 11 }} title="Delete row">✕</button>
+                </td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {canEdit && <button onClick={addRow} style={{ ...S.btnAddItem, marginTop: 8 }}>+ Add Row</button>}
+      {rows.length > 0 && <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F, marginTop: 4 }}>{rows.length} row{rows.length !== 1 ? "s" : ""}</div>}
+    </div>
+  );
+}
+
+/* ═══ FOLDER SECTION — renders a link/file folder category ═══ */
+function FolderSection({ cat, updateCats, user, canEdit, pid }) {
+  const [addingItem, setAddingItem] = useState(false);
+  const [itemForm, setItemForm] = useState({ name: "", url: "", type: "link", lang: "en" });
+  const items = (cat.items || []).filter(i => !i._userDeleted);
+
+  const addItem = () => {
+    if (!itemForm.name.trim()) return;
+    const url = commitUrl(itemForm.url); if (url === null) return;
+    const item = { id: genId(), name: itemForm.name.trim(), url, type: itemForm.type, lang: itemForm.lang, addedBy: user.name, addedAt: new Date().toISOString() };
+    updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, items: [...(c.items || []), item] }));
+    setItemForm({ name: "", url: "", type: "link", lang: "en" }); setAddingItem(false);
+  };
+
+  const delItem = (itemId, isSystem) => {
+    if (isSystem) {
+      updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, items: (c.items || []).map(i => i.id !== itemId ? i : { ...i, _userDeleted: true }) }));
+    } else {
+      updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, items: (c.items || []).filter(i => i.id !== itemId) }));
+    }
+  };
+
+  return (
+    <div>
+      {items.map(item => (
+        <div key={item.id} style={{ ...S.docItemRow, border: item.source === "system" ? "1px dashed #E2E8F0" : undefined, borderRadius: item.source === "system" ? 6 : undefined, padding: item.source === "system" ? "8px 10px" : undefined, marginBottom: 4 }}>
+          <span style={{ fontSize: 14 }}>{item.type === "link" ? "🔗" : fileIcon(item.name)}</span>
+          <div style={{ flex: 1 }}>
+            {item.url ? <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 15, fontWeight: 500, color: "#0284C7", textDecoration: "none", fontFamily: F }}>{item.name}</a> : <span style={{ fontSize: 15, fontFamily: F }}>{item.name}</span>}
+            <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F, display: "flex", gap: 6, alignItems: "center" }}>
+              {item.source === "system" ? <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "#FFF4F0", color: "#C2410C", fontWeight: 600 }}>SYSTEM</span> : `${item.addedBy} · ${fmtDate(item.addedAt)}`}
+            </div>
+          </div>
+          {canEdit && <button style={{ ...S.btnDel, padding: "3px 8px", fontSize: 11 }} onClick={() => delItem(item.id, item.source === "system")}>✕</button>}
+        </div>
+      ))}
+      {items.length === 0 && <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>No documents yet.</div>}
+      {canEdit && pid && (
+        addingItem ? (
+          <div style={{ marginTop: 12, padding: 14, background: "#F8FAFC", borderRadius: 10 }}>
+            <label style={S.lbl}>Name</label>
+            <input style={S.inp} value={itemForm.name} onChange={e => setItemForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Pin Inspection Spec v2.1" />
+            <label style={S.lbl}>URL <span style={{ color: "#94A3B8", fontWeight: 400 }}>(or upload a file below)</span></label>
+            <input style={S.inp} value={itemForm.url} onChange={e => setItemForm(f => ({ ...f, url: e.target.value, type: "link" }))} placeholder="https://..." />
+            <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <button style={{ ...S.btnMain, width: "auto", padding: "10px 18px", marginTop: 0 }} onClick={addItem}>Add</button>
+              <PdfUploadButton projectId={pid} onUploaded={(url, fileName) => setItemForm(f => ({ ...f, url, type: "pdf", name: f.name?.trim() || fileName.replace(/\.[^.]+$/, "") }))} />
+              <button style={{ ...S.btnFlat, width: "auto" }} onClick={() => { setAddingItem(false); setItemForm({ name: "", url: "", type: "link", lang: "en" }); }}>Cancel</button>
+            </div>
+            {itemForm.url && itemForm.type === "pdf" && <div style={{ fontSize: 12, color: "#059669", fontFamily: F, marginTop: 8 }}>✓ File uploaded — click Add to save.</div>}
+          </div>
+        ) : (
+          <button style={{ ...S.btnAddItem, marginTop: 8 }} onClick={() => setAddingItem(true)}>+ Add Link or File</button>
+        )
+      )}
+    </div>
+  );
+}
+
+/* ═══ PROJECT TABS VIEW — tabbed nav for all project categories ═══ */
+function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state, setState, lang, onDelFolder, standardCatIds }) {
+  // External users see only 3 specific folders; tables + checklists are Instrumental-only.
+  const EXTERNAL_VISIBLE = new Set(["pd_specs", "pd_cad", "pd_deployment_requirements"]);
+  const visibleCats = (() => {
+    const filtered = cats
+      .filter(c => c.type !== "program")
+      .filter(c => isInst(user) || EXTERNAL_VISIBLE.has(c.id));
+    if (!isInst(user)) return filtered;
+    // Instrumental: tables leftmost, then folders, then checklists
+    return [
+      ...filtered.filter(c => c.type === "table"),
+      ...filtered.filter(c => c.type !== "table" && c.type !== "checklist"),
+      ...filtered.filter(c => c.type === "checklist"),
+    ];
+  })();
+
+  const [activeTab, setActiveTab] = useState(() => {
+    const saved = localStorage.getItem(`dp_proj_tab_${pid}`);
+    return (saved && visibleCats.find(c => c.id === saved)) ? saved : (visibleCats[0]?.id || "");
+  });
+  useEffect(() => {
+    const saved = localStorage.getItem(`dp_proj_tab_${pid}`);
+    const valid = saved && visibleCats.find(c => c.id === saved);
+    setActiveTab(valid ? saved : (visibleCats[0]?.id || ""));
+  }, [pid, visibleCats.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleTab = (id) => { setActiveTab(id); localStorage.setItem(`dp_proj_tab_${pid}`, id); };
+  const activeCat = visibleCats.find(c => c.id === activeTab) || visibleCats[0];
+  const isUserFolder = activeCat && !standardCatIds?.has(activeCat.id) && activeCat.type !== "checklist" && activeCat.type !== "program" && activeCat.type !== "table";
+
+  return (
+    <div>
+      {/* Active tab header with optional delete (user-created folders only) */}
+      {activeCat && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F }}>{activeCat.name}</div>
+          {canEdit && isUserFolder && onDelFolder && (
+            <button style={{ ...S.btnDel, fontSize: 11, padding: "4px 10px" }} onClick={() => onDelFolder(activeCat.id)}>Delete Folder</button>
+          )}
+        </div>
+      )}
+      {/* Active tab content */}
+      {activeCat && (
+        activeCat.type === "checklist"
+          ? <ChecklistSection cat={activeCat} cats={cats} updateCats={updateCats} user={user} canEdit={canEdit} pid={pid} lang={lang} />
+          : activeCat.type === "program"
+            ? <ProgramDetailsSection cat={activeCat} pid={pid} state={state} setState={setState} user={user} canEdit={canEdit} lang={lang} />
+            : activeCat.type === "table"
+              ? <TableSection cat={activeCat} updateCats={updateCats} canEdit={canEdit} />
+              : <FolderSection cat={activeCat} updateCats={updateCats} user={user} canEdit={canEdit} pid={pid} />
+      )}
+    </div>
+  );
+}
+
+/* Standard category IDs — protect from accidental deletion */
+const STANDARD_CAT_IDS = new Set([
+  ...APP_TABLE_TEMPLATES.map(t => t.id),
+  "pd_specs", "pd_program", "pd_cad", "pd_deployment_requirements", "pd_reference_info",
+  "inst_internal_checklist", "inst_external_checklist", "inst_si_checklist",
+]);
+
+/* ═══ PROJECT DETAILS VIEW — v4.1.0: tabbed nav with lazy migration ═══ */
 function ProjectDetailsView({ user, project, state, setState, lang = "en" }) {
   const canEdit = isInst(user);
   const pid = project?.id;
   const cats = getProjectDetails(state.docData, pid);
   const [addingFolder, setAddingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
-  const [addingItem, setAddingItem] = useState(null);
-  const [itemForm, setItemForm] = useState({ name: "", url: "", type: "link", lang: "en" });
+
+  // updateCats + useEffect must be before any early return (Rules of Hooks)
+  const updateCats = (newCatsOrFn) => setState(prev => {
+    const cur = prev.docData?.[pid]?.projectDetails || DEFAULT_PROJECT_DETAILS;
+    const newCats = typeof newCatsOrFn === "function" ? newCatsOrFn(cur) : newCatsOrFn;
+    return { ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), projectDetails: newCats } } };
+  });
+
+  // Server-side atomic migration: CF adds ALL missing standard categories in one write (no race condition)
+  useEffect(() => {
+    if (!canEdit || !pid || cats.length === 0) return;
+    httpsCallable(functions, "ensureProjectTemplate")({ projectId: pid })
+      .catch(e => console.warn("ensureProjectTemplate:", e.message));
+  }, [pid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!project) return <div style={S.page}><div style={S.empty}>Select a project from the sidebar.</div></div>;
 
-  const updateCats = (newCats) => setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), projectDetails: newCats } } }));
-  const addFolder = () => { if (!newFolderName.trim()) return; updateCats([...cats, { id: genId(), name: newFolderName.trim(), accessLevel: "open", items: [] }]); setNewFolderName(""); setAddingFolder(false); };
-  const delFolder = (catId) => { if (!confirm("Delete this folder?")) return; updateCats(cats.filter(c => c.id !== catId)); };
-  const addItem = (catId) => {
-    if (!itemForm.name.trim()) return;
-    const url = commitUrl(itemForm.url); if (url === null) return;
-    const item = { id: genId(), name: itemForm.name.trim(), url, type: itemForm.type, lang: itemForm.lang, addedBy: user.name, addedAt: new Date().toISOString() };
-    updateCats(cats.map(c => c.id !== catId ? c : { ...c, items: [...(c.items||[]), item] }));
-    setItemForm({ name: "", url: "", type: "link", lang: "en" }); setAddingItem(null);
+  const addFolder = () => {
+    if (!newFolderName.trim()) return;
+    updateCats(cur => [...cur, { id: genId(), name: newFolderName.trim(), accessLevel: "open", items: [] }]);
+    setNewFolderName(""); setAddingFolder(false);
   };
-  const delItem = (catId, itemId) => updateCats(cats.map(c => c.id !== catId ? c : { ...c, items: (c.items||[]).filter(i => i.id !== itemId) }));
+  const delFolder = (catId) => { if (!confirm("Delete this folder?")) return; updateCats(cats.filter(c => c.id !== catId)); };
+
+  const activeTabId = localStorage.getItem(`dp_proj_tab_${pid}`);
+  const showValidation = activeTabId === "pd_specs";
 
   return (
     <div style={S.page}>
       <h2 style={S.h2}>Project Details</h2>
-      <p style={S.sub}>{project.name} — documents, specs, checklists, and drawings.</p>
+      <p style={S.sub}>{project.name} — documents, specs, checklists, tables, and drawings.</p>
 
-      {cats.map(cat => {
-        if (cat.type === "checklist") return <ChecklistSection key={cat.id} cat={cat} cats={cats} updateCats={updateCats} user={user} canEdit={canEdit} pid={pid} lang={lang} />;
-        if (cat.type === "program") return <ProgramDetailsSection key={cat.id} cat={cat} pid={pid} state={state} setState={setState} user={user} canEdit={canEdit} lang={lang} />;
-        return (
-          <div key={cat.id} style={{ ...S.card, marginBottom: 12, borderLeft: "3px solid #00C9A7" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F }}>{cat.name}</div>
-              <Chip small color="#ECFDF5" fg="#059669">{(cat.items||[]).length} items</Chip>
-            </div>
-            {(cat.items||[]).map(item => (
-              <div key={item.id} style={S.docItemRow}>
-                <span style={{ fontSize: 14, color: item.type === "link" ? "#3B82F6" : "#A855F7" }}>{item.type === "link" ? "🔗" : "📄"}</span>
-                <div style={{ flex: 1 }}>
-                  {item.url ? <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 15, fontWeight: 500, color: "#0284C7", textDecoration: "none", fontFamily: F }}>{item.name}</a> : <span style={{ fontSize: 15, fontFamily: F }}>{item.name}</span>}
-                  <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F }}>{item.addedBy} · {fmtDate(item.addedAt)}</div>
-                </div>
-                {canEdit && <button style={{ ...S.btnDel, padding: "3px 8px", fontSize: 11 }} onClick={() => delItem(cat.id, item.id)}>✕</button>}
-              </div>
-            ))}
-            {(cat.items||[]).length === 0 && <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>No documents yet.</div>}
-            {canEdit && pid && (
-              addingItem === cat.id ? (
-                <div style={{ marginTop: 12, padding: 14, background: "#F8FAFC", borderRadius: 10 }}>
-                  <label style={S.lbl}>Name</label>
-                  <input style={S.inp} value={itemForm.name} onChange={e => setItemForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Pin Inspection Spec v2.1" />
-                  <label style={S.lbl}>URL <span style={{ color: "#94A3B8", fontWeight: 400 }}>(or upload PDF below)</span></label>
-                  <input style={S.inp} value={itemForm.url} onChange={e => setItemForm(f => ({ ...f, url: e.target.value, type: "link" }))} placeholder="https://..." />
-                  <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
-                    <button style={{ ...S.btnMain, width: "auto", padding: "10px 18px", marginTop: 0 }} onClick={() => addItem(cat.id)}>Add</button>
-                    <PdfUploadButton projectId={pid} onUploaded={(url, fileName) => {
-                      setItemForm(f => ({ ...f, url, type: "pdf", name: f.name?.trim() || fileName.replace(/\.pdf$/i, "") }));
-                    }} />
-                    <button style={{ ...S.btnFlat, width: "auto" }} onClick={() => { setAddingItem(null); setItemForm({ name: "", url: "", type: "link", lang: "en" }); }}>Cancel</button>
-                  </div>
-                  {itemForm.url && itemForm.type === "pdf" && <div style={{ fontSize: 12, color: "#059669", fontFamily: F, marginTop: 8 }}>✓ PDF uploaded — click Add to save.</div>}
-                </div>
-              ) : (
-                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                  <button style={S.btnAddItem} onClick={() => setAddingItem(cat.id)}>+ Add Link or PDF</button>
-                  <button style={{ ...S.btnDel, fontSize: 11, padding: "4px 10px" }} onClick={() => delFolder(cat.id)}>Delete Folder</button>
-                </div>
-              )
-            )}
-          </div>
-        );
-      })}
+      <ProjectTabsView
+        cats={cats} updateCats={updateCats} user={user} canEdit={canEdit} pid={pid}
+        project={project} state={state} setState={setState} lang={lang}
+        onDelFolder={delFolder} standardCatIds={STANDARD_CAT_IDS}
+      />
 
-      {/* Hardware tracking + Validation subsections */}
-      <HardwareTrackingSection project={project} state={state} setState={setState} user={user} canEdit={canEdit} />
-      <ValidationSection project={project} state={state} setState={setState} user={user} canEdit={canEdit} />
+      {showValidation && <ValidationSection project={project} state={state} setState={setState} user={user} canEdit={canEdit} />}
 
       {canEdit && !addingFolder && (
         <button style={{ ...S.btnAddItem, marginTop: 16 }} onClick={() => setAddingFolder(true)}>+ Add Folder</button>
@@ -1057,12 +1497,21 @@ function ChecklistSection({ cat, cats, updateCats, user, canEdit, pid, lang }) {
   const [expanded, setExpanded] = useState({});
   const [addingTo, setAddingTo] = useState(null); // milestone id currently showing the "Add task" input
   const [newTaskLabel, setNewTaskLabel] = useState("");
+  const [editingTask, setEditingTask] = useState(null); // { msId, ckId }
+  const [editLabel, setEditLabel] = useState("");
   const toggleExpand = (msId) => setExpanded(prev => ({ ...prev, [msId]: !prev[msId] }));
 
   const updateMilestone = (msId, updater) => {
-    updateCats(cats.map(c => c.id !== cat.id ? c : { ...c, milestones: (c.milestones||[]).map(ms => ms.id !== msId ? ms : updater(ms)) }));
+    updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, milestones: (c.milestones||[]).map(ms => ms.id !== msId ? ms : updater(ms)) }));
   };
-  const toggleCheck = (msId, ckId) => updateMilestone(msId, ms => ({ ...ms, checklist: ms.checklist.map(ck => ck.id !== ckId ? ck : { ...ck, checked: !ck.checked }) }));
+  const toggleCheck = (msId, ckId) => updateMilestone(msId, ms => ({ ...ms, checklist: (ms.checklist || []).map(ck => ck.id !== ckId ? ck : { ...ck, checked: !ck.checked }) }));
+  const startEdit = (msId, ckId, label) => { setEditingTask({ msId, ckId }); setEditLabel(label); };
+  const commitEdit = () => {
+    if (!editingTask) return;
+    const trimmed = editLabel.trim();
+    if (trimmed) updateMilestone(editingTask.msId, ms => ({ ...ms, checklist: (ms.checklist || []).map(ck => ck.id !== editingTask.ckId ? ck : { ...ck, label: trimmed }) }));
+    setEditingTask(null); setEditLabel("");
+  };
   const addTask = (msId, label) => {
     const trimmed = (label || "").trim();
     if (!trimmed) return;
@@ -1079,7 +1528,7 @@ function ChecklistSection({ cat, cats, updateCats, user, canEdit, pid, lang }) {
   };
   const deleteTask = (msId, ckId) => {
     if (!confirm("Delete this task?")) return;
-    updateMilestone(msId, ms => ({ ...ms, checklist: ms.checklist.filter(ck => ck.id !== ckId) }));
+    updateMilestone(msId, ms => ({ ...ms, checklist: (ms.checklist || []).filter(ck => ck.id !== ckId) }));
   };
 
   const canCheck = canEdit || isInst(user); // Instrumental users can tick + add/delete tasks
@@ -1121,39 +1570,59 @@ function ChecklistSection({ cat, cats, updateCats, user, canEdit, pid, lang }) {
                 ) : (
                   items.map(ck => {
                     const disabled = ck.na || !canCheck;
+                    const isEditing = editingTask?.msId === ms.id && editingTask?.ckId === ck.id;
                     return (
-                      <div key={ck.id} style={{ display: "flex", alignItems: "center", borderBottom: "1px solid #F1F5F9" }}>
+                      <div key={ck.id} style={{ display: "flex", alignItems: "center", borderBottom: "1px solid #F1F5F9", gap: 6 }}>
+                        {/* Checkbox — click to toggle */}
                         <button
                           type="button"
                           disabled={disabled}
                           onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (!disabled) toggleCheck(ms.id, ck.id); }}
-                          style={{
-                            display: "flex", alignItems: "center", gap: 10,
-                            flex: 1, padding: "8px 6px",
-                            background: "transparent", border: "none",
-                            textAlign: "left", fontFamily: F, fontSize: 13,
-                            color: ck.na ? "#94A3B8" : "#1E293B",
-                            textDecoration: ck.na ? "line-through" : "none",
-                            cursor: disabled ? "default" : "pointer",
-                          }}
+                          style={{ flexShrink: 0, padding: "8px 4px 8px 6px", background: "transparent", border: "none", cursor: disabled ? "default" : "pointer" }}
                         >
                           <div style={{
-                            width: 18, height: 18, flexShrink: 0,
+                            width: 18, height: 18,
                             borderRadius: 4,
                             border: `2px solid ${ck.checked ? "#00C9A7" : "#CBD5E1"}`,
                             background: ck.checked ? "#00C9A7" : "#FFF",
                             display: "flex", alignItems: "center", justifyContent: "center",
                             fontSize: 11, color: "#FFF", fontWeight: 800,
                           }}>{ck.checked ? "✓" : ""}</div>
-                          <span style={{ flex: 1 }}>{ck.label}</span>
-                          {ck.ownership && <span style={{ fontSize: 11, color: "#94A3B8" }}>· {ck.ownership}</span>}
                         </button>
+                        {/* Label — double-click to edit (Instrumental only) */}
+                        {isEditing ? (
+                          <input
+                            autoFocus
+                            type="text"
+                            value={editLabel}
+                            onChange={e => setEditLabel(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === "Enter") { e.preventDefault(); commitEdit(); }
+                              if (e.key === "Escape") { setEditingTask(null); setEditLabel(""); }
+                            }}
+                            onBlur={commitEdit}
+                            style={{ flex: 1, padding: "4px 8px", fontSize: 13, fontFamily: F, border: "1px solid #C7D2FE", borderRadius: 6, outline: "none" }}
+                          />
+                        ) : (
+                          <span
+                            style={{
+                              flex: 1, fontSize: 13, fontFamily: F, padding: "8px 0",
+                              color: ck.na ? "#94A3B8" : "#1E293B",
+                              textDecoration: ck.na ? "line-through" : "none",
+                              cursor: canCheck ? "text" : "default",
+                              userSelect: "none",
+                            }}
+                            onDoubleClick={() => { if (canCheck) startEdit(ms.id, ck.id, ck.label); }}
+                            title={canCheck ? "Double-click to edit" : undefined}
+                          >{ck.label}</span>
+                        )}
+                        {ck.ownership && !isEditing && <span style={{ fontSize: 11, color: "#94A3B8", flexShrink: 0 }}>· {ck.ownership}</span>}
                         {canCheck && (
                           <button
                             type="button"
                             title="Delete task"
                             onClick={(e) => { e.preventDefault(); e.stopPropagation(); deleteTask(ms.id, ck.id); }}
-                            style={{ border: "none", background: "transparent", color: "#CBD5E1", padding: "4px 10px", cursor: "pointer", fontSize: 16, fontFamily: F, lineHeight: 1 }}
+                            style={{ border: "none", background: "transparent", color: "#CBD5E1", padding: "4px 10px", cursor: "pointer", fontSize: 16, fontFamily: F, lineHeight: 1, flexShrink: 0 }}
                             onMouseOver={e => e.currentTarget.style.color = "#DC2626"}
                             onMouseOut={e => e.currentTarget.style.color = "#CBD5E1"}
                           >×</button>
@@ -1251,18 +1720,81 @@ function ProgramDetailsSection({ cat, pid, state, setState, user, canEdit, lang 
 function HardwareTrackingSection({ project, state, setState, user, canEdit }) {
   const pid = project?.id;
   const hwData = state.docData?.[pid]?._hardwareTracking || [];
+  const [addForm, setAddForm] = useState(null); // null | { type, serial, model, assetTag }
   const updateHW = (newData) => setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), _hardwareTracking: newData } } }));
-  const addHW = (type) => { const serial = prompt("Serial number:"); const tag = prompt("Instrumental Asset Tag:"); if (serial) updateHW([...hwData, { id: genId(), type, serial, assetTag: tag || "" }]); };
-  const delHW = (id) => updateHW(hwData.filter(h => h.id !== id));
+  const delHW = (id) => { if (confirm("Remove this item?")) updateHW(hwData.filter(h => h.id !== id)); };
+  const submitAdd = () => {
+    if (!addForm?.serial?.trim()) return;
+    updateHW([...hwData, { id: genId(), type: addForm.type, serial: addForm.serial.trim(), model: addForm.model?.trim() || "", assetTag: addForm.assetTag?.trim() || "", source: "manual" }]);
+    setAddForm(null);
+  };
+
+  const hsCount = hwData.filter(h => h.source === "hubspot").length;
+  const manualCount = hwData.filter(h => h.source !== "hubspot").length;
 
   return (
     <div style={{ ...S.card, marginBottom: 12, marginTop: 16 }}>
-      <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 10 }}>Hardware Tracking</div>
-      {hwData.length === 0 ? <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>No hardware tracked yet.</div> : (
-        <table style={{ ...S.table, fontSize: 13 }}><thead><tr><th style={S.th}>Type</th><th style={S.th}>Serial Number</th><th style={S.th}>Asset Tag</th>{canEdit && <th style={S.th}></th>}</tr></thead>
-        <tbody>{hwData.map(h => (<tr key={h.id}><td style={S.td}>{h.type}</td><td style={S.td}>{h.serial}</td><td style={S.td}>{h.assetTag || "—"}</td>{canEdit && <td style={S.td}><button style={{ ...S.btnDel, fontSize: 11, padding: "2px 8px" }} onClick={() => delHW(h.id)}>✕</button></td>}</tr>))}</tbody></table>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F }}>Hardware Tracking</div>
+        <div style={{ display: "flex", gap: 6 }}>
+          {hsCount > 0 && <span style={{ fontSize: 11, fontWeight: 600, background: "#EFF6FF", color: "#2563EB", borderRadius: 6, padding: "2px 8px", fontFamily: F }}>🔗 {hsCount} from HubSpot</span>}
+          {manualCount > 0 && <span style={{ fontSize: 11, fontWeight: 600, background: "#F0FDF4", color: "#16A34A", borderRadius: 6, padding: "2px 8px", fontFamily: F }}>✎ {manualCount} manual</span>}
+        </div>
+      </div>
+
+      {hwData.length === 0 ? (
+        <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>No hardware tracked yet. Run a HubSpot sync to auto-populate from Station Kits.</div>
+      ) : (
+        <table style={{ ...S.table, fontSize: 13 }}>
+          <thead><tr>
+            <th style={S.th}>Source</th>
+            <th style={S.th}>Type</th>
+            <th style={S.th}>Serial / Asset SN</th>
+            <th style={S.th}>Model</th>
+            <th style={S.th}>Asset Tag</th>
+            <th style={S.th}>Kit SN</th>
+            {canEdit && <th style={S.th}></th>}
+          </tr></thead>
+          <tbody>{hwData.map(h => (
+            <tr key={h.id}>
+              <td style={S.td}>
+                {h.source === "hubspot"
+                  ? <span style={{ fontSize: 10, fontWeight: 700, background: "#EFF6FF", color: "#2563EB", borderRadius: 4, padding: "1px 5px", fontFamily: F }}>HubSpot</span>
+                  : <span style={{ fontSize: 10, fontWeight: 700, background: "#F0FDF4", color: "#16A34A", borderRadius: 4, padding: "1px 5px", fontFamily: F }}>Manual</span>}
+              </td>
+              <td style={S.td}>{h.type || "—"}</td>
+              <td style={{ ...S.td, fontWeight: 600 }}>{h.serial || "—"}</td>
+              <td style={S.td}>{h.model || "—"}</td>
+              <td style={S.td}>{h.assetTag || "—"}</td>
+              <td style={{ ...S.td, fontSize: 11, color: "#94A3B8" }}>{h.kitSN || "—"}</td>
+              {canEdit && <td style={S.td}><button style={{ ...S.btnDel, fontSize: 11, padding: "2px 8px" }} onClick={() => delHW(h.id)}>✕</button></td>}
+            </tr>
+          ))}</tbody>
+        </table>
       )}
-      {canEdit && <div style={{ display: "flex", gap: 8, marginTop: 8 }}>{HW_TYPES.map(t => <button key={t} style={S.btnAddItem} onClick={() => addHW(t)}>+ {t}</button>)}</div>}
+
+      {canEdit && (
+        addForm ? (
+          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <select value={addForm.type} onChange={e => setAddForm(f => ({ ...f, type: e.target.value }))}
+              style={{ ...S.inp, width: 150, padding: "6px 10px", fontSize: 12 }}>
+              {HW_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <input placeholder="Serial / Asset SN *" value={addForm.serial} onChange={e => setAddForm(f => ({ ...f, serial: e.target.value }))}
+              style={{ ...S.inp, width: 160, padding: "6px 10px", fontSize: 12 }} />
+            <input placeholder="Model #" value={addForm.model} onChange={e => setAddForm(f => ({ ...f, model: e.target.value }))}
+              style={{ ...S.inp, width: 140, padding: "6px 10px", fontSize: 12 }} />
+            <input placeholder="Asset Tag" value={addForm.assetTag} onChange={e => setAddForm(f => ({ ...f, assetTag: e.target.value }))}
+              onKeyDown={e => { if (e.key === "Enter") submitAdd(); if (e.key === "Escape") setAddForm(null); }}
+              style={{ ...S.inp, width: 130, padding: "6px 10px", fontSize: 12 }} />
+            <button onClick={submitAdd} style={{ ...S.btnMain, padding: "6px 16px", fontSize: 12 }}>Add</button>
+            <button onClick={() => setAddForm(null)} style={{ padding: "6px 12px", fontSize: 12, border: "1px solid #E2E8F0", borderRadius: 6, background: "#FFF", color: "#64748B", cursor: "pointer", fontFamily: F }}>Cancel</button>
+          </div>
+        ) : (
+          <button onClick={() => setAddForm({ type: HW_TYPES[0], serial: "", model: "", assetTag: "" })}
+            style={{ ...S.btnAddItem, marginTop: 10 }}>+ Add hardware manually</button>
+        )
+      )}
     </div>
   );
 }
@@ -1279,13 +1811,19 @@ function ValidationSection({ project, state, setState, user, canEdit }) {
         <div style={S.miniStat}><span>FAT Status</span><strong>{valData.fatStatus || "Not started"}</strong></div>
         <div style={S.miniStat}><span>SAT Status</span><strong>{valData.satStatus || "Not started"}</strong></div>
         {canEdit && (
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <select style={{ ...S.inp, width: "auto", padding: "6px 10px", fontSize: 12 }} value={valData.fatStatus || ""} onChange={e => updateVal({ ...valData, fatStatus: e.target.value })}>
-              <option value="">FAT Status...</option><option value="Not started">Not started</option><option value="In progress">In progress</option><option value="Passed">Passed</option><option value="Failed">Failed</option><option value="Conditional">Conditional</option>
-            </select>
-            <select style={{ ...S.inp, width: "auto", padding: "6px 10px", fontSize: 12 }} value={valData.satStatus || ""} onChange={e => updateVal({ ...valData, satStatus: e.target.value })}>
-              <option value="">SAT Status...</option><option value="Not started">Not started</option><option value="In progress">In progress</option><option value="Passed">Passed</option><option value="Failed">Failed</option><option value="Conditional">Conditional</option>
-            </select>
+          <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <select style={{ ...S.inp, width: "auto", padding: "6px 10px", fontSize: 12 }} value={valData.fatStatus || ""} onChange={e => updateVal({ ...valData, fatStatus: e.target.value })}>
+                <option value="">FAT Status...</option><option value="Not started">Not started</option><option value="In progress">In progress</option><option value="Passed">Passed</option><option value="Failed">Failed</option><option value="Conditional">Conditional</option>
+              </select>
+              {valData.fatStatus && <button type="button" onClick={() => updateVal({ ...valData, fatStatus: "" })} style={{ background: "#EF4444", color: "#fff", border: "none", borderRadius: 4, padding: "4px 8px", fontSize: 12, cursor: "pointer" }}>×</button>}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <select style={{ ...S.inp, width: "auto", padding: "6px 10px", fontSize: 12 }} value={valData.satStatus || ""} onChange={e => updateVal({ ...valData, satStatus: e.target.value })}>
+                <option value="">SAT Status...</option><option value="Not started">Not started</option><option value="In progress">In progress</option><option value="Passed">Passed</option><option value="Failed">Failed</option><option value="Conditional">Conditional</option>
+              </select>
+              {valData.satStatus && <button type="button" onClick={() => updateVal({ ...valData, satStatus: "" })} style={{ background: "#EF4444", color: "#fff", border: "none", borderRadius: 4, padding: "4px 8px", fontSize: 12, cursor: "pointer" }}>×</button>}
+            </div>
           </div>
         )}
       </div>
@@ -1336,7 +1874,7 @@ function CommercialView({ user, project, state, setState, lang = "en" }) {
             {canEdit && (addingItem === cat.id ? (
               <div style={{ marginTop: 12, padding: 14, background: "#F8FAFC", borderRadius: 10 }}>
                 <label style={S.lbl}>Name</label><input style={S.inp} value={itemForm.name} onChange={e => setItemForm(f => ({ ...f, name: e.target.value }))} />
-                <label style={S.lbl}>URL <span style={{ color: "#94A3B8", fontWeight: 400 }}>(or upload PDF below)</span></label>
+                <label style={S.lbl}>URL <span style={{ color: "#94A3B8", fontWeight: 400 }}>(or upload a file below)</span></label>
                 <input style={S.inp} value={itemForm.url} onChange={e => setItemForm(f => ({ ...f, url: e.target.value, type: "link" }))} placeholder="https://..." />
                 <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
                   <button style={{ ...S.btnMain, width: "auto", padding: "10px 18px", marginTop: 0 }} onClick={() => addItem(cat.id)}>Add</button>
@@ -1460,7 +1998,7 @@ function TrainingView({ user, project, state, setState, lang = "en" }) {
               {["white","blue","black"].map(b => <button key={b} onClick={() => setMatForm(f => ({...f, belt: b}))} style={{ ...S.typeBtn, ...(matForm.belt === b ? S.typeBtnActive : {}) }}>{BELT_LEVELS[b].icon} {BELT_LEVELS[b].name}</button>)}
             </div>
             <label style={S.lbl}>Title</label><input style={S.inp} value={matForm.name} onChange={e => setMatForm(f => ({...f, name: e.target.value}))} />
-            <label style={S.lbl}>URL <span style={{ color: "#94A3B8", fontWeight: 400 }}>(or upload PDF below)</span></label>
+            <label style={S.lbl}>URL <span style={{ color: "#94A3B8", fontWeight: 400 }}>(or upload a file below)</span></label>
             <input style={S.inp} value={matForm.url} onChange={e => setMatForm(f => ({...f, url: e.target.value}))} placeholder="https://..." />
             <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
               <button style={{ ...S.btnMain, width: "auto", padding: "8px 16px", marginTop: 0 }} onClick={addMaterial}>Add</button>
@@ -1714,7 +2252,7 @@ function ProjectBotChat({ project, user }) {
 /* Stage comes from HubSpot sync (project.siStage). Drag-and-drop is local-only until v4.1.0 writeback. */
 function SIKanbanView({ projects, state, setState }) {
   // Filter: projects in the SI Partner Deployment pipeline. Exclude [SI]-tagged Hardware Deployment projects.
-  const siProjects = projects.filter(p =>
+  const siProjects = (projects || []).filter(p =>
     p.status === "active" &&
     p.hubspotPipelineId === SI_PARTNER_PIPELINE_ID
   );
@@ -1797,9 +2335,18 @@ function GanttChart({ project, state }) {
   const pdCats = getProjectDetails(state.docData, project?.id);
   const progData = state.docData?.[project?.id]?._programDetails || {};
   const tasks = progData.tasks || [];
-  const checklistItems = pdCats.filter(c => c.type === "checklist").flatMap(c => (c.milestones||[]).flatMap(ms => ms.checklist.filter(ck => !ck.na && (ck.projectedDate || ck.actualDate)).map(ck => ({ id: ck.id, name: ck.label.substring(0, 40), start: ck.projectedDate || ck.actualDate, end: ck.actualDate || ck.projectedDate, done: ck.checked, type: "checklist" }))));
+  // v4.1.0: also include checklist startDate, and Project Overview dates (CAD, deploy, etc.)
+  const checklistItems = pdCats.filter(c => c.type === "checklist").flatMap(c => (c.milestones||[]).flatMap(ms => (ms.checklist||[]).filter(ck => !ck.na && (ck.projectedDate || ck.actualDate || ck.startDate)).map(ck => ({ id: ck.id, name: ck.label.substring(0, 40), start: ck.startDate || ck.projectedDate || ck.actualDate, end: ck.actualDate || ck.projectedDate || ck.startDate, done: ck.checked, type: "checklist" }))));
   const programTasks = tasks.map(t => ({ id: t.id, name: t.name, start: t.date, end: t.endDate || t.date, done: false, type: t.type }));
-  const allItems = [...programTasks, ...checklistItems].filter(i => i.start).sort((a, b) => new Date(a.start) - new Date(b.start));
+  const overview = state.projectOverview?.[project?.id] || {};
+  const overviewItems = [
+    { key: "cadCompleteDate", label: "CAD Complete (Target)" },
+    { key: "cadActualFinishDate", label: "CAD Actual Finish" },
+    { key: "actualServiceStartDate", label: "Service Start" },
+    { key: "targetBuildDate", label: "Target Build" },
+    { key: "actualDeployDate", label: "Actual Deploy" },
+  ].filter(o => overview[o.key]).map(o => ({ id: `ov_${o.key}`, name: o.label, start: overview[o.key], end: overview[o.key], done: !!overview[o.key], type: "overview" }));
+  const allItems = [...overviewItems, ...programTasks, ...checklistItems].filter(i => i.start).sort((a, b) => new Date(a.start) - new Date(b.start));
 
   if (allItems.length === 0) return null;
 
@@ -1847,32 +2394,71 @@ function GanttChart({ project, state }) {
   );
 }
 
+/* v4.1.0 — Gantt toggle wrapper. Hidden by default; click to expand.
+   Disabled with tooltip if fewer than 3 dated items. Reuses GanttChart.
+   Date count must match exactly what GanttChart renders (overview dates + program tasks + checklist start/projected/actual). */
+function GanttChartToggle({ project, state }) {
+  const [shown, setShown] = useState(false);
+  const dateCount = useMemo(() => {
+    const pdCats = getProjectDetails(state.docData, project?.id);
+    const progTasks = (state.docData?.[project?.id]?._programDetails?.tasks || []).filter(t => t.date).length;
+    const checks = pdCats
+      .filter(c => c.type === "checklist")
+      .flatMap(c => (c.milestones || []).flatMap(ms => (ms.checklist || []).filter(ck => !ck.na && (ck.projectedDate || ck.actualDate || ck.startDate))))
+      .length;
+    const overview = state.projectOverview?.[project?.id] || {};
+    const overviewDates = ["cadCompleteDate", "cadActualFinishDate", "actualServiceStartDate", "targetBuildDate", "actualDeployDate"]
+      .filter(k => overview[k]).length;
+    return progTasks + checks + overviewDates;
+  }, [state.docData, project?.id]);
+  const ready = dateCount >= 3;
+  return (
+    <div style={{ marginTop: 16 }}>
+      <button
+        type="button"
+        onClick={() => ready && setShown(s => !s)}
+        disabled={!ready}
+        title={ready ? (shown ? "Hide Gantt chart" : "Show Gantt chart") : "Need at least 3 dates/milestones to display Gantt chart"}
+        style={{
+          padding: "8px 14px", fontSize: 13, fontWeight: 600,
+          border: "1px solid " + (ready ? "#C7D2FE" : "#E2E8F0"), borderRadius: 6,
+          background: ready ? (shown ? "#EEF2FF" : "#F8FAFC") : "#F1F5F9",
+          color: ready ? "#4338CA" : "#94A3B8",
+          cursor: ready ? "pointer" : "not-allowed", fontFamily: F,
+        }}
+      >
+        📊 {shown ? "Hide" : "Show"} Gantt Chart {!ready && `(${dateCount}/3 dates)`}
+      </button>
+      {shown && ready && <div style={{ marginTop: 12 }}><GanttChart project={project} state={state} /></div>}
+    </div>
+  );
+}
+
 /* ═══ PROJECTS OVERVIEW — summary of ALL projects across pipelines ═══ */
 /* Note: distinct from per-project "Overview" dashboard. This aggregates every project. */
 function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
-  const allProjects = projectsToArray(state.projects);
-  const activeProjects = allProjects.filter(p => p.status === "active");
+  const allProjects = useMemo(() => projectsToArray(state.projects), [state.projects]);
+  const activeProjects = useMemo(() => allProjects.filter(p => p.status === "active"), [allProjects]);
   const [selPipeline, setSelPipeline] = useState(PIPELINE_LIST[0]?.id || "");
   const [demandExpanded, setDemandExpanded] = useState(null); // which hw row is expanded to show per-project
   const canEditDemand = isInst(user); // Any Instrumental user can add custom demand types
 
   // ─── Demand Plan: aggregate hardware across all ACTIVE projects ───
   const customTypes = state.demandCustomTypes || {}; // { typeId: { label, counts: { projectId: n } } }
-  const hubspotTotals = HUBSPOT_HW_FIELDS.map(f => ({
+  const hubspotTotals = useMemo(() => HUBSPOT_HW_FIELDS.map(f => ({
     label: f.label,
     source: "HubSpot",
     total: activeProjects.reduce((sum, p) => sum + getEffectiveHwCount(p, f.key, state.docData), 0),
     perProject: activeProjects.map(p => ({ id: p.id, name: p.customer || p.name, count: getEffectiveHwCount(p, f.key, state.docData) })).filter(x => x.count > 0),
-  }));
-  const customTotals = Object.entries(customTypes).map(([id, t]) => ({
+  })), [activeProjects, state.docData]);
+  const customTotals = useMemo(() => Object.entries(customTypes).map(([id, t]) => ({
     id,
     label: t.label,
     source: "Manual",
     total: Object.entries(t.counts || {}).reduce((sum, [pid, n]) => {
-      // only count if project is still active
       return activeProjects.some(p => p.id === pid) ? sum + (parseInt(n) || 0) : sum;
     }, 0),
-  }));
+  })), [customTypes, activeProjects]);
   const [newTypeLabel, setNewTypeLabel] = useState("");
   const addCustomType = () => {
     if (!newTypeLabel.trim() || !canEditDemand) return;
@@ -1886,7 +2472,7 @@ function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
   };
 
   // ─── Per-pipeline bar chart: active project count per stage ───
-  const pipelineCharts = PIPELINE_LIST.map(pl => {
+  const pipelineCharts = useMemo(() => PIPELINE_LIST.map(pl => {
     const stagesForPipeline = Object.entries(STAGES)
       .filter(([, s]) => s.pipelineId === pl.id && !s.closed) // active stages only
       .sort((a, b) => a[1].order - b[1].order);
@@ -1897,7 +2483,7 @@ function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
     }));
     const maxCount = Math.max(1, ...data.map(d => d.count));
     return { pipeline: pl, data, maxCount, total: data.reduce((s, d) => s + d.count, 0) };
-  });
+  }), [activeProjects]);
 
   // ─── Stage breakdown for selected pipeline (existing feature, active-only) ───
   const pipelineStages = Object.entries(STAGES).filter(([, s]) => s.pipelineId === selPipeline).sort((a, b) => a[1].order - b[1].order);
@@ -1909,7 +2495,7 @@ function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
   const renderProjectRow = (proj) => (
     <div key={proj.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid #F8FAFC" }}>
       <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: "#0F172A", fontFamily: F }}>{proj.customer || proj.name}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "#0F172A", fontFamily: F }}>{proj.customer || proj.name}<HubspotLinkIcon project={proj} /></div>
         <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F }}>{proj.name}{proj.updatedAt ? ` · Updated ${fmtDay(proj.updatedAt)}` : ""}</div>
       </div>
       {proj.isSI && <Chip small color="#EFF6FF" fg="#3B82F6">SI</Chip>}
@@ -1940,9 +2526,6 @@ function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
       {activeProjects.length === 0 && (
         <div style={S.empty}>No active projects. Sync from Admin Panel → HubSpot Sync, or create one in Manage Projects.</div>
       )}
-
-      {/* SI Kanban — only shown if there are SI projects */}
-      <SIKanbanView projects={activeProjects} state={state} setState={setState} />
 
       {activeProjects.length > 0 && (<>
         {/* ═══ DEMAND PLAN ═══ */}
@@ -2106,6 +2689,14 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
   // v4.0.2 — Backfill Checklists (decoupled from HubSpot sync)
   const [backfillLoading, setBackfillLoading] = useState(false);
   const [backfillMsg, setBackfillMsg] = useState("");
+  // v4.1.0 — HubSpot property schema diagnostic
+  const [schemaLoading, setSchemaLoading] = useState(false);
+  const [schemaResult, setSchemaResult] = useState(null);
+  // v4.1.0 — Maintenance tab
+  const [maintRun, setMaintRun] = useState(null);
+  const [maintAlerts, setMaintAlerts] = useState({});
+  const [maintLoading, setMaintLoading] = useState(false);
+  const [maintMsg, setMaintMsg] = useState("");
 
   useEffect(() => {
     const unsubStatus = onValue(ref(db, "hubspotSync/status"), s => setSyncStatus(s.val()), { onlyOnce: false });
@@ -2114,7 +2705,9 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
       const arr = Object.values(v).sort((a, b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
       setSyncLog(arr);
     }, { onlyOnce: false });
-    return () => { unsubStatus(); unsubLog(); };
+    const unsubMaint = onValue(ref(db, "maintenance/lastRun"), s => setMaintRun(s.val()), { onlyOnce: false });
+    const unsubAlerts = onValue(ref(db, "maintenance/alerts"), s => setMaintAlerts(s.val() || {}), { onlyOnce: false });
+    return () => { unsubStatus(); unsubLog(); unsubMaint(); unsubAlerts(); };
   }, []);
 
   const runPreview = async () => {
@@ -2125,7 +2718,7 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
       // Preview data written to hubspotPreview/ — read it once
       const snap = await new Promise(r => onValue(ref(db, "hubspotPreview"), r, { onlyOnce: true }));
       const data = snap.val() || {};
-      const projects = Object.values(data);
+      const projects = Object.values(data.projects || {});
       setSyncPreview(projects);
       setSyncMsg(`Preview complete: ${projects.length} projects found.`);
     } catch(e) { setSyncMsg("Error: " + (e.message || String(e))); }
@@ -2206,7 +2799,7 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
     <div style={S.page}>
       <h2 style={S.h2}>Admin Panel</h2>
       <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
-        {[{ id: "pending", label: `Pending${pending.length > 0 ? ` (${pending.length})` : ""}` }, { id: "users", label: "User Access" }, { id: "commercial_access", label: "🔒 Commercial Access" }, { id: "hubspot", label: "🔄 HubSpot Sync" }].map(t => (
+        {[{ id: "pending", label: `Pending${pending.length > 0 ? ` (${pending.length})` : ""}` }, { id: "users", label: "User Access" }, { id: "commercial_access", label: "🔒 Commercial Access" }, { id: "hubspot", label: "🔄 HubSpot Sync" }, { id: "maintenance", label: "🔧 Maintenance" }].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{ ...S.tabBtn, ...(tab === t.id ? { background: "#00C9A7", color: "#FFF", borderColor: "#00C9A7" } : {}), ...(t.id === "pending" && pending.length > 0 ? { borderColor: "#F59E0B" } : {}) }}>{t.label}</button>
         ))}
       </div>
@@ -2300,8 +2893,8 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
             </p>
             {syncStatus && (
               <div style={{ fontSize: 13, color: "#94A3B8", fontFamily: F, marginBottom: 12 }}>
-                Last sync: {syncStatus.lastSync ? new Date(syncStatus.lastSync).toLocaleString() : "Never"} ·{" "}
-                {syncStatus.count != null ? `${syncStatus.count} projects` : ""}{" "}
+                Last sync: {syncStatus.syncedAt ? new Date(syncStatus.syncedAt).toLocaleString() : "Never"} ·{" "}
+                {syncStatus.total != null ? `${syncStatus.total} projects` : ""}{" "}
                 {syncStatus.error ? <span style={{ color: "#DC2626" }}>Error: {syncStatus.error}</span> : ""}
               </div>
             )}
@@ -2344,6 +2937,44 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
               {backfillLoading ? "Backfilling…" : "Backfill Checklists Now"}
             </button>
             {backfillMsg && <p style={{ fontSize: 13, color: backfillMsg.startsWith("Error") ? "#DC2626" : "#059669", marginTop: 12, fontFamily: F }}>{backfillMsg}</p>}
+          </div>
+
+          {/* v4.1.0 — HubSpot Property Schema Diagnostic */}
+          <div style={{ ...S.card, marginBottom: 16, borderLeft: "3px solid #6366F1" }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 6 }}>🔍 HubSpot Property Schema</div>
+            <p style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginBottom: 12 }}>
+              Fetches all property names and types for the custom Projects object. Use this to verify the internal names for date writeback (e.g. <code>cad_complete_date__c</code>).
+            </p>
+            <button
+              style={{ ...S.btnMain, width: "auto", padding: "8px 16px", marginTop: 0, opacity: schemaLoading ? .5 : 1, background: "#6366F1", fontSize: 13 }}
+              disabled={schemaLoading}
+              onClick={async () => {
+                setSchemaLoading(true); setSchemaResult(null);
+                try {
+                  const fn = httpsCallable(functions, "getHubspotCustomObjectSchema");
+                  const res = await fn({});
+                  setSchemaResult(res.data);
+                } catch(e) { setSchemaResult({ error: e.message || String(e) }); }
+                setSchemaLoading(false);
+              }}
+            >
+              {schemaLoading ? "Fetching…" : "Fetch Schema"}
+            </button>
+            {schemaResult?.error && <p style={{ fontSize: 13, color: "#DC2626", marginTop: 10, fontFamily: F }}>Error: {schemaResult.error}</p>}
+            {schemaResult?.properties && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 12, color: "#64748B", fontFamily: F, marginBottom: 6 }}>{schemaResult.totalProperties} properties total. Showing all:</div>
+                <div style={{ maxHeight: 300, overflowY: "auto", fontSize: 12, fontFamily: "monospace", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 6, padding: 10 }}>
+                  {schemaResult.properties.map(p => (
+                    <div key={p.name} style={{ display: "flex", gap: 12, padding: "2px 0", borderBottom: "1px solid #F1F5F9" }}>
+                      <span style={{ color: "#6366F1", minWidth: 280 }}>{p.name}</span>
+                      <span style={{ color: "#64748B" }}>{p.type}/{p.fieldType}</span>
+                      <span style={{ color: "#94A3B8" }}>{p.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {syncPreview && (
@@ -2429,6 +3060,91 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
         </div>
       )}
 
+      {/* MAINTENANCE TAB */}
+      {tab === "maintenance" && (
+        <div>
+          {/* Active alerts */}
+          {Object.keys(maintAlerts).length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#DC2626", fontFamily: F, marginBottom: 8 }}>⚠ Active Alerts</div>
+              {Object.entries(maintAlerts).map(([key, alert]) => (
+                <div key={key} style={{ ...S.card, marginBottom: 8, borderLeft: `3px solid ${alert.severity === "critical" ? "#DC2626" : "#F59E0B"}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: alert.severity === "critical" ? "#DC2626" : "#D97706", fontFamily: F, textTransform: "uppercase" }}>{alert.severity}</span>
+                    <span style={{ fontSize: 11, color: "#94A3B8", fontFamily: F }}>{alert.rule}</span>
+                  </div>
+                  <div style={{ fontSize: 14, color: "#0F172A", fontFamily: F }}>{alert.message}</div>
+                  {alert.firedAt && <div style={{ fontSize: 11, color: "#94A3B8", fontFamily: F, marginTop: 4 }}>Fired {new Date(alert.firedAt).toLocaleString()}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          {Object.keys(maintAlerts).length === 0 && maintRun && (
+            <div style={{ ...S.card, marginBottom: 16, borderLeft: "3px solid #00C9A7" }}>
+              <div style={{ fontSize: 14, color: "#059669", fontFamily: F }}>✓ No active alerts</div>
+            </div>
+          )}
+
+          {/* Last run summary */}
+          <div style={{ ...S.card, marginBottom: 16, borderLeft: "3px solid #6366F1" }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 8 }}>Last Maintenance Run</div>
+            {maintRun ? (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8, marginBottom: 12 }}>
+                  {[
+                    { label: "Ran at", value: new Date(maintRun.ranAt).toLocaleString() },
+                    { label: "Duration", value: `${maintRun.durationMs}ms` },
+                    { label: "Tasks completed", value: `${maintRun.tasksCompleted}/${maintRun.totalTasks}` },
+                    { label: "Alerts fired", value: maintRun.alerts },
+                  ].map(f => (
+                    <div key={f.label} style={{ padding: "8px 10px", background: "#F8FAFC", borderRadius: 6 }}>
+                      <div style={{ fontSize: 11, color: "#94A3B8", fontFamily: F, textTransform: "uppercase", letterSpacing: .4, marginBottom: 2 }}>{f.label}</div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "#0F172A", fontFamily: F }}>{f.value}</div>
+                    </div>
+                  ))}
+                </div>
+                {maintRun.tasks && (
+                  <div style={{ fontSize: 12, fontFamily: "monospace", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 6, padding: "8px 10px", maxHeight: 200, overflowY: "auto" }}>
+                    {maintRun.tasks.map((t, i) => (
+                      <div key={i} style={{ color: t.error ? "#DC2626" : "#059669", padding: "1px 0" }}>
+                        {t.error ? "✗" : "✓"} {t.name}{t.deleted != null ? ` — ${t.deleted} deleted` : ""}{t.openBugs != null ? ` — ${t.openBugs} open bugs` : ""}{t.rate != null ? ` — ${t.rate}% error rate` : ""}{t.error ? `: ${t.error}` : ""}{t.skipped ? ` (${t.skipped})` : ""}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ fontSize: 14, color: "#94A3B8", fontFamily: F }}>No maintenance run recorded yet. Schedule: Tue & Fri 3 PM PT.</div>
+            )}
+          </div>
+
+          {/* Manual trigger */}
+          <div style={{ ...S.card, borderLeft: "3px solid #F59E0B" }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 6 }}>Run Maintenance Now</div>
+            <p style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginBottom: 12 }}>
+              Manually triggers the same routine as the scheduled run: sweeps old logs, evaluates Rules 1–3, writes results to <code>maintenance/lastRun</code>.
+            </p>
+            <button
+              style={{ ...S.btnMain, width: "auto", padding: "10px 20px", marginTop: 0, opacity: maintLoading ? .5 : 1, background: "#F59E0B" }}
+              disabled={maintLoading}
+              onClick={async () => {
+                setMaintLoading(true); setMaintMsg("");
+                try {
+                  const fn = httpsCallable(functions, "runMaintenanceNow");
+                  const res = await fn({});
+                  const r = res.data || {};
+                  setMaintMsg(`✓ Complete: ${r.tasksCompleted}/${r.totalTasks} tasks, ${r.alerts} alert(s), ${r.durationMs}ms`);
+                } catch (e) { setMaintMsg("Error: " + (e.message || String(e))); }
+                setMaintLoading(false);
+              }}
+            >
+              {maintLoading ? "Running…" : "Run Maintenance Now"}
+            </button>
+            {maintMsg && <p style={{ fontSize: 13, color: maintMsg.startsWith("Error") ? "#DC2626" : "#059669", marginTop: 10, fontFamily: F }}>{maintMsg}</p>}
+          </div>
+        </div>
+      )}
+
       {/* COMMERCIAL ACCESS TAB */}
       {tab === "commercial_access" && (
         <div>
@@ -2453,7 +3169,7 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
             };
             return (
               <div key={proj.id} style={{ ...S.card, marginBottom: 12 }}>
-                <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 10 }}>{proj.name}</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 10 }}>{proj.name}<HubspotLinkIcon project={proj} /></div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {eligibleUsers.map(u => {
                     const has = commAccess[u.id];
@@ -2603,6 +3319,208 @@ function ManageProjects({ state, setState }) {
   );
 }
 
+/* ═══ ALL SI PROJECTS VIEW — v4.1.0 ═══ */
+function AllSIProjectsView({ user, state, setState, setView, setProject }) {
+  const isSIAdminUser = user?.role === "si_admin" || user?.role === "admin" || user?.superAdmin;
+  const SI_PIPELINE = "2206979797";
+  const siProjects = (Array.isArray(state.projects) ? state.projects : []).filter(p => p.hubspotPipelineId === SI_PIPELINE);
+  const tracker = state.siTracker || {};
+  const [editing, setEditing] = useState(null); // { pid, field }
+
+  const saveTracker = (pid, field, value) => {
+    dbWrite(`appState/siTracker/${pid}/${field}`, value);
+    setState(prev => ({
+      ...prev,
+      siTracker: {
+        ...(prev.siTracker || {}),
+        [pid]: { ...(prev.siTracker?.[pid] || {}), [field]: value },
+      },
+    }));
+  };
+
+  const riskBadge = (val) => {
+    if (val === "at_risk") return "🔴 At-risk";
+    if (val === "watch")   return "🟡 Watch";
+    if (val === "healthy") return "🟢 Healthy";
+    return "—";
+  };
+
+  const atRisk  = siProjects.filter(p => tracker[p.id]?.risk === "at_risk").length;
+  const watch   = siProjects.filter(p => tracker[p.id]?.risk === "watch").length;
+  const healthy = siProjects.filter(p => tracker[p.id]?.risk === "healthy").length;
+
+  const allActiveProjects = (Array.isArray(state.projects) ? state.projects : []).filter(p => p.status !== "inactive");
+
+  return (
+    <div style={S.page}>
+      <h2 style={S.h2}>🤝 All SI Projects</h2>
+      <p style={S.sub}>{siProjects.length} project{siProjects.length !== 1 ? "s" : ""} in SI Partner Deployment pipeline</p>
+
+      {/* SI Kanban */}
+      <SIKanbanView projects={allActiveProjects} state={state} setState={setState} />
+
+      <div style={{ display: "flex", gap: 20, margin: "24px 0 16px", flexWrap: "wrap" }}>
+        <span style={{ fontFamily: F, fontSize: 14, color: "#64748B" }}>🔴 At-risk: <strong>{atRisk}</strong></span>
+        <span style={{ fontFamily: F, fontSize: 14, color: "#64748B" }}>🟡 Watch: <strong>{watch}</strong></span>
+        <span style={{ fontFamily: F, fontSize: 14, color: "#64748B" }}>🟢 Healthy: <strong>{healthy}</strong></span>
+      </div>
+      {siProjects.length === 0 ? (
+        <div style={S.empty}>No projects in SI Partner Deployment pipeline.</div>
+      ) : (
+        <div style={S.card}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={S.table}>
+              <thead>
+                <tr>
+                  <th style={S.th}>Project</th>
+                  <th style={S.th}>HubSpot Stage</th>
+                  <th style={S.th}>SI Partner</th>
+                  <th style={S.th}>Risk</th>
+                  <th style={S.th}>Last Contact</th>
+                  <th style={S.th}>Next Milestone</th>
+                  <th style={S.th}>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {siProjects.map(proj => <SIProjectRow key={proj.id} proj={proj} tracker={tracker} isSIAdminUser={isSIAdminUser} editing={editing} setEditing={setEditing} saveTracker={saveTracker} riskBadge={riskBadge} setProject={setProject} setView={setView} />)}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SIProjectRow({ proj, tracker, isSIAdminUser, editing, setEditing, saveTracker, riskBadge, setProject, setView }) {
+  const t = tracker[proj.id] || {};
+  const [notesExpanded, setNotesExpanded] = useState(false);
+  const notesFull = t.notes || "";
+  const isEditingField = (field) => editing?.pid === proj.id && editing?.field === field;
+
+  return (
+    <tr>
+      {/* Project name — clickable */}
+      <td style={S.td}>
+        <button
+          onClick={() => { setProject(proj); setView("project_details"); }}
+          style={{ background: "none", border: "none", color: "#00C9A7", cursor: "pointer", fontFamily: F, fontSize: 14, fontWeight: 600, padding: 0, textAlign: "left" }}
+        >
+          {proj.name}
+        </button>
+      </td>
+      {/* HubSpot Stage — pulled from siStage via SI_PIPELINE_STAGES lookup */}
+      <td style={S.td}>{SI_PIPELINE_STAGES.find(s => s.id === normalizeSiStage(proj.siStage))?.label || "—"}</td>
+      {/* SI Partner — editable text */}
+      <td style={S.td}>
+        {isSIAdminUser ? (
+          isEditingField("siPartnerName") ? (
+            <input
+              autoFocus
+              defaultValue={t.siPartnerName || ""}
+              style={{ fontFamily: F, fontSize: 14, border: "1px solid #CBD5E1", borderRadius: 6, padding: "3px 7px", width: 130 }}
+              onBlur={e => { saveTracker(proj.id, "siPartnerName", e.target.value); setEditing(null); }}
+            />
+          ) : (
+            <span
+              onClick={() => setEditing({ pid: proj.id, field: "siPartnerName" })}
+              style={{ cursor: "text", color: t.siPartnerName ? "#1E293B" : "#94A3B8", fontFamily: F, fontSize: 14 }}
+            >
+              {t.siPartnerName || "Click to add"}
+            </span>
+          )
+        ) : (
+          <span style={{ fontFamily: F, fontSize: 14 }}>{t.siPartnerName || "—"}</span>
+        )}
+      </td>
+      {/* Risk — dropdown or badge */}
+      <td style={S.td}>
+        {isSIAdminUser ? (
+          <select
+            value={t.risk || ""}
+            onChange={e => saveTracker(proj.id, "risk", e.target.value)}
+            style={{ fontFamily: F, fontSize: 14, border: "1px solid #CBD5E1", borderRadius: 6, padding: "3px 7px" }}
+          >
+            <option value="">—</option>
+            <option value="healthy">🟢 Healthy</option>
+            <option value="watch">🟡 Watch</option>
+            <option value="at_risk">🔴 At-risk</option>
+          </select>
+        ) : (
+          <span style={{ fontFamily: F, fontSize: 14 }}>{riskBadge(t.risk)}</span>
+        )}
+      </td>
+      {/* Last Contact — date input or text */}
+      <td style={S.td}>
+        {isSIAdminUser ? (
+          <input
+            type="date"
+            value={t.lastContactDate || ""}
+            onChange={e => saveTracker(proj.id, "lastContactDate", e.target.value)}
+            style={{ fontFamily: F, fontSize: 14, border: "1px solid #CBD5E1", borderRadius: 6, padding: "3px 7px" }}
+          />
+        ) : (
+          <span style={{ fontFamily: F, fontSize: 14 }}>{t.lastContactDate || "—"}</span>
+        )}
+      </td>
+      {/* Next Milestone — editable text */}
+      <td style={S.td}>
+        {isSIAdminUser ? (
+          isEditingField("nextMilestone") ? (
+            <input
+              autoFocus
+              defaultValue={t.nextMilestone || ""}
+              style={{ fontFamily: F, fontSize: 14, border: "1px solid #CBD5E1", borderRadius: 6, padding: "3px 7px", width: 160 }}
+              onBlur={e => { saveTracker(proj.id, "nextMilestone", e.target.value); setEditing(null); }}
+            />
+          ) : (
+            <span
+              onClick={() => setEditing({ pid: proj.id, field: "nextMilestone" })}
+              style={{ cursor: "text", color: t.nextMilestone ? "#1E293B" : "#94A3B8", fontFamily: F, fontSize: 14 }}
+            >
+              {t.nextMilestone || "Click to add"}
+            </span>
+          )
+        ) : (
+          <span style={{ fontFamily: F, fontSize: 14 }}>{t.nextMilestone || "—"}</span>
+        )}
+      </td>
+      {/* Notes — expandable */}
+      <td style={S.td}>
+        {isSIAdminUser ? (
+          isEditingField("notes") ? (
+            <textarea
+              autoFocus
+              defaultValue={notesFull}
+              rows={3}
+              style={{ fontFamily: F, fontSize: 13, border: "1px solid #CBD5E1", borderRadius: 6, padding: "4px 8px", width: 200, resize: "vertical" }}
+              onBlur={e => { saveTracker(proj.id, "notes", e.target.value); setEditing(null); setNotesExpanded(false); }}
+            />
+          ) : (
+            <span
+              onClick={() => setEditing({ pid: proj.id, field: "notes" })}
+              style={{ cursor: "text", color: notesFull ? "#1E293B" : "#94A3B8", fontFamily: F, fontSize: 13 }}
+            >
+              {notesFull ? (notesFull.length > 40 ? notesFull.slice(0, 40) + "..." : notesFull) : "Click to add"}
+            </span>
+          )
+        ) : (
+          notesExpanded ? (
+            <span style={{ fontFamily: F, fontSize: 13, cursor: "pointer" }} onClick={() => setNotesExpanded(false)}>{notesFull || "—"}</span>
+          ) : (
+            <span
+              style={{ cursor: notesFull.length > 40 ? "pointer" : "default", fontFamily: F, fontSize: 13 }}
+              onClick={() => notesFull.length > 40 && setNotesExpanded(true)}
+            >
+              {notesFull ? (notesFull.length > 40 ? notesFull.slice(0, 40) + "..." : notesFull) : "—"}
+            </span>
+          )
+        )}
+      </td>
+    </tr>
+  );
+}
+
 /* ═══ APP — Auth, DB, routing ═══ */
 export default function App() {
   const [authChecked, setAuthChecked] = useState(false);
@@ -2610,12 +3528,13 @@ export default function App() {
   const [state, setState] = useState(getDefault());
   const [authUser, setAuthUser] = useState(null);
   const [user, setUser] = useState(null);
-  const [view, setView] = useState("dashboard");
+  const [view, setView] = useState(() => localStorage.getItem("dp_last_view") || "project_details");
   const [project, setProject] = useState(null);
   const [loginErr, setLoginErr] = useState("");
   const [pendingApproval, setPendingApproval] = useState(false);
   const [pendingUsers, setPendingUsers] = useState([]);
   const [lang, setLang] = useState("en");
+  const [detailTabKey, setDetailTabKey] = useState(0);
 
   // 1. Auth state + session timeout
   useEffect(() => {
@@ -2674,6 +3593,9 @@ export default function App() {
       // Full reads — rules permit Admin/Instrumental to read parent paths
       unsubs.push(onValue(ref(db, "appState/projects"), (s) => { const v = s.val(); setState(prev => ({ ...prev, projects: projectsToArray(v) })); }, (e) => console.error(e)));
       unsubs.push(onValue(ref(db, "appState/docData"), (s) => { setState(prev => ({ ...prev, docData: s.val() || {} })); }, (e) => console.error(e)));
+      unsubs.push(onValue(ref(db, "appState/siTracker"), (s) => {
+        setState(prev => ({ ...prev, siTracker: s.val() || {} }));
+      }));
     } else {
       // External users — listen only to assigned projects/docData. Parent reads are blocked by rules.
       const assignedIds = user.projects || [];
@@ -2790,7 +3712,14 @@ export default function App() {
         arr.forEach(p => { if (p && p.id) obj[p.id] = p; });
         dbWrite("appState/projects", obj).catch(console.error);
       }
-      if (next.docData !== prev.docData) dbWrite("appState/docData", next.docData).catch(console.error);
+      if (next.docData !== prev.docData) {
+        const prevDoc = prev.docData || {};
+        Object.keys(next.docData).forEach(pid => {
+          if (next.docData[pid] !== prevDoc[pid]) {
+            dbWrite(`appState/docData/${pid}`, next.docData[pid]).catch(console.error);
+          }
+        });
+      }
       // v4.0.0: per-user progress write (rules require $uid === auth.uid on progress/$uid).
       if (next.progress !== prev.progress && user?.id && next.progress?.[user.id] !== prev.progress?.[user.id]) {
         dbWrite(`appState/progress/${user.id}`, next.progress[user.id] || null).catch(console.error);
@@ -2810,11 +3739,19 @@ export default function App() {
 
   const onLogout = async () => { await signOut(auth); setUser(null); setAuthUser(null); setProject(null); setView("dashboard"); setLoaded(false); };
 
-  // Auto-select project
+  // Persist current project/view so hard refresh restores where the user was
+  useEffect(() => { if (project?.id) localStorage.setItem("dp_last_project", project.id); }, [project]);
+  useEffect(() => { if (view) localStorage.setItem("dp_last_view", view); }, [view]);
+
+  // Auto-select project — restores last-viewed project if still accessible.
+  // Guard: skip if state.projects is still the seed placeholder (Firebase hasn't loaded yet).
   useEffect(() => {
-    if (user && state.projects) {
+    if (user && state.projects && state.projects !== SEED_PROJECTS) {
       const up = (Array.isArray(state.projects) ? state.projects : []).filter(p => user.role === "admin" || (user.projects||[]).includes(p.id));
-      if (up.length > 0 && !project) setProject(up[0]);
+      if (up.length > 0 && !project) {
+        const lastId = localStorage.getItem("dp_last_project");
+        setProject((lastId && up.find(p => p.id === lastId)) || up[0]);
+      }
     }
   }, [user, state.projects]);
 
@@ -2827,6 +3764,7 @@ export default function App() {
   const projectsArr = Array.isArray(state.projects) ? state.projects : (state.projects ? Object.values(state.projects) : []);
   const userProjects = projectsArr.filter(p => user.role === "admin" || (user.projects||[]).includes(p.id));
   const admin = isInst(user);
+  const projectCats = (project && state.docData?.[project.id]?.projectDetails) || [];
   const hasProjectAccess = !project || user.role === "admin" || admin || (user.projects||[]).includes(project.id);
   // Commercial access: admin always has it; others need explicit grant in commercialAccess/{pid}/{uid}
   const hasCommAccess = user.role === "admin" || (project && state.commercialAccess?.[project.id]?.[user.id]);
@@ -2834,11 +3772,12 @@ export default function App() {
   const renderMain = () => {
     if (view === "chat") return <ChatView user={user} />;
     if (view === "projects_overview" && admin) return <ProjectsOverviewView state={state} setState={save} user={user} lang={lang} />;
-    if (!hasProjectAccess && view !== "projects_overview" && view !== "admin" && view !== "manage" && view !== "chat") {
+    if (view === "all_si_projects" && admin) return <AllSIProjectsView user={user} state={state} setState={save} setView={setView} setProject={setProject} />;
+    if (!hasProjectAccess && view !== "projects_overview" && view !== "admin" && view !== "manage" && view !== "chat" && view !== "all_si_projects") {
       return <div style={S.page}><div style={S.empty}>Access denied — you are not assigned to this project.</div></div>;
     }
     if (view === "project_details") {
-      return <ProjectDetailsView user={user} project={project} state={state} setState={save} lang={lang} />;
+      return <ProjectDetailsView key={detailTabKey} user={user} project={project} state={state} setState={save} lang={lang} />;
     }
     if (view === "commercial") {
       if (!hasCommAccess) return <div style={S.page}><div style={S.empty}>🔒 Access restricted. Contact your admin for access to Commercial documents.</div></div>;
@@ -2870,7 +3809,7 @@ export default function App() {
           ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
           ::selection { background: #00C9A733; }
         `}</style>
-        <Sidebar view={view} setView={setView} user={user} project={project} projects={userProjects} setProject={setProject} onLogout={onLogout} lang={lang} setLang={setLang} hasCommercialAccess={hasCommAccess} />
+        <Sidebar view={view} setView={setView} user={user} project={project} projects={userProjects} setProject={setProject} onLogout={onLogout} lang={lang} setLang={setLang} hasCommercialAccess={hasCommAccess} cats={projectCats} setDetailTab={(tabId) => { if (project?.id) localStorage.setItem(`dp_proj_tab_${project.id}`, tabId); setDetailTabKey(k => k + 1); setView("project_details"); }} />
         <main style={{ ...S.main, padding: 0 }}>
           <GlobalBotBar user={user} />
           <div style={{ padding: "32px 40px" }}>{renderMain()}</div>

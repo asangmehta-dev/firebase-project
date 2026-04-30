@@ -1,7 +1,7 @@
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const fetch = require("node-fetch");
-const { buildProjectDetails, buildCommercialFolders } = require("./checklists");
+const { buildProjectDetails, buildCommercialFolders, TABLE_TEMPLATES, DEPLOYMENT_REQUIREMENTS_FOLDER } = require("./checklists");
 
 admin.initializeApp();
 const db = admin.database();
@@ -29,6 +29,9 @@ const PIPELINES = {
   // v4.0.1 — SI Partner Deployment pipeline.
   "2206979797": { label: "SI Partner Deployment", order: 6 },
 };
+
+// v4.1.0 — si_admin role helper: si_admin, admin, and superAdmin all have SI-admin capabilities.
+const isSIAdmin = (caller) => caller?.role === "si_admin" || caller?.role === "admin" || caller?.superAdmin;
 
 // v4.0.1 — SI Partner Deployment pipeline ID + stage mapping.
 const SI_PARTNER_PIPELINE_ID = "2206979797";
@@ -236,6 +239,219 @@ async function fetchAllHubspotObjects(token) {
   return all;
 }
 
+/* ═══ STATION KITS SYNC ═══ */
+// Normalize HubSpot category labels to webapp hardware types
+function normalizeCategory(cat) {
+  if (!cat) return "Other";
+  const c = cat.toLowerCase();
+  if (c.includes("camera")) return "Camera";
+  if (c.includes("lens")) return "Lens";
+  if (c.includes("computer")) return "Station Computer";
+  if (c.includes("frame")) return "Frame";
+  if (c.includes("monitor") || c.includes("screen")) return "Monitor";
+  if (c.includes("led") || c.includes("light controller")) return "LED Controller";
+  if (c.includes("barcode") || c.includes("scanner")) return "Barcode Scanner";
+  return cat; // pass through unknown categories as-is
+}
+
+// Discover Station Kit + Station Component object type IDs from HubSpot schema.
+// Returns null if not found — callers handle gracefully.
+async function discoverStationObjectTypes(token) {
+  try {
+    const res = await fetch("https://api.hubapi.com/crm/v3/schemas", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    let kitTypeId = null, componentTypeId = null;
+    const allLabels = [];
+    for (const schema of (data.results || [])) {
+      const singular = (schema.labels?.singular || schema.name || "").toLowerCase();
+      const plural   = (schema.labels?.plural   || "").toLowerCase();
+      const typeId   = schema.objectTypeId || schema.id;
+      allLabels.push(`${singular}/${plural}(${typeId})`);
+      if (singular.includes("station kit") || plural.includes("station kit")) kitTypeId = typeId;
+      if (singular.includes("station component") || plural.includes("station component")) componentTypeId = typeId;
+    }
+    console.log("[stationKits] schema:", allLabels.join(", "));
+
+    // Always fetch the kit schema to discover actual associated component types
+    if (kitTypeId) {
+      try {
+        const schemaRes = await fetch(`https://api.hubapi.com/crm/v3/schemas/${kitTypeId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (schemaRes.ok) {
+          const kitSchema = await schemaRes.json();
+          const assocs = kitSchema.associations || [];
+          console.log("[stationKits] kit schema assocs:", JSON.stringify(assocs.map(a => ({ to: a.toObjectTypeId, name: a.name, label: a.label }))));
+          // If componentTypeId not yet found, infer from first non-kit, non-project association
+          if (!componentTypeId) {
+            for (const a of assocs) {
+              if (a.toObjectTypeId && a.toObjectTypeId !== kitTypeId && a.toObjectTypeId !== OBJECT_TYPE) {
+                componentTypeId = a.toObjectTypeId;
+                console.log("[stationKits] inferred componentTypeId from kit schema:", componentTypeId);
+                break;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("[stationKits] kit schema lookup failed:", e.message);
+      }
+    }
+
+    console.log("[stationKits] discovered →", { kitTypeId, componentTypeId });
+    return kitTypeId ? { kitTypeId, componentTypeId } : null;
+  } catch (e) {
+    console.warn("[stationKits] schema discovery failed:", e.message);
+    return null;
+  }
+}
+
+// Batch-read project → station kit associations via v4 API, then batch-read kit properties.
+// Returns { byProject: { projectHsId: [kitId, ...] }, kitProps: { kitId: properties } }.
+// Avoids v3 inline association key ambiguity (custom-to-custom objects).
+async function fetchKitsForProjects(token, projectHsIds, kitTypeId) {
+  if (!projectHsIds.length) return { byProject: {}, kitProps: {} };
+  const BATCH = 100;
+  const byProject = {};
+
+  for (let i = 0; i < projectHsIds.length; i += BATCH) {
+    const batch = projectHsIds.slice(i, i + BATCH);
+    try {
+      const res = await fetch(
+        `https://api.hubapi.com/crm/v4/associations/${OBJECT_TYPE}/${kitTypeId}/batch/read`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ inputs: batch.map(id => ({ id: String(id) })) }),
+        }
+      );
+      if (!res.ok) { console.warn("[stationKits] project→kit assoc batch error:", res.status); continue; }
+      const data = await res.json();
+      for (const result of (data.results || [])) {
+        byProject[String(result.from.id)] = (result.to || []).map(t => String(t.toObjectId));
+      }
+    } catch (e) {
+      console.warn("[stationKits] project→kit assoc batch failed:", e.message);
+    }
+  }
+
+  const allKitIds = [...new Set(Object.values(byProject).flat())];
+  const kitProps = {};
+  for (let i = 0; i < allKitIds.length; i += BATCH) {
+    const batch = allKitIds.slice(i, i + BATCH);
+    try {
+      const res = await fetch(`https://api.hubapi.com/crm/v3/objects/${kitTypeId}/batch/read`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          inputs: batch.map(id => ({ id })),
+          properties: ["station_kit_sn", "name", "computer_sn", "status", "station_type"],
+        }),
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      for (const obj of (data.results || [])) kitProps[obj.id] = obj.properties || {};
+    } catch (e) {
+      console.warn("[stationKits] kit props batch failed:", e.message);
+    }
+  }
+
+  return { byProject, kitProps };
+}
+
+// Batch-fetch Station Components for a list of kit IDs.
+// Returns map: kitId → [{ id, serial, category, model }]
+async function fetchComponentsForKits(token, kitTypeId, componentTypeId, kitIds) {
+  if (!kitIds.length || !componentTypeId) return {};
+  const componentsByKit = {};
+  const BATCH = 100;
+
+  // Step 1: batch-read kit→component associations
+  let firstBatchLogged = false;
+  for (let i = 0; i < kitIds.length; i += BATCH) {
+    const batch = kitIds.slice(i, i + BATCH);
+    try {
+      const res = await fetch(`https://api.hubapi.com/crm/v4/associations/${kitTypeId}/${componentTypeId}/batch/read`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ inputs: batch.map(id => ({ id })) }),
+      });
+      const rawText = await res.text();
+      if (!firstBatchLogged) {
+        console.log(`[stationKits] assoc batch status=${res.status}, sample response:`, rawText.slice(0, 400));
+        firstBatchLogged = true;
+      }
+      if (!res.ok) continue;
+      const data = JSON.parse(rawText);
+      for (const result of (data.results || [])) {
+        componentsByKit[result.from.id] = (result.to || []).map(t => t.toObjectId);
+      }
+    } catch (e) {
+      console.warn("[stationKits] assoc batch failed:", e.message);
+    }
+  }
+
+  // Step 2: batch-read component properties
+  const allCompIds = [...new Set(Object.values(componentsByKit).flat())];
+  const compProps = {};
+  for (let i = 0; i < allCompIds.length; i += BATCH) {
+    const batch = allCompIds.slice(i, i + BATCH);
+    try {
+      const res = await fetch(`https://api.hubapi.com/crm/v3/objects/${componentTypeId}/batch/read`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ inputs: batch.map(id => ({ id })), properties: ["asset_sn", "name", "category_master", "category", "model_number", "model"] }),
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      for (const obj of (data.results || [])) compProps[obj.id] = obj.properties || {};
+    } catch (e) {
+      console.warn("[stationKits] component batch read failed:", e.message);
+    }
+  }
+
+  // Step 3: build final map kitId → components array
+  const result = {};
+  for (const [kitId, compIds] of Object.entries(componentsByKit)) {
+    result[kitId] = compIds.map(cid => {
+      const p = compProps[cid] || {};
+      return {
+        id: `hs_comp_${cid}`,
+        serial: p.asset_sn || p.name || cid,
+        category: p.category_master || p.category || "",
+        model: p.model_number || p.model || "",
+      };
+    }).filter(c => c.serial);
+  }
+  return result;
+}
+
+// Build _hardwareTracking array for a project from its Station Kits.
+// Preserves existing manually-added items (source !== "hubspot").
+function buildHardwareFromKits(projectKitIds, kitProps, componentsByKit, existingHW) {
+  const manualItems = (existingHW || []).filter(h => h.source !== "hubspot");
+  const hsItems = [];
+  for (const kitId of (projectKitIds || [])) {
+    const props = kitProps[kitId] || {};
+    const kitSN = props.station_kit_sn || props.name || kitId;
+    const components = componentsByKit[kitId] || [];
+    for (const comp of components) {
+      hsItems.push({
+        id: comp.id,
+        type: normalizeCategory(comp.category),
+        serial: comp.serial,
+        model: comp.model || "",
+        kitSN,
+        source: "hubspot",
+      });
+    }
+  }
+  return [...hsItems, ...manualItems];
+}
+
 /* v4.0.3: Firebase Realtime DB rejects `undefined` in .set() values — recursively swap to null. */
 function sanitizeForFirebase(value) {
   if (value === undefined) return null;
@@ -379,6 +595,39 @@ async function runSync(token, commit, syncCtx) {
       await db.ref("appState/docData").set(sanitizeForFirebase(docData));
     }
 
+    // Station Kits sync — batch-read project→kit associations via v4 API, populate _hardwareTracking.
+    // Wrapped in try/catch: station kit failures must not abort the main project sync.
+    try {
+      const stationTypes = await discoverStationObjectTypes(token);
+      if (stationTypes) {
+        const { kitTypeId, componentTypeId } = stationTypes;
+        const projectHsIds = incoming.map(p => p.hubspotId).filter(Boolean);
+        const { byProject, kitProps } = await fetchKitsForProjects(token, projectHsIds, kitTypeId);
+        const allKitIds = [...new Set(Object.values(byProject).flat())];
+        console.log(`[stationKits] projects with kits: ${Object.keys(byProject).length}, total unique kit IDs: ${allKitIds.length}`);
+        const componentsByKit = await fetchComponentsForKits(token, kitTypeId, componentTypeId, allKitIds);
+        const totalComponents = Object.values(componentsByKit).reduce((s, a) => s + a.length, 0);
+        console.log(`[stationKits] total components found: ${totalComponents}`, totalComponents > 0 ? "sample:" : "(none)", totalComponents > 0 ? JSON.stringify(Object.values(componentsByKit)[0]?.[0]) : "");
+
+        const hwUpdates = {};
+        const latestDocData = (await db.ref("appState/docData").once("value")).val() || {};
+        for (const [projectHsId, kitIds] of Object.entries(byProject)) {
+          const pid = `hs_${projectHsId}`;
+          const existingHW = latestDocData[pid]?._hardwareTracking;
+          const hwArray = buildHardwareFromKits(kitIds, kitProps, componentsByKit, existingHW);
+          hwUpdates[`appState/docData/${pid}/_hardwareTracking`] = sanitizeForFirebase(hwArray);
+        }
+        if (Object.keys(hwUpdates).length > 0) {
+          await db.ref().update(hwUpdates);
+          console.log(`[stationKits] synced hardware for ${Object.keys(hwUpdates).length} projects`);
+        }
+      } else {
+        console.log("[stationKits] object types not found in schema — skipping hardware sync");
+      }
+    } catch (stErr) {
+      console.warn("[stationKits] station kit sync failed (non-fatal):", stErr.message);
+    }
+
     await db.ref("hubspotPreview").set(null);
     await db.ref("hubspotSync/status").set({ state: "success", ...summary });
     await writeSyncLogEntry({
@@ -491,7 +740,7 @@ async function applyChecklistToProject(projectId, isSI) {
 }
 
 /* ═══ SCHEDULED SYNC — Tue & Fri 9am PDT (16:00 UTC) ═══ */
-exports.scheduledHubspotSync = functions.pubsub
+exports.scheduledHubspotSync = functions.runWith({ memory: "512MB" }).pubsub
   .schedule("0 16 * * 2,5")
   .timeZone("America/Los_Angeles")
   .onRun(async () => {
@@ -501,7 +750,7 @@ exports.scheduledHubspotSync = functions.pubsub
   });
 
 /* ═══ MANUAL SYNC — callable from Admin Panel ═══ */
-exports.manualHubspotSync = functions.https.onCall(async (data, context) => {
+exports.manualHubspotSync = functions.runWith({ memory: "512MB" }).https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
 
   const userSnap = await db.ref(`users/${context.auth.uid}`).once("value");
@@ -514,11 +763,16 @@ exports.manualHubspotSync = functions.https.onCall(async (data, context) => {
   if (!token) throw new functions.https.HttpsError("internal", "HubSpot token not configured.");
 
   const commit = data?.commit === true;
-  return await runSync(token, commit, {
-    type: "manual",
-    actorUid: context.auth.uid,
-    actorEmail: (context.auth.token?.email || user?.email || null),
-  });
+  try {
+    return await runSync(token, commit, {
+      type: "manual",
+      actorUid: context.auth.uid,
+      actorEmail: (context.auth.token?.email || user?.email || null),
+    });
+  } catch (e) {
+    if (e instanceof functions.https.HttpsError) throw e;
+    throw new functions.https.HttpsError("internal", e.message || "Sync failed");
+  }
 });
 
 /* ═══ APPLY CHECKLIST — callable from Admin Panel ═══ */
@@ -538,7 +792,7 @@ exports.applyChecklistTemplate = functions.https.onCall(async (data, context) =>
 });
 
 /* ═══ AI PROJECT BOT — v3.3.0: Claude-powered Q&A per project ═══ */
-exports.askProjectBot = functions.https.onCall(async (data, context) => {
+exports.askProjectBot = functions.runWith({ memory: "512MB" }).https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
 
   // Only Instrumental users can use the bot
@@ -766,7 +1020,7 @@ exports.adminSetRole = functions.https.onCall(async (data, context) => {
   const caller = await requireAdmin(context);
   const { uid, role } = data || {};
   if (!uid || !role) throw new functions.https.HttpsError("invalid-argument", "uid and role required.");
-  if (role !== "user" && role !== "admin") throw new functions.https.HttpsError("invalid-argument", "role must be 'user' or 'admin'.");
+  if (role !== "user" && role !== "si_admin" && role !== "admin") throw new functions.https.HttpsError("invalid-argument", "role must be 'user', 'si_admin', or 'admin'.");
   const target = (await db.ref(`users/${uid}`).once("value")).val();
   if (!target) throw new functions.https.HttpsError("not-found", "User not found.");
   if (role === "admin" && !/@instrumental\.com$/i.test((target.email || "").toLowerCase())) {
@@ -806,13 +1060,94 @@ exports.adminSetCommercialAccess = functions.https.onCall(async (data, context) 
   return { ok: true };
 });
 
-/* ── v4.1.0 placeholders (commented until HubSpot write + files scopes arrive) ──
-exports.syncHubspotWriteback = functions.https.onCall(async (data, context) => { });
-exports.syncHubspotFiles = functions.https.onCall(async (data, context) => { });
-*/
+/* ═══ HUBSPOT WRITEBACK — v4.1.0: write date fields back to HubSpot custom object ═══ */
+
+// Date property internal names in HubSpot. Run getHubspotCustomObjectSchema (admin panel) to verify.
+// HubSpot stores dates as milliseconds-since-epoch (integer), not ISO strings.
+const HUBSPOT_DATE_PROPS = {
+  cadCompleteDate:        "cad_complete_date__c",
+  cadActualFinishDate:    "cad_actual_finish_date__c",
+  actualServiceStartDate: "actual_service_start_date__c",
+  targetBuildDate:        "target_build_date__c",
+  actualDeployDate:       "actual_deploy_date__c",
+};
+
+// Diagnostic: returns all property names + labels for the custom object type (admin-only).
+exports.getHubspotCustomObjectSchema = functions.https.onCall(async (_data, context) => {
+  await requireAdmin(context);
+  const token = process.env.HUBSPOT_TOKEN;
+  if (!token) throw new functions.https.HttpsError("internal", "HUBSPOT_TOKEN not configured.");
+  const res = await fetch(
+    `https://api.hubapi.com/crm/v3/schemas/${OBJECT_TYPE}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!res.ok) throw new functions.https.HttpsError("internal", `HubSpot schema error: ${res.status} ${await res.text()}`);
+  const schema = await res.json();
+  const props = (schema.properties || []).map(p => ({
+    name: p.name,
+    label: p.label,
+    type: p.type,
+    fieldType: p.fieldType,
+  }));
+  return { objectType: OBJECT_TYPE, totalProperties: props.length, properties: props };
+});
+
+// Writeback: patches one or more date fields on the HubSpot custom object record.
+// data: { hubspotId: string, fields: { [appKey]: "YYYY-MM-DD" | null } }
+// Gate: Instrumental users only (admin or si_admin or partyId === "instrumental")
+exports.writeProjectDateToHubspot = functions.runWith({ memory: "256MB" }).https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  const uid = context.auth.uid;
+  const userSnap = await db.ref(`users/${uid}`).once("value");
+  const user = userSnap.val();
+  if (!user) throw new functions.https.HttpsError("permission-denied", "User not found.");
+  const isInst = user.role === "admin" || user.role === "si_admin" || user.partyId === "instrumental";
+  if (!isInst) throw new functions.https.HttpsError("permission-denied", "Instrumental users only.");
+
+  const { hubspotId, fields } = data || {};
+  if (!hubspotId || !fields || typeof fields !== "object")
+    throw new functions.https.HttpsError("invalid-argument", "hubspotId and fields required.");
+
+  const token = process.env.HUBSPOT_TOKEN;
+  if (!token) throw new functions.https.HttpsError("internal", "HUBSPOT_TOKEN not configured.");
+
+  // Build HubSpot properties object — convert "YYYY-MM-DD" → ms since epoch (noon UTC to avoid TZ shifts)
+  const properties = {};
+  for (const [appKey, val] of Object.entries(fields)) {
+    const propName = HUBSPOT_DATE_PROPS[appKey];
+    if (!propName) continue;
+    if (val) {
+      const ms = new Date(val + "T12:00:00Z").getTime();
+      properties[propName] = ms;
+    } else {
+      properties[propName] = "";  // clear the field
+    }
+  }
+  if (Object.keys(properties).length === 0) return { ok: true, skipped: true };
+
+  const url = `https://api.hubapi.com/crm/v3/objects/${OBJECT_TYPE}/${hubspotId}`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ properties }),
+  });
+
+  const logEntry = {
+    ts: new Date().toISOString(), uid, hubspotId, fields,
+    status: res.ok ? "ok" : "error",
+    httpStatus: res.status,
+  };
+  if (!res.ok) {
+    logEntry.body = await res.text();
+    await db.ref("hubspotWriteback/log").push(logEntry);
+    throw new functions.https.HttpsError("internal", `HubSpot PATCH failed: ${res.status} ${logEntry.body}`);
+  }
+  await db.ref("hubspotWriteback/log").push(logEntry);
+  return { ok: true, properties };
+});
 
 /* ═══ CHAT BOT — v4.0.0: conversational chat for all authed users, scoped to accessible projects ═══ */
-exports.chatBot = functions.https.onCall(async (data, context) => {
+exports.chatBot = functions.runWith({ memory: "512MB" }).https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
   const uid = context.auth.uid;
   const userSnap = await db.ref(`users/${uid}`).once("value");
@@ -877,7 +1212,7 @@ Be conversational, concise, and helpful. Use the user's name (${user.name.split(
 
 /* ═══ GLOBAL AI SEARCH/CHAT — v4.0.0: cross-project Q&A for Instrumental users ═══ */
 /* Differs from askProjectBot: no projectId required; aggregates all active projects + their key data. */
-exports.askGlobalBot = functions.https.onCall(async (data, context) => {
+exports.askGlobalBot = functions.runWith({ memory: "512MB" }).https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
 
   const userSnap = await db.ref(`users/${context.auth.uid}`).once("value");
@@ -954,5 +1289,222 @@ Keep answers concise and actionable. Use bullet points or short tables when list
     console.error("Global Bot error:", err);
     throw new functions.https.HttpsError("internal", "AI service error: " + (err.message || String(err)));
   }
+});
+
+/* ═══ ENSURE PROJECT TEMPLATE — atomically adds ALL missing standard categories in one write ═══ */
+/* Called by the client on every project open; idempotent (returns fast if nothing needed). */
+exports.ensureProjectTemplate = functions.runWith({ memory: "512MB" }).https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Login required.");
+  const email = (context.auth.token.email || "").toLowerCase();
+  const callerSnap = await db.ref(`users/${context.auth.uid}`).once("value");
+  const caller = callerSnap.val();
+  const instUser = email.endsWith("@instrumental.com") || caller?.role === "admin" || caller?.superAdmin;
+  if (!instUser) throw new functions.https.HttpsError("permission-denied", "Instrumental users only.");
+
+  const { projectId } = data || {};
+  if (!projectId) throw new functions.https.HttpsError("invalid-argument", "projectId required.");
+
+  const [projectSnap, detailsSnap] = await Promise.all([
+    db.ref(`appState/projects/${projectId}`).once("value"),
+    db.ref(`appState/docData/${projectId}/projectDetails`).once("value"),
+  ]);
+  const project = projectSnap.val();
+  if (!project) return { skipped: true, reason: "project_not_found" };
+
+  const raw = detailsSnap.val();
+  const existingArr = Array.isArray(raw) ? raw
+    : (raw && typeof raw === "object" ? Object.values(raw) : []);
+  let workingArr = existingArr.filter(Boolean);
+  let needsWrite = false;
+
+  // Remove legacy pd_hw folder
+  if (workingArr.some(c => c.id === "pd_hw")) {
+    workingArr = workingArr.filter(c => c.id !== "pd_hw");
+    needsWrite = true;
+  }
+
+  // Add any missing standard categories
+  const workingIds = new Set(workingArr.map(c => c.id));
+  const toAdd = [];
+  TABLE_TEMPLATES.forEach(t => { if (!workingIds.has(t.id)) toAdd.push(JSON.parse(JSON.stringify(t))); });
+  if (!workingIds.has("pd_deployment_requirements"))
+    toAdd.push(JSON.parse(JSON.stringify(DEPLOYMENT_REQUIREMENTS_FOLDER)));
+  if (!workingIds.has("pd_reference_info"))
+    toAdd.push({ id: "pd_reference_info", name: "Reference Info", type: "folder", accessLevel: "open", items: [] });
+  if (!workingArr.some(c => c?.type === "checklist")) {
+    const useSI = project.hubspotPipelineId === SI_PARTNER_PIPELINE_ID;
+    buildProjectDetails(useSI).filter(c => c.type === "checklist").forEach(c => toAdd.push(c));
+  }
+
+  if (toAdd.length === 0 && !needsWrite) return { added: false, reason: "already_complete" };
+
+  const finalArr = [...workingArr, ...toAdd];
+  await db.ref(`appState/docData/${projectId}/projectDetails`).set(sanitizeForFirebase(finalArr));
+  console.log(`ensureProjectTemplate: updated ${projectId} — migrated:${needsWrite} added:${toAdd.map(t => t.id).join(",")}`);
+  return { added: true, migrated: needsWrite, count: toAdd.length, ids: toAdd.map(t => t.id) };
+});
+
+/* ═══ BACKFILL DEPLOYMENT DOCS — adds missing standard categories to all existing projects ═══ */
+exports.backfillDeploymentDocs = functions.runWith({ memory: "1GB", timeoutSeconds: 300 }).https.onCall(async (_data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Login required.");
+  const callerSnap = await db.ref(`users/${context.auth.uid}`).once("value");
+  const caller = callerSnap.val();
+  if (caller?.role !== "admin" && !caller?.superAdmin) throw new functions.https.HttpsError("permission-denied", "Admin only.");
+
+  const projectsSnap = await db.ref("appState/projects").once("value");
+  const projects = projectsSnap.val() || {};
+  const pids = Object.keys(projects);
+
+  let updated = 0, skipped = 0, errors = 0;
+  for (const pid of pids) {
+    try {
+      const detailsSnap = await db.ref(`appState/docData/${pid}/projectDetails`).once("value");
+      const existing = detailsSnap.val();
+      if (!Array.isArray(existing)) { skipped++; continue; }
+
+      let workArr = existing.filter(Boolean);
+      let changed = false;
+
+      // Remove legacy pd_hw folder
+      if (workArr.some(c => c.id === "pd_hw")) {
+        workArr = workArr.filter(c => c.id !== "pd_hw");
+        changed = true;
+      }
+
+      const workIds = new Set(workArr.map(c => c.id));
+      const toAdd = [];
+      TABLE_TEMPLATES.forEach(t => { if (!workIds.has(t.id)) toAdd.push(JSON.parse(JSON.stringify(t))); });
+      if (!workIds.has("pd_deployment_requirements")) toAdd.push(JSON.parse(JSON.stringify(DEPLOYMENT_REQUIREMENTS_FOLDER)));
+      if (!workIds.has("pd_reference_info")) toAdd.push({ id: "pd_reference_info", name: "Reference Info", type: "folder", accessLevel: "open", items: [] });
+
+      if (toAdd.length === 0 && !changed) { skipped++; continue; }
+      await db.ref(`appState/docData/${pid}/projectDetails`).set([...workArr, ...toAdd]);
+      updated++;
+    } catch (e) {
+      console.error(`backfillDeploymentDocs: error on ${pid}:`, e.message);
+      errors++;
+    }
+  }
+
+  const summary = { ranAt: new Date().toISOString(), total: pids.length, updated, skipped, errors };
+  await db.ref("maintenance/lastBackfill").set(summary);
+  console.log("backfillDeploymentDocs complete:", summary);
+  return summary;
+});
+
+/* ═══ SCHEDULED MAINTENANCE — v4.1.0: Tue & Fri 3pm PT (1 hr before HubSpot sync) ═══ */
+
+async function runMaintenance() {
+  const startedAt = Date.now();
+  const now = new Date();
+  const tasks = [];
+  const alerts = [];
+
+  // 1 — Sweep hubspotSync/log: delete entries older than 30 days
+  try {
+    const cutoff30 = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const logSnap = await db.ref("hubspotSync/log").orderByChild("startedAt").endAt(cutoff30).once("value");
+    const stale = logSnap.val() || {};
+    const staleKeys = Object.keys(stale);
+    await Promise.all(staleKeys.map(k => db.ref(`hubspotSync/log/${k}`).remove()));
+    tasks.push({ name: "sweep_sync_log", deleted: staleKeys.length });
+  } catch (e) { tasks.push({ name: "sweep_sync_log", error: e.message }); }
+
+  // 2 — Sweep auditLog: delete entries older than 90 days
+  try {
+    const cutoff90 = new Date(now - 90 * 24 * 60 * 60 * 1000).toISOString();
+    const auditSnap = await db.ref("auditLog").orderByChild("ts").endAt(cutoff90).once("value");
+    const stale = auditSnap.val() || {};
+    const staleKeys = Object.keys(stale);
+    await Promise.all(staleKeys.map(k => db.ref(`auditLog/${k}`).remove()));
+    tasks.push({ name: "sweep_audit_log", deleted: staleKeys.length });
+  } catch (e) { tasks.push({ name: "sweep_audit_log", error: e.message }); }
+
+  // 3 — Sweep hubspotWriteback/log: delete entries older than 30 days
+  try {
+    const cutoff30 = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const wbSnap = await db.ref("hubspotWriteback/log").orderByChild("ts").endAt(cutoff30).once("value");
+    const stale = wbSnap.val() || {};
+    const staleKeys = Object.keys(stale);
+    await Promise.all(staleKeys.map(k => db.ref(`hubspotWriteback/log/${k}`).remove()));
+    tasks.push({ name: "sweep_writeback_log", deleted: staleKeys.length });
+  } catch (e) { tasks.push({ name: "sweep_writeback_log", error: e.message }); }
+
+  // 4 — Rule 1: bug count threshold (> 2 open bugs in current version → alert)
+  try {
+    const bugsSnap = await db.ref("bugs/log").orderByChild("status").equalTo("open").once("value");
+    const bugs = Object.values(bugsSnap.val() || {});
+    if (bugs.length > 2) {
+      const alert = { rule: "bug_count_threshold", severity: "warn", message: `${bugs.length} open bugs logged — review and resolve.`, firedAt: now.toISOString() };
+      alerts.push(alert);
+      await db.ref("maintenance/alerts/bugCount").set(alert);
+    } else {
+      await db.ref("maintenance/alerts/bugCount").remove();
+    }
+    tasks.push({ name: "rule_bug_count", openBugs: bugs.length, alerted: bugs.length > 2 });
+  } catch (e) { tasks.push({ name: "rule_bug_count", error: e.message }); }
+
+  // 5 — Rule 2: sync error rate (> 10% of syncs in last 24 h have state="error")
+  try {
+    const cutoff24 = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+    const recentSnap = await db.ref("hubspotSync/log").orderByChild("startedAt").startAt(cutoff24).once("value");
+    const recent = Object.values(recentSnap.val() || {});
+    const errorCount = recent.filter(e => e.state === "error").length;
+    const errorRate = recent.length > 0 ? errorCount / recent.length : 0;
+    if (errorRate > 0.1) {
+      const alert = { rule: "sync_error_rate", severity: "warn", message: `${Math.round(errorRate * 100)}% of syncs in last 24h errored (${errorCount}/${recent.length}). Consider pausing scheduled sync.`, firedAt: now.toISOString() };
+      alerts.push(alert);
+      await db.ref("maintenance/alerts/syncErrorRate").set(alert);
+    } else {
+      await db.ref("maintenance/alerts/syncErrorRate").remove();
+    }
+    tasks.push({ name: "rule_sync_error_rate", rate: Math.round(errorRate * 100), alerted: errorRate > 0.1 });
+  } catch (e) { tasks.push({ name: "rule_sync_error_rate", error: e.message }); }
+
+  // 6 — Rule 3: sync failure circuit breaker (3 consecutive scheduled syncs failed → pause)
+  try {
+    const pausedSnap = await db.ref("hubspotSync/paused").once("value");
+    if (!pausedSnap.val()) {
+      const recentSnap = await db.ref("hubspotSync/log")
+        .orderByChild("type").equalTo("scheduled").limitToLast(3).once("value");
+      const recent = Object.values(recentSnap.val() || {}).sort((a, b) => (a.startedAt || "").localeCompare(b.startedAt || ""));
+      const allFailed = recent.length === 3 && recent.every(e => e.state === "error");
+      if (allFailed) {
+        await db.ref("hubspotSync/paused").set(true);
+        const alert = { rule: "sync_circuit_breaker", severity: "critical", message: "3 consecutive scheduled syncs failed — auto-paused. Re-enable manually in Admin Panel → HubSpot Sync.", firedAt: now.toISOString() };
+        alerts.push(alert);
+        await db.ref("maintenance/alerts/circuitBreaker").set(alert);
+      } else {
+        await db.ref("maintenance/alerts/circuitBreaker").remove();
+      }
+      tasks.push({ name: "rule_circuit_breaker", consecutive: recent.length, tripped: allFailed });
+    } else {
+      tasks.push({ name: "rule_circuit_breaker", skipped: "already paused" });
+    }
+  } catch (e) { tasks.push({ name: "rule_circuit_breaker", error: e.message }); }
+
+  const result = {
+    ranAt: now.toISOString(),
+    durationMs: Date.now() - startedAt,
+    tasksCompleted: tasks.filter(t => !t.error).length,
+    totalTasks: tasks.length,
+    alerts: alerts.length,
+    tasks,
+    alertList: alerts,
+  };
+  await db.ref("maintenance/lastRun").set(result);
+  console.log("scheduledMaintenance complete:", result);
+  return result;
+}
+
+exports.scheduledMaintenance = functions.runWith({ memory: "256MB" }).pubsub
+  .schedule("0 15 * * 2,5")
+  .timeZone("America/Los_Angeles")
+  .onRun(async () => { await runMaintenance(); });
+
+// Manual trigger — admin only, callable from Admin Panel
+exports.runMaintenanceNow = functions.runWith({ memory: "256MB" }).https.onCall(async (_data, context) => {
+  await requireAdmin(context);
+  return await runMaintenance();
 });
 

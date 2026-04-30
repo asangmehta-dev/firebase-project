@@ -48,6 +48,10 @@
       "demandCustomTypes": {
         ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')",
         ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')"
+      },
+      "siTracker": {
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'si_admin')"
       }
     },
 
@@ -58,7 +62,7 @@
         ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
         ".validate": "newData.hasChildren(['id', 'name', 'email', 'role']) || newData.val() === null",
         "role": {
-          ".validate": "newData.val() === 'user' || newData.val() === 'admin' && root.child('users').child(auth.uid).child('role').val() === 'admin'"
+          ".validate": "newData.val() === 'user' || newData.val() === 'si_admin' || newData.val() === 'admin' && root.child('users').child(auth.uid).child('role').val() === 'admin'"
         },
         "partyId": {
           ".validate": "newData.val() !== 'instrumental' || auth.token.email.matches(/.*@instrumental\\.com$/) || root.child('users').child(auth.uid).child('role').val() === 'admin'"
@@ -112,6 +116,21 @@
     },
 
     "hubspotPreview": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      ".write": false
+    },
+
+    "hubspotWriteback": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      ".write": false
+    },
+
+    "bugs": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'"
+    },
+
+    "maintenance": {
       ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
       ".write": false
     }
