@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import * as XLSX from "xlsx";
 import { auth, db, functions, storage, googleProvider } from "./firebase";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { ref, onValue, set } from "firebase/database";
@@ -820,17 +821,6 @@ function DashboardView({ user, project, state, setState, lang = "en", setView })
           <div style={{ fontSize: 42, fontWeight: 800, color: "#0F172A", fontFamily: F }}>{project.stations || 0}</div>
           <div style={{ fontSize: 13, color: "#94A3B8", fontFamily: F }}>{t("inspection stations for this project", lang)}</div>
         </div>
-        {progMilestones.length > 0 && (
-          <div style={{ ...S.card, marginTop: 12, borderTop: "3px solid #F59E0B" }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 10 }}>{t("Key Milestones", lang)}</div>
-            {progMilestones.map(m => (
-              <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "1px solid #F1F5F9" }}>
-                <span style={{ fontSize: 14, fontFamily: F, color: "#1E293B" }}>🏁 {m.name}</span>
-                <span style={{ fontSize: 13, color: "#64748B", fontFamily: F }}>{fmtDay(m.date)}</span>
-              </div>
-            ))}
-          </div>
-        )}
         {/* v4.1.0: external users now also see Project Overview + Hardware (read-only via canEdit gating) + Gantt */}
         <ProjectOverviewSection project={project} state={state} setState={setState} user={user} />
         <ProjectHardwareSection project={project} state={state} setState={setState} user={user} />
@@ -1069,6 +1059,45 @@ function ProjectOverviewSection({ project, state, setState, user }) {
           <Field label="Associated CS Program ID" value={csProgramId} readOnly badge="HubSpot" />
         </div>
 
+        {/* Custom Milestones — internal users only */}
+        {canEdit && (
+          <div style={{ marginTop: 16, padding: "12px 14px", background: "#F8FAFC", borderRadius: 8, border: "1px solid #F1F5F9" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <div style={{ fontSize: 11, color: "#64748B", fontFamily: F, textTransform: "uppercase", letterSpacing: .5, fontWeight: 600 }}>Custom Milestones</div>
+              {editing && (
+                <button onClick={() => setDraft(d => ({ ...d, customMilestones: [...(d.customMilestones || []), { id: genId(), label: "", date: "" }] }))}
+                  style={{ ...S.btnAddItem, padding: "2px 8px", fontSize: 11 }}>+ Add Milestone</button>
+              )}
+            </div>
+            {editing ? (
+              (draft.customMilestones || []).length === 0 ? (
+                <div style={{ fontSize: 13, color: "#CBD5E1", fontFamily: F, fontStyle: "italic" }}>No custom milestones. Click '+ Add Milestone' to add one.</div>
+              ) : (
+                (draft.customMilestones || []).map(m => (
+                  <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <input type="text" value={m.label} onChange={e => setDraft(d => ({ ...d, customMilestones: d.customMilestones.map(x => x.id !== m.id ? x : { ...x, label: e.target.value }) }))}
+                      placeholder="Milestone name" style={{ ...S.inp, flex: 1, padding: "4px 8px", fontSize: 13 }} />
+                    <input type="date" value={m.date} onChange={e => setDraft(d => ({ ...d, customMilestones: d.customMilestones.map(x => x.id !== m.id ? x : { ...x, date: e.target.value }) }))}
+                      style={{ ...S.inp, width: 140, padding: "4px 8px", fontSize: 13 }} />
+                    <button onClick={() => setDraft(d => ({ ...d, customMilestones: d.customMilestones.filter(x => x.id !== m.id) }))}
+                      style={{ ...S.btnDel, padding: "3px 8px", fontSize: 11 }}>✕</button>
+                  </div>
+                ))
+              )
+            ) : (
+              (overview.customMilestones || []).filter(m => m.label).length === 0 ? (
+                <div style={{ fontSize: 13, color: "#CBD5E1", fontFamily: F, fontStyle: "italic" }}>No custom milestones added.</div>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+                  {(overview.customMilestones || []).filter(m => m.label).map(m => (
+                    <Field key={m.id} label={m.label} value={m.date ? fmtDay(m.date) : ""} />
+                  ))}
+                </div>
+              )
+            )}
+          </div>
+        )}
+
         {/* Project Status + Next Steps */}
         <div style={{ marginTop: 16, padding: "12px 14px", background: "#F8FAFC", borderRadius: 8, border: "1px solid #F1F5F9" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, gap: 8, flexWrap: "wrap" }}>
@@ -1252,6 +1281,8 @@ const tabBadge = (cat) => {
 function TableSection({ cat, updateCats, canEdit }) {
   const [editCell, setEditCell] = useState(null); // { rowId, key }
   const [editVal, setEditVal] = useState("");
+  const [importStatus, setImportStatus] = useState(""); // brief feedback after import
+  const fileInputRef = useRef(null);
   const rows = cat.rows || [];
   const cols = cat.columns || [];
 
@@ -1274,6 +1305,47 @@ function TableSection({ cat, updateCats, canEdit }) {
     if (!editCell) return;
     updateRow(editCell.rowId, editCell.key, editVal);
     setEditCell(null); setEditVal("");
+  };
+
+  const handleImport = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const wb = XLSX.read(ev.target.result, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const uploadedRows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+        if (uploadedRows.length === 0) { setImportStatus("No rows found in file."); setTimeout(() => setImportStatus(""), 4000); return; }
+
+        const norm = s => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const colMap = {};
+        for (const h of Object.keys(uploadedRows[0])) {
+          const nh = norm(h);
+          const match = cols.find(c => norm(c.label) === nh || norm(c.key) === nh);
+          if (match) colMap[h] = match.key;
+        }
+        const matchCount = Object.keys(colMap).length;
+        if (matchCount === 0) { setImportStatus("No matching columns found. Check your column headers match the table."); setTimeout(() => setImportStatus(""), 6000); return; }
+
+        if (rows.length > 0 && !confirm(`This will append ${uploadedRows.length} row${uploadedRows.length !== 1 ? "s" : ""} to existing ${rows.length} row${rows.length !== 1 ? "s" : ""}. Proceed?`)) return;
+
+        const newRows = uploadedRows.map(r => {
+          const row = { id: genId() };
+          cols.forEach(c => { row[c.key] = c.type === "boolean" ? false : ""; });
+          for (const [h, key] of Object.entries(colMap)) row[key] = String(r[h] ?? "");
+          return row;
+        });
+        updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, rows: [...(c.rows || []), ...newRows] }));
+        setImportStatus(`✓ Imported ${newRows.length} row${newRows.length !== 1 ? "s" : ""} (${matchCount} column${matchCount !== 1 ? "s" : ""} matched)`);
+        setTimeout(() => setImportStatus(""), 5000);
+      } catch (err) {
+        setImportStatus("Error reading file: " + err.message);
+        setTimeout(() => setImportStatus(""), 6000);
+      }
+    };
+    reader.readAsArrayBuffer(file);
   };
 
   return (
@@ -1335,7 +1407,14 @@ function TableSection({ cat, updateCats, canEdit }) {
           </tbody>
         </table>
       </div>
-      {canEdit && <button onClick={addRow} style={{ ...S.btnAddItem, marginTop: 8 }}>+ Add Row</button>}
+      {canEdit && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+          <button onClick={addRow} style={S.btnAddItem}>+ Add Row</button>
+          <button onClick={() => fileInputRef.current?.click()} style={{ ...S.btnAddItem, background: "#F0FDF4", color: "#15803D", border: "1px solid #BBF7D0" }} title="Supports .xlsx, .xls, .csv — export from Google Sheets first">📥 Import from Spreadsheet</button>
+          <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={handleImport} />
+          {importStatus && <span style={{ fontSize: 12, color: importStatus.startsWith("✓") ? "#15803D" : "#DC2626", fontFamily: F }}>{importStatus}</span>}
+        </div>
+      )}
       {rows.length > 0 && <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F, marginTop: 4 }}>{rows.length} row{rows.length !== 1 ? "s" : ""}</div>}
     </div>
   );
@@ -2376,7 +2455,10 @@ function GanttChart({ project, state }) {
     { key: "targetBuildDate", label: "Target Build" },
     { key: "actualDeployDate", label: "Actual Deploy" },
   ].filter(o => overview[o.key]).map(o => ({ id: `ov_${o.key}`, name: o.label, start: overview[o.key], end: overview[o.key], done: !!overview[o.key], type: "overview" }));
-  const allItems = [...overviewItems, ...programTasks, ...checklistItems].filter(i => i.start).sort((a, b) => new Date(a.start) - new Date(b.start));
+  const customMilestoneItems = (overview.customMilestones || [])
+    .filter(m => m.label && m.date)
+    .map(m => ({ id: `cm_${m.id}`, name: m.label.substring(0, 40), start: m.date, end: m.date, done: false, type: "milestone" }));
+  const allItems = [...overviewItems, ...programTasks, ...checklistItems, ...customMilestoneItems].filter(i => i.start).sort((a, b) => new Date(a.start) - new Date(b.start));
 
   if (allItems.length === 0) return null;
 
@@ -2439,7 +2521,8 @@ function GanttChartToggle({ project, state }) {
     const overview = state.projectOverview?.[project?.id] || {};
     const overviewDates = ["cadCompleteDate", "cadActualFinishDate", "actualServiceStartDate", "targetBuildDate", "actualDeployDate"]
       .filter(k => overview[k]).length;
-    return progTasks + checks + overviewDates;
+    const customMilestoneDates = (overview.customMilestones || []).filter(m => m.label && m.date).length;
+    return progTasks + checks + overviewDates + customMilestoneDates;
   }, [state.docData, project?.id]);
   const ready = dateCount >= 3;
   return (

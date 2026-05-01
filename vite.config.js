@@ -8,6 +8,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           'react-vendor': ['react', 'react-dom'],
+          'xlsx-vendor': ['xlsx'],
           'firebase-vendor': [
             'firebase/app',
             'firebase/auth',

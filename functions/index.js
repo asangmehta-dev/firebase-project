@@ -1065,11 +1065,11 @@ exports.adminSetCommercialAccess = functions.https.onCall(async (data, context) 
 // Date property internal names in HubSpot. Run getHubspotCustomObjectSchema (admin panel) to verify.
 // HubSpot stores dates as milliseconds-since-epoch (integer), not ISO strings.
 const HUBSPOT_DATE_PROPS = {
-  cadCompleteDate:        "cad_complete_date__c",
-  cadActualFinishDate:    "cad_actual_finish_date__c",
+  cadCompleteDate:        "cad_complete_date",
+  cadActualFinishDate:    "actual_finish_date",
   actualServiceStartDate: "actual_service_start_date__c",
-  targetBuildDate:        "target_build_date__c",
-  actualDeployDate:       "actual_deploy_date__c",
+  targetBuildDate:        "actual_target_build_date__c",
+  actualDeployDate:       "actual_deploy_date_production_ready__c",
 };
 
 // Diagnostic: returns all property names + labels for the custom object type (admin-only).
