@@ -925,26 +925,13 @@ function DashboardView({ user, project, state, setState, lang = "en", setView })
         </div>
       )}
 
-      {/* External view preview — station count + milestones */}
+      {/* External view preview — stations + Project Overview dates */}
       <div style={{ marginTop: 24 }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 12, paddingBottom: 8, borderBottom: "2px solid #F1F5F9" }}>External User View</div>
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-          <div style={{ ...S.card, flex: "1 1 160px", borderTop: "3px solid #F59E0B" }}>
-            <div style={{ fontSize: 14, color: "#64748B", fontFamily: F, marginBottom: 6 }}>Stations</div>
-            <div style={{ fontSize: 42, fontWeight: 800, color: "#0F172A", fontFamily: F }}>{project.stations || 0}</div>
-            <div style={{ fontSize: 13, color: "#94A3B8", fontFamily: F }}>inspection stations for this project</div>
-          </div>
-          <div style={{ ...S.card, flex: "1 1 300px", borderTop: "3px solid #F59E0B" }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 10 }}>Key Milestones</div>
-            {progMilestones.length > 0
-              ? progMilestones.map(m => (
-                <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "1px solid #F1F5F9" }}>
-                  <span style={{ fontSize: 14, fontFamily: F, color: "#1E293B" }}>🏁 {m.name}</span>
-                  <span style={{ fontSize: 13, color: "#64748B", fontFamily: F }}>{fmtDay(m.date)}</span>
-                </div>
-              ))
-              : <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>Add milestones in Program Details to display here</div>}
-          </div>
+        <div style={{ ...S.card, borderTop: "3px solid #F59E0B" }}>
+          <div style={{ fontSize: 14, color: "#64748B", fontFamily: F, marginBottom: 6 }}>Stations</div>
+          <div style={{ fontSize: 42, fontWeight: 800, color: "#0F172A", fontFamily: F }}>{project.stations || 0}</div>
+          <div style={{ fontSize: 13, color: "#94A3B8", fontFamily: F }}>inspection stations for this project</div>
         </div>
       </div>
 
