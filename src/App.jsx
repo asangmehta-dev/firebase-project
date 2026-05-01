@@ -155,18 +155,41 @@ const APP_DEPLOY_REQ_FOLDER = {
 
 const APP_TABLE_TEMPLATES = [
   { id: "pd_station_kits", name: "Station Kits", type: "table", accessLevel: "open", columns: [
-    { key: "station_num",           label: "Station #",           width: 80  },
-    { key: "line",                  label: "Line",                width: 100 },
-    { key: "station_name",          label: "Station Name",        width: 140 },
-    { key: "fixture_name",          label: "Fixture Name",        width: 160 },
-    { key: "computer_service_tag",  label: "Computer ServiceTag", width: 150 },
-    { key: "mac_address",           label: "MAC Address",         width: 140 },
-    { key: "computer_sn",           label: "Computer SN",         width: 130 },
-    { key: "keyboard",              label: "Keyboard",            width: 90,  type: "boolean" },
-    { key: "mouse",                 label: "Mouse",               width: 80,  type: "boolean" },
-    { key: "usb_button",            label: "USB Button",          width: 95,  type: "boolean" },
-    { key: "ship_date",             label: "Ship Date",           width: 100, type: "date" },
-    { key: "notes",                 label: "Notes",               width: 200 },
+    { key: "station_num",           label: "Station #",              width: 80  },
+    { key: "line",                  label: "Line Name",              width: 120 },
+    { key: "station_name",          label: "Station Name",           width: 140 },
+    { key: "fixture_name",          label: "Fixture Name",           width: 160 },
+    { key: "computer_service_tag",  label: "Computer ServiceTag",    width: 150 },
+    { key: "mac_address",           label: "MAC Address",            width: 140 },
+    { key: "computer_sn",           label: "Computer SN",            width: 130 },
+    { key: "computer_deployed",     label: "Computer Deployed?",     width: 145, type: "boolean" },
+    { key: "keyboard",              label: "Keyboard",               width: 90,  type: "boolean" },
+    { key: "mouse",                 label: "Mouse",                  width: 80,  type: "boolean" },
+    { key: "usb_button",            label: "USB Button",             width: 95,  type: "boolean" },
+    { key: "ethernet_cable",        label: "Ethernet Cable",         width: 115, type: "boolean" },
+    { key: "power_cable",           label: "Power Cable",            width: 100, type: "boolean" },
+    { key: "barcode_scanner",       label: "BarCode Scanner",        width: 125, type: "boolean" },
+    { key: "barcode_scanner_sn",    label: "BarCode Scanner SN",     width: 145 },
+    { key: "monitor",               label: "Monitor",                width: 80,  type: "boolean" },
+    { key: "monitor_sn",            label: "Monitor SN",             width: 120 },
+    { key: "hdmi_dp_cable",         label: "HDMI to DP Cable",       width: 135, type: "boolean" },
+    { key: "no_cameras",            label: "No. Cameras",            width: 100 },
+    { key: "camera_type",           label: "Camera Type",            width: 130 },
+    { key: "camera_1_sn",           label: "Camera #1 SN",           width: 130 },
+    { key: "camera_brackets",       label: "Camera Brackets",        width: 125, type: "boolean" },
+    { key: "camera_bracket_notch",  label: "Camera Bracket Notch #", width: 160 },
+    { key: "camera_usb_cable",      label: "Camera USB Cable",       width: 135, type: "boolean" },
+    { key: "lens_1_type",           label: "Lens #1 Type",           width: 110 },
+    { key: "lens_1_sn",             label: "Lens #1 SN",             width: 120 },
+    { key: "no_leds",               label: "No. LEDs/Type",          width: 120 },
+    { key: "uv_light",              label: "UV Light",               width: 100 },
+    { key: "leds",                  label: "LEDs",                   width: 70,  type: "boolean" },
+    { key: "led_brackets",          label: "LED Brackets",           width: 110, type: "boolean" },
+    { key: "led_controller_sn",     label: "LED Controller SN",      width: 145 },
+    { key: "manual_controller_sn",  label: "Manual Controller SN",   width: 155 },
+    { key: "led_white_intensity",   label: "LED White Intensity",    width: 140 },
+    { key: "ship_date",             label: "Ship Date",              width: 100, type: "date" },
+    { key: "notes",                 label: "Notes",                  width: 200 },
   ], rows: [] },
   { id: "pd_in_factory_install", name: "In-Factory Install", type: "table", accessLevel: "open", columns: [
     { key: "station",            label: "Station",            width: 80  },
@@ -1278,7 +1301,7 @@ const tabBadge = (cat) => {
 };
 
 /* ═══ TABLE SECTION — inline-editable rows for type:"table" categories ═══ */
-function TableSection({ cat, updateCats, canEdit }) {
+function TableSection({ cat, updateCats, canEdit, allCats = [] }) {
   const [editCell, setEditCell] = useState(null); // { rowId, key }
   const [editVal, setEditVal] = useState("");
   const [importStatus, setImportStatus] = useState(""); // brief feedback after import
@@ -1314,32 +1337,89 @@ function TableSection({ cat, updateCats, canEdit }) {
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
-        const wb = XLSX.read(ev.target.result, { type: "array" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const uploadedRows = XLSX.utils.sheet_to_json(ws, { defval: "" });
-        if (uploadedRows.length === 0) { setImportStatus("No rows found in file."); setTimeout(() => setImportStatus(""), 4000); return; }
-
         const norm = s => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-        const colMap = {};
-        for (const h of Object.keys(uploadedRows[0])) {
-          const nh = norm(h);
-          const match = cols.find(c => norm(c.label) === nh || norm(c.key) === nh);
-          if (match) colMap[h] = match.key;
+        const wb = XLSX.read(ev.target.result, { type: "array" });
+
+        // Build lookup: norm(tabName) → cat object (all table-type cats)
+        const tabLookup = {};
+        (allCats || []).filter(c => c.type === "table").forEach(c => { tabLookup[norm(c.name)] = c; });
+
+        // Pivot vertical/transposed sheets: attribute-per-row, station-per-column
+        // (Excel layout used by StationKits, InFactoryInstall, CameraSettings, LED Settings)
+        // Detected when first cell of row 0 normalizes to "station"
+        const pivotVertical = (raw) => {
+          const numStations = (raw[0] || []).length - 1;
+          const pivoted = [];
+          for (let si = 1; si <= numStations; si++) {
+            const row = {};
+            for (let ri = 0; ri < raw.length; ri++) {
+              const attr = String(raw[ri]?.[0] || "").trim().replace(/:$/, "");
+              if (!attr) continue;
+              row[attr] = raw[ri][si] ?? "";
+            }
+            if (Object.values(row).some(v => v !== "" && v !== null && v !== undefined)) pivoted.push(row);
+          }
+          return pivoted;
+        };
+
+        // Scan all sheets in the file, match each to an app tab
+        const imports = [];
+        for (const sheetName of wb.SheetNames) {
+          const matchedCat = tabLookup[norm(sheetName)];
+          if (!matchedCat) continue;
+          const ws = wb.Sheets[sheetName];
+          const raw2d = XLSX.utils.sheet_to_json(ws, { header: 1 });
+          const isVertical = norm(String(raw2d[0]?.[0] || "")) === "station" && raw2d[0]?.[1];
+          const uploadedRows = isVertical
+            ? pivotVertical(raw2d)
+            : XLSX.utils.sheet_to_json(ws, { defval: "" });
+          if (uploadedRows.length === 0) continue;
+
+          const tCols = matchedCat.columns || [];
+          const colMap = {};
+          for (const h of Object.keys(uploadedRows[0])) {
+            const nh = norm(h);
+            const match = tCols.find(c => norm(c.label) === nh || norm(c.key) === nh);
+            if (match) colMap[h] = { key: match.key, type: match.type };
+          }
+          if (Object.keys(colMap).length === 0) continue;
+
+          const newRows = uploadedRows.map(r => {
+            const row = { id: genId() };
+            tCols.forEach(c => { row[c.key] = c.type === "boolean" ? false : ""; });
+            for (const [h, { key, type }] of Object.entries(colMap)) {
+              const v = r[h];
+              row[key] = type === "boolean"
+                ? (v === true || v === 1 || String(v).toLowerCase() === "true")
+                : String(v ?? "");
+            }
+            return row;
+          });
+          imports.push({ catId: matchedCat.id, catName: matchedCat.name, newRows, existing: (matchedCat.rows || []).length });
         }
-        const matchCount = Object.keys(colMap).length;
-        if (matchCount === 0) { setImportStatus("No matching columns found. Check your column headers match the table."); setTimeout(() => setImportStatus(""), 6000); return; }
 
-        if (rows.length > 0 && !confirm(`This will append ${uploadedRows.length} row${uploadedRows.length !== 1 ? "s" : ""} to existing ${rows.length} row${rows.length !== 1 ? "s" : ""}. Proceed?`)) return;
+        if (imports.length === 0) {
+          setImportStatus("No matching sheets found. Sheet names must match tab names (e.g. 'StationKits' → Station Kits).");
+          setTimeout(() => setImportStatus(""), 7000); return;
+        }
 
-        const newRows = uploadedRows.map(r => {
-          const row = { id: genId() };
-          cols.forEach(c => { row[c.key] = c.type === "boolean" ? false : ""; });
-          for (const [h, key] of Object.entries(colMap)) row[key] = String(r[h] ?? "");
-          return row;
+        const hasExisting = imports.some(im => im.existing > 0);
+        if (hasExisting) {
+          const names = imports.filter(im => im.existing > 0).map(im => im.catName).join(", ");
+          if (!confirm(`This will append rows to tabs with existing data: ${names}. Proceed?`)) return;
+        }
+
+        updateCats(cur => {
+          let next = cur;
+          for (const { catId, newRows } of imports) {
+            next = next.map(c => c.id !== catId ? c : { ...c, rows: [...(c.rows || []), ...newRows] });
+          }
+          return next;
         });
-        updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, rows: [...(c.rows || []), ...newRows] }));
-        setImportStatus(`✓ Imported ${newRows.length} row${newRows.length !== 1 ? "s" : ""} (${matchCount} column${matchCount !== 1 ? "s" : ""} matched)`);
-        setTimeout(() => setImportStatus(""), 5000);
+
+        const summary = imports.map(im => `${im.catName} (${im.newRows.length})`).join(", ");
+        setImportStatus(`✓ Imported: ${summary}`);
+        setTimeout(() => setImportStatus(""), 8000);
       } catch (err) {
         setImportStatus("Error reading file: " + err.message);
         setTimeout(() => setImportStatus(""), 6000);
@@ -1528,7 +1608,7 @@ function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state,
           : activeCat.type === "program"
             ? <ProgramDetailsSection cat={activeCat} pid={pid} state={state} setState={setState} user={user} canEdit={canEdit} lang={lang} />
             : activeCat.type === "table"
-              ? <TableSection cat={activeCat} updateCats={updateCats} canEdit={canEdit} />
+              ? <TableSection cat={activeCat} updateCats={updateCats} canEdit={canEdit} allCats={cats} />
               : <FolderSection cat={activeCat} updateCats={updateCats} user={user} canEdit={canEdit} pid={pid} />
       )}
     </div>
