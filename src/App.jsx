@@ -586,7 +586,13 @@ const getProjectDetails = (dd, pid) => {
   const cats = dd?.[pid]?.projectDetails || DEFAULT_PROJECT_DETAILS;
   return cats.map(cat => {
     const tmpl = APP_TABLE_TEMPLATES.find(t => t.id === cat.id);
-    return (tmpl && cat.type === "table") ? { ...cat, columns: tmpl.columns } : cat;
+    if (!tmpl || cat.type !== "table") return cat;
+    // Additive merge: keep existing Firebase columns, append any new template columns not yet present
+    // (respects deletedCols so explicitly deleted columns don't come back)
+    const deletedKeys = new Set(cat.deletedCols || []);
+    const existingKeys = new Set((cat.columns || []).map(c => c.key));
+    const newCols = tmpl.columns.filter(c => !existingKeys.has(c.key) && !deletedKeys.has(c.key));
+    return { ...cat, columns: [...(cat.columns || []), ...newCols] };
   });
 };
 const getCommercial = (dd, pid) => dd?.[pid]?.commercial || DEFAULT_COMMERCIAL;
@@ -1531,6 +1537,12 @@ function TransposedTableSection({ cat, updateCats, canEdit, allCats = [] }) {
   const [editVal, setEditVal] = useState("");
   const [importStatus, setImportStatus] = useState("");
   const fileInputRef = useRef(null);
+  const [editAttrs, setEditAttrs] = useState(false);
+  const [editingAttrKey, setEditingAttrKey] = useState(null);
+  const [editingAttrLabel, setEditingAttrLabel] = useState("");
+  const [newAttrLabel, setNewAttrLabel] = useState("");
+  const [newAttrType, setNewAttrType] = useState("text");
+  const [newAttrSection, setNewAttrSection] = useState("");
 
   const stations = cat.rows || []; // each "row" in data = one station column in UI
   const cols = cat.columns || [];  // each "col" in template = one attribute row in UI
@@ -1554,6 +1566,30 @@ function TransposedTableSection({ cat, updateCats, canEdit, allCats = [] }) {
     if (!editCell) return;
     updateCell(editCell.rowId, editCell.key, editVal);
     setEditCell(null); setEditVal("");
+  };
+
+  const delCol = (key) =>
+    updateCats(cur => cur.map(c => c.id !== cat.id ? c : {
+      ...c,
+      columns: (c.columns || []).filter(col => col.key !== key),
+      deletedCols: [...(c.deletedCols || []), key],
+    }));
+
+  const renameCol = (key, newLabel) => {
+    if (!newLabel.trim()) return;
+    updateCats(cur => cur.map(c => c.id !== cat.id ? c : {
+      ...c, columns: (c.columns || []).map(col => col.key === key ? { ...col, label: newLabel.trim() } : col),
+    }));
+  };
+
+  const addCol = () => {
+    const label = newAttrLabel.trim();
+    if (!label) return;
+    const key = "custom_" + label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") + "_" + Date.now().toString(36);
+    const section = newAttrSection.trim() || "Custom";
+    const colDef = { key, label, section, ...(newAttrType !== "text" ? { type: newAttrType } : {}) };
+    updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, columns: [...(c.columns || []), colDef] }));
+    setNewAttrLabel(""); setNewAttrSection("");
   };
 
   // Same multi-tab import logic as TableSection
@@ -1655,7 +1691,7 @@ function TransposedTableSection({ cat, updateCats, canEdit, allCats = [] }) {
         <table style={{ borderCollapse: "collapse", fontSize: 13, fontFamily: F, width: "max-content", minWidth: "100%" }}>
           <thead>
             <tr>
-              <th style={{ ...thBase, textAlign: "left", minWidth: 200, position: "sticky", left: 0, zIndex: 1 }}>Attribute</th>
+              <th style={{ ...thBase, textAlign: "left", minWidth: editAttrs ? 260 : 200, position: "sticky", left: 0, zIndex: 1 }}>Attribute</th>
               {stations.map((row, i) => (
                 <th key={row.id} style={{ ...thBase, textAlign: "center", minWidth: 130 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
@@ -1690,8 +1726,28 @@ function TransposedTableSection({ cat, updateCats, canEdit, allCats = [] }) {
                 const col = item.col;
                 return (
                   <tr key={col.key} style={{ borderBottom: "1px solid #F1F5F9" }}>
-                    <td style={{ padding: "6px 12px", color: "#1E293B", fontSize: 13, whiteSpace: "nowrap", background: "#FAFAFA", fontWeight: 500, position: "sticky", left: 0, borderRight: "1px solid #E2E8F0" }}>
-                      {col.label}
+                    <td style={{ padding: editAttrs ? "4px 8px" : "6px 12px", color: "#1E293B", fontSize: 13, background: "#FAFAFA", fontWeight: 500, position: "sticky", left: 0, borderRight: "1px solid #E2E8F0", minWidth: editAttrs ? 260 : 200 }}>
+                      {editAttrs ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          {editingAttrKey === col.key ? (
+                            <input value={editingAttrLabel} autoFocus
+                              onChange={e => setEditingAttrLabel(e.target.value)}
+                              onBlur={() => { renameCol(col.key, editingAttrLabel); setEditingAttrKey(null); }}
+                              onKeyDown={e => { if (e.key === "Enter") { renameCol(col.key, editingAttrLabel); setEditingAttrKey(null); } if (e.key === "Escape") setEditingAttrKey(null); }}
+                              style={{ flex: 1, padding: "3px 6px", fontSize: 12, border: "1px solid #3B82F6", borderRadius: 3, outline: "none", fontFamily: F }} />
+                          ) : (
+                            <span onClick={() => { setEditingAttrKey(col.key); setEditingAttrLabel(col.label); }}
+                              title="Click to rename"
+                              style={{ flex: 1, cursor: "text", padding: "3px 4px", borderRadius: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {col.label}
+                            </span>
+                          )}
+                          <button onClick={() => { if (confirm(`Delete attribute "${col.label}"?`)) delCol(col.key); }}
+                            style={{ flexShrink: 0, background: "none", border: "none", cursor: "pointer", color: "#EF4444", fontSize: 15, lineHeight: 1, padding: "2px 4px" }} title="Delete attribute">×</button>
+                        </div>
+                      ) : (
+                        <span style={{ whiteSpace: "nowrap" }}>{col.label}</span>
+                      )}
                     </td>
                     {stations.map(row => {
                       const val = row[col.key];
@@ -1730,11 +1786,35 @@ function TransposedTableSection({ cat, updateCats, canEdit, allCats = [] }) {
         </table>
       </div>
       {canEdit && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-          <button onClick={addStation} style={S.btnAddItem}>+ Add Station</button>
-          <button onClick={() => fileInputRef.current?.click()} style={{ ...S.btnAddItem, background: "#F0FDF4", color: "#15803D", border: "1px solid #BBF7D0" }} title="Supports .xlsx, .xls, .csv — export from Google Sheets first">📥 Import from Spreadsheet</button>
-          <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={handleImport} />
-          {importStatus && <span style={{ fontSize: 12, color: importStatus.startsWith("✓") ? "#15803D" : "#DC2626", fontFamily: F }}>{importStatus}</span>}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={addStation} style={S.btnAddItem}>+ Add Station</button>
+            <button onClick={() => fileInputRef.current?.click()} style={{ ...S.btnAddItem, background: "#F0FDF4", color: "#15803D", border: "1px solid #BBF7D0" }} title="Supports .xlsx, .xls, .csv — export from Google Sheets first">📥 Import from Spreadsheet</button>
+            <button onClick={() => { setEditAttrs(ea => !ea); setEditingAttrKey(null); }}
+              style={{ ...S.btnAddItem, ...(editAttrs ? { background: "#EFF6FF", color: "#1D4ED8", border: "1px solid #BFDBFE" } : {}) }}>
+              {editAttrs ? "✓ Done Editing Attributes" : "✏️ Edit Attributes"}
+            </button>
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={handleImport} />
+            {importStatus && <span style={{ fontSize: 12, color: importStatus.startsWith("✓") ? "#15803D" : "#DC2626", fontFamily: F }}>{importStatus}</span>}
+          </div>
+          {editAttrs && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", padding: "8px 10px", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 6 }}>
+              <span style={{ fontSize: 11, color: "#64748B", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>Add attribute:</span>
+              <input placeholder="Label..." value={newAttrLabel} onChange={e => setNewAttrLabel(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && addCol()}
+                style={{ padding: "4px 8px", fontSize: 12, border: "1px solid #CBD5E1", borderRadius: 4, width: 180, fontFamily: F }} />
+              <select value={newAttrType} onChange={e => setNewAttrType(e.target.value)}
+                style={{ padding: "4px 6px", fontSize: 12, border: "1px solid #CBD5E1", borderRadius: 4, fontFamily: F }}>
+                <option value="text">Text</option>
+                <option value="boolean">Checkbox</option>
+                <option value="date">Date</option>
+              </select>
+              <input placeholder="Section (optional)" value={newAttrSection} onChange={e => setNewAttrSection(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && addCol()}
+                style={{ padding: "4px 8px", fontSize: 12, border: "1px solid #CBD5E1", borderRadius: 4, width: 150, fontFamily: F }} />
+              <button onClick={addCol} style={{ ...S.btnAddItem, padding: "4px 12px" }}>+ Add</button>
+            </div>
+          )}
         </div>
       )}
       {stations.length > 0 && <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F, marginTop: 4 }}>{stations.length} station{stations.length !== 1 ? "s" : ""}</div>}
@@ -1876,7 +1956,7 @@ function ProjectDetailsView({ user, project, state, setState, lang = "en" }) {
 
   // updateCats + useEffect must be before any early return (Rules of Hooks)
   const updateCats = (newCatsOrFn) => setState(prev => {
-    const cur = prev.docData?.[pid]?.projectDetails || DEFAULT_PROJECT_DETAILS;
+    const cur = getProjectDetails(prev.docData, pid); // use merged result so col edits see appended template cols
     const newCats = typeof newCatsOrFn === "function" ? newCatsOrFn(cur) : newCatsOrFn;
     return { ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), projectDetails: newCats } } };
   });
