@@ -582,7 +582,13 @@ const F = "'Times New Roman', Georgia, serif";
 const fmtDate = (iso) => { if (!iso) return "—"; return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); };
 const fmtDay = (iso) => { if (!iso) return "—"; return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
 const genId = () => `id_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-const getProjectDetails = (dd, pid) => dd?.[pid]?.projectDetails || DEFAULT_PROJECT_DETAILS;
+const getProjectDetails = (dd, pid) => {
+  const cats = dd?.[pid]?.projectDetails || DEFAULT_PROJECT_DETAILS;
+  return cats.map(cat => {
+    const tmpl = APP_TABLE_TEMPLATES.find(t => t.id === cat.id);
+    return (tmpl && cat.type === "table") ? { ...cat, columns: tmpl.columns } : cat;
+  });
+};
 const getCommercial = (dd, pid) => dd?.[pid]?.commercial || DEFAULT_COMMERCIAL;
 const isInst = (u) => u?.role === "admin" || (u?.email || "").endsWith("@instrumental.com");
 const isExternal = (u) => u && u.role !== "admin" && !(u.email || "").endsWith("@instrumental.com");
