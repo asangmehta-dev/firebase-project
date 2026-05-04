@@ -155,93 +155,93 @@ const APP_DEPLOY_REQ_FOLDER = {
 
 const APP_TABLE_TEMPLATES = [
   { id: "pd_station_kits", name: "Station Kits", type: "table", accessLevel: "open", columns: [
-    { key: "station_num",           label: "Station #",              width: 80  },
-    { key: "line",                  label: "Line Name",              width: 120 },
-    { key: "station_name",          label: "Station Name",           width: 140 },
-    { key: "fixture_name",          label: "Fixture Name",           width: 160 },
-    { key: "computer_service_tag",  label: "Computer ServiceTag",    width: 150 },
-    { key: "mac_address",           label: "MAC Address",            width: 140 },
-    { key: "computer_sn",           label: "Computer SN",            width: 130 },
-    { key: "computer_deployed",     label: "Computer Deployed?",     width: 145, type: "boolean" },
-    { key: "keyboard",              label: "Keyboard",               width: 90,  type: "boolean" },
-    { key: "mouse",                 label: "Mouse",                  width: 80,  type: "boolean" },
-    { key: "usb_button",            label: "USB Button",             width: 95,  type: "boolean" },
-    { key: "ethernet_cable",        label: "Ethernet Cable",         width: 115, type: "boolean" },
-    { key: "power_cable",           label: "Power Cable",            width: 100, type: "boolean" },
-    { key: "barcode_scanner",       label: "BarCode Scanner",        width: 125, type: "boolean" },
-    { key: "barcode_scanner_sn",    label: "BarCode Scanner SN",     width: 145 },
-    { key: "monitor",               label: "Monitor",                width: 80,  type: "boolean" },
-    { key: "monitor_sn",            label: "Monitor SN",             width: 120 },
-    { key: "hdmi_dp_cable",         label: "HDMI to DP Cable",       width: 135, type: "boolean" },
-    { key: "no_cameras",            label: "No. Cameras",            width: 100 },
-    { key: "camera_type",           label: "Camera Type",            width: 130 },
-    { key: "camera_1_sn",           label: "Camera #1 SN",           width: 130 },
-    { key: "camera_brackets",       label: "Camera Brackets",        width: 125, type: "boolean" },
-    { key: "camera_bracket_notch",  label: "Camera Bracket Notch #", width: 160 },
-    { key: "camera_usb_cable",      label: "Camera USB Cable",       width: 135, type: "boolean" },
-    { key: "lens_1_type",           label: "Lens #1 Type",           width: 110 },
-    { key: "lens_1_sn",             label: "Lens #1 SN",             width: 120 },
-    { key: "no_leds",               label: "No. LEDs/Type",          width: 120 },
-    { key: "uv_light",              label: "UV Light",               width: 100 },
-    { key: "leds",                  label: "LEDs",                   width: 70,  type: "boolean" },
-    { key: "led_brackets",          label: "LED Brackets",           width: 110, type: "boolean" },
-    { key: "led_controller_sn",     label: "LED Controller SN",      width: 145 },
-    { key: "manual_controller_sn",  label: "Manual Controller SN",   width: 155 },
-    { key: "led_white_intensity",   label: "LED White Intensity",    width: 140 },
-    { key: "ship_date",             label: "Ship Date",              width: 100, type: "date" },
-    { key: "notes",                 label: "Notes",                  width: 200 },
+    { key: "station_num",           label: "Station #",              section: "Station" },
+    { key: "line",                  label: "Line Name",              section: "Station" },
+    { key: "station_name",          label: "Station Name",           section: "Station" },
+    { key: "fixture_name",          label: "Fixture Name",           section: "Station" },
+    { key: "computer_service_tag",  label: "Computer ServiceTag",    section: "Computer" },
+    { key: "mac_address",           label: "MAC Address",            section: "Computer" },
+    { key: "computer_sn",           label: "Computer SN",            section: "Computer" },
+    { key: "computer_deployed",     label: "Computer Deployed?",     section: "Computer",    type: "boolean" },
+    { key: "keyboard",              label: "Keyboard",               section: "Peripherals", type: "boolean" },
+    { key: "mouse",                 label: "Mouse",                  section: "Peripherals", type: "boolean" },
+    { key: "usb_button",            label: "USB Button",             section: "Peripherals", type: "boolean" },
+    { key: "ethernet_cable",        label: "Ethernet Cable",         section: "Peripherals", type: "boolean" },
+    { key: "power_cable",           label: "Power Cable",            section: "Peripherals", type: "boolean" },
+    { key: "barcode_scanner",       label: "BarCode Scanner",        section: "Peripherals", type: "boolean" },
+    { key: "barcode_scanner_sn",    label: "BarCode Scanner SN",     section: "Peripherals" },
+    { key: "monitor",               label: "Monitor",                section: "Monitor",     type: "boolean" },
+    { key: "monitor_sn",            label: "Monitor SN",             section: "Monitor" },
+    { key: "hdmi_dp_cable",         label: "HDMI to DP Cable",       section: "Monitor",     type: "boolean" },
+    { key: "no_cameras",            label: "No. Cameras",            section: "Cameras" },
+    { key: "camera_type",           label: "Camera Type",            section: "Cameras" },
+    { key: "camera_1_sn",           label: "Camera #1 SN",           section: "Cameras" },
+    { key: "camera_brackets",       label: "Camera Brackets",        section: "Cameras",     type: "boolean" },
+    { key: "camera_bracket_notch",  label: "Camera Bracket Notch #", section: "Cameras" },
+    { key: "camera_usb_cable",      label: "Camera USB Cable",       section: "Cameras",     type: "boolean" },
+    { key: "lens_1_type",           label: "Lens #1 Type",           section: "Lenses" },
+    { key: "lens_1_sn",             label: "Lens #1 SN",             section: "Lenses" },
+    { key: "no_leds",               label: "No. LEDs/Type",          section: "Lights" },
+    { key: "uv_light",              label: "UV Light",               section: "Lights" },
+    { key: "leds",                  label: "LEDs",                   section: "Lights",      type: "boolean" },
+    { key: "led_brackets",          label: "LED Brackets",           section: "Lights",      type: "boolean" },
+    { key: "led_controller_sn",     label: "LED Controller SN",      section: "Lights" },
+    { key: "manual_controller_sn",  label: "Manual Controller SN",   section: "Lights" },
+    { key: "led_white_intensity",   label: "LED White Intensity",    section: "Lights" },
+    { key: "ship_date",             label: "Ship Date",              section: "Logistics",   type: "date" },
+    { key: "notes",                 label: "Notes",                  section: "Logistics" },
   ], rows: [] },
   { id: "pd_in_factory_install", name: "In-Factory Install", type: "table", accessLevel: "open", columns: [
-    { key: "station",            label: "Station",            width: 80  },
-    { key: "line",               label: "Line",               width: 100 },
-    { key: "station_name",       label: "Station Name",       width: 140 },
-    { key: "fixture_name",       label: "Fixture Name",       width: 160 },
-    { key: "internet_confirmed", label: "Internet Confirmed", width: 130, type: "boolean" },
-    { key: "ip_address",         label: "IP Address",         width: 130 },
-    { key: "gateway",            label: "Gateway",            width: 120 },
-    { key: "mask",               label: "Mask",               width: 120 },
-    { key: "nameserver_1",       label: "Nameserver 1",       width: 130 },
-    { key: "nameserver_2",       label: "Nameserver 2",       width: 130 },
-    { key: "camera_mounted",     label: "Camera Mounted",     width: 120, type: "boolean" },
-    { key: "led_mounted",        label: "LED Mounted",        width: 110, type: "boolean" },
-    { key: "fov_confirmed",      label: "FOV Confirmed",      width: 120, type: "boolean" },
-    { key: "notes",              label: "Notes",              width: 200 },
+    { key: "station",            label: "Station",            section: "Station" },
+    { key: "line",               label: "Line",               section: "Station" },
+    { key: "station_name",       label: "Station Name",       section: "Station" },
+    { key: "fixture_name",       label: "Fixture Name",       section: "Station" },
+    { key: "internet_confirmed", label: "Internet Confirmed", section: "Network",  type: "boolean" },
+    { key: "ip_address",         label: "IP Address",         section: "Network" },
+    { key: "gateway",            label: "Gateway",            section: "Network" },
+    { key: "mask",               label: "Mask",               section: "Network" },
+    { key: "nameserver_1",       label: "Nameserver 1",       section: "Network" },
+    { key: "nameserver_2",       label: "Nameserver 2",       section: "Network" },
+    { key: "camera_mounted",     label: "Camera Mounted",     section: "Install",  type: "boolean" },
+    { key: "led_mounted",        label: "LED Mounted",        section: "Install",  type: "boolean" },
+    { key: "fov_confirmed",      label: "FOV Confirmed",      section: "Install",  type: "boolean" },
+    { key: "notes",              label: "Notes",              section: "Install" },
   ], rows: [] },
   { id: "pd_camera_settings", name: "Camera Settings", type: "table", accessLevel: "open", columns: [
-    { key: "station",         label: "Station",          width: 80  },
-    { key: "camera_id",       label: "Camera ID",        width: 90  },
-    { key: "camera_model",    label: "Camera Model",     width: 130 },
-    { key: "serial_num",      label: "Serial #",         width: 110 },
-    { key: "lens",            label: "Lens",             width: 100 },
-    { key: "focal_length_mm", label: "Focal Length (mm)",width: 130 },
-    { key: "working_dist_mm", label: "Working Dist (mm)",width: 140 },
-    { key: "aperture",        label: "Aperture (f/)",    width: 100 },
-    { key: "gain",            label: "Gain",             width: 70  },
-    { key: "exposure_us",     label: "Exposure (μs)",    width: 110 },
-    { key: "fps",             label: "FPS",              width: 60  },
-    { key: "trigger_mode",    label: "Trigger Mode",     width: 110 },
-    { key: "resolution_w",    label: "Res. W",           width: 70  },
-    { key: "resolution_h",    label: "Res. H",           width: 70  },
-    { key: "lighting_type",   label: "Lighting Type",    width: 110 },
-    { key: "lighting_pos",    label: "Lighting Position",width: 130 },
-    { key: "verified_by",     label: "Verified By",      width: 110 },
-    { key: "verified_date",   label: "Verified Date",    width: 110, type: "date" },
+    { key: "station",         label: "Station",           section: "Station" },
+    { key: "camera_id",       label: "Camera ID",         section: "Camera" },
+    { key: "camera_model",    label: "Camera Model",      section: "Camera" },
+    { key: "serial_num",      label: "Serial #",          section: "Camera" },
+    { key: "lens",            label: "Lens",              section: "Camera" },
+    { key: "focal_length_mm", label: "Focal Length (mm)", section: "Optics" },
+    { key: "working_dist_mm", label: "Working Dist (mm)", section: "Optics" },
+    { key: "aperture",        label: "Aperture (f/)",     section: "Optics" },
+    { key: "gain",            label: "Gain",              section: "Capture" },
+    { key: "exposure_us",     label: "Exposure (μs)",     section: "Capture" },
+    { key: "fps",             label: "FPS",               section: "Capture" },
+    { key: "trigger_mode",    label: "Trigger Mode",      section: "Capture" },
+    { key: "resolution_w",    label: "Res. W",            section: "Capture" },
+    { key: "resolution_h",    label: "Res. H",            section: "Capture" },
+    { key: "lighting_type",   label: "Lighting Type",     section: "Lighting" },
+    { key: "lighting_pos",    label: "Lighting Position", section: "Lighting" },
+    { key: "verified_by",     label: "Verified By",       section: "Verification" },
+    { key: "verified_date",   label: "Verified Date",     section: "Verification", type: "date" },
   ], rows: [] },
   { id: "pd_led_settings", name: "LED Settings", type: "table", accessLevel: "open", columns: [
-    { key: "station",        label: "Station",        width: 80  },
-    { key: "line",           label: "Line",           width: 100 },
-    { key: "station_name",   label: "Station Name",   width: 140 },
-    { key: "fixture_name",   label: "Fixture Name",   width: 160 },
-    { key: "led_controller", label: "LED Controller", width: 110, type: "boolean" },
-    { key: "l1_brightness",  label: "L1 Brightness",  width: 100 },
-    { key: "l2_brightness",  label: "L2 Brightness",  width: 100 },
-    { key: "l3_brightness",  label: "L3 Brightness",  width: 100 },
-    { key: "l4_brightness",  label: "L4 Brightness",  width: 100 },
-    { key: "l1_type",        label: "L1 Type",        width: 100 },
-    { key: "l2_type",        label: "L2 Type",        width: 100 },
-    { key: "l3_type",        label: "L3 Type",        width: 100 },
-    { key: "l4_type",        label: "L4 Type",        width: 100 },
-    { key: "notes",          label: "Notes",          width: 200 },
+    { key: "station",        label: "Station",        section: "Station" },
+    { key: "line",           label: "Line",           section: "Station" },
+    { key: "station_name",   label: "Station Name",   section: "Station" },
+    { key: "fixture_name",   label: "Fixture Name",   section: "Station" },
+    { key: "led_controller", label: "LED Controller", section: "Controller", type: "boolean" },
+    { key: "l1_brightness",  label: "L1 Brightness",  section: "Light 1" },
+    { key: "l1_type",        label: "L1 Type",        section: "Light 1" },
+    { key: "l2_brightness",  label: "L2 Brightness",  section: "Light 2" },
+    { key: "l2_type",        label: "L2 Type",        section: "Light 2" },
+    { key: "l3_brightness",  label: "L3 Brightness",  section: "Light 3" },
+    { key: "l3_type",        label: "L3 Type",        section: "Light 3" },
+    { key: "l4_brightness",  label: "L4 Brightness",  section: "Light 4" },
+    { key: "l4_type",        label: "L4 Type",        section: "Light 4" },
+    { key: "notes",          label: "Notes",          section: "Notes" },
   ], rows: [] },
   { id: "pd_sop_plan", name: "SOP Plan", type: "table", accessLevel: "open", columns: [
     { key: "location",   label: "Location",     width: 100 },
@@ -295,6 +295,8 @@ const APP_TABLE_TEMPLATES = [
 ];
 
 const APP_REFERENCE_INFO_FOLDER = { id: "pd_reference_info", name: "Reference Info", type: "folder", accessLevel: "open", items: [] };
+// These 4 tabs use a transposed layout: attributes as rows, stations as columns (mirrors Excel format)
+const TRANSPOSED_TABLE_IDS = new Set(["pd_station_kits", "pd_in_factory_install", "pd_camera_settings", "pd_led_settings"]);
 const DEFAULT_COMMERCIAL = [
   { id: "comm_agreements", name: "Agreements", accessLevel: "restricted", items: [] },
   { id: "comm_pricing", name: "Pricing Details", accessLevel: "restricted", items: [] },
@@ -1487,6 +1489,225 @@ function TableSection({ cat, updateCats, canEdit, allCats = [] }) {
   );
 }
 
+/* ═══ TRANSPOSED TABLE SECTION — attributes as rows, stations as columns (mirrors Excel format) ═══ */
+/* Used for Station Kits, In-Factory Install, Camera Settings, LED Settings.                         */
+/* Data model unchanged: cat.rows = one object per station. Rendering is transposed.                 */
+function TransposedTableSection({ cat, updateCats, canEdit, allCats = [] }) {
+  const [editCell, setEditCell] = useState(null); // { rowId, key }
+  const [editVal, setEditVal] = useState("");
+  const [importStatus, setImportStatus] = useState("");
+  const fileInputRef = useRef(null);
+
+  const stations = cat.rows || []; // each "row" in data = one station column in UI
+  const cols = cat.columns || [];  // each "col" in template = one attribute row in UI
+
+  const updateCell = (rowId, key, value) =>
+    updateCats(cur => cur.map(c => c.id !== cat.id ? c : {
+      ...c, rows: (c.rows || []).map(r => r.id !== rowId ? r : { ...r, [key]: value })
+    }));
+
+  const addStation = () => {
+    const newRow = { id: genId() };
+    cols.forEach(col => { newRow[col.key] = col.type === "boolean" ? false : ""; });
+    updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, rows: [...(c.rows || []), newRow] }));
+  };
+
+  const delStation = (rowId) =>
+    updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, rows: (c.rows || []).filter(r => r.id !== rowId) }));
+
+  const startEdit = (rowId, key, val) => { setEditCell({ rowId, key }); setEditVal(val || ""); };
+  const commitEdit = () => {
+    if (!editCell) return;
+    updateCell(editCell.rowId, editCell.key, editVal);
+    setEditCell(null); setEditVal("");
+  };
+
+  // Same multi-tab import logic as TableSection
+  const handleImport = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const norm = s => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const wb = XLSX.read(ev.target.result, { type: "array" });
+        const tabLookup = {};
+        (allCats || []).filter(c => c.type === "table").forEach(c => { tabLookup[norm(c.name)] = c; });
+        const pivotVertical = (raw) => {
+          const numStations = (raw[0] || []).length - 1;
+          const pivoted = [];
+          for (let si = 1; si <= numStations; si++) {
+            const row = {};
+            for (let ri = 0; ri < raw.length; ri++) {
+              const attr = String(raw[ri]?.[0] || "").trim().replace(/:$/, "");
+              if (!attr) continue;
+              row[attr] = raw[ri][si] ?? "";
+            }
+            if (Object.values(row).some(v => v !== "" && v !== null && v !== undefined)) pivoted.push(row);
+          }
+          return pivoted;
+        };
+        const imports = [];
+        for (const sheetName of wb.SheetNames) {
+          const matchedCat = tabLookup[norm(sheetName)];
+          if (!matchedCat) continue;
+          const ws = wb.Sheets[sheetName];
+          const raw2d = XLSX.utils.sheet_to_json(ws, { header: 1 });
+          const isVertical = norm(String(raw2d[0]?.[0] || "")) === "station" && raw2d[0]?.[1];
+          const uploadedRows = isVertical ? pivotVertical(raw2d) : XLSX.utils.sheet_to_json(ws, { defval: "" });
+          if (uploadedRows.length === 0) continue;
+          const tCols = matchedCat.columns || [];
+          const colMap = {};
+          for (const h of Object.keys(uploadedRows[0])) {
+            const nh = norm(h);
+            const match = tCols.find(c => norm(c.label) === nh || norm(c.key) === nh);
+            if (match) colMap[h] = { key: match.key, type: match.type };
+          }
+          if (Object.keys(colMap).length === 0) continue;
+          const newRows = uploadedRows.map(r => {
+            const row = { id: genId() };
+            tCols.forEach(c => { row[c.key] = c.type === "boolean" ? false : ""; });
+            for (const [h, { key, type }] of Object.entries(colMap)) {
+              const v = r[h];
+              row[key] = type === "boolean" ? (v === true || v === 1 || String(v).toLowerCase() === "true") : String(v ?? "");
+            }
+            return row;
+          });
+          imports.push({ catId: matchedCat.id, catName: matchedCat.name, newRows, existing: (matchedCat.rows || []).length });
+        }
+        if (imports.length === 0) { setImportStatus("No matching sheets found."); setTimeout(() => setImportStatus(""), 6000); return; }
+        const hasExisting = imports.some(im => im.existing > 0);
+        if (hasExisting) {
+          const names = imports.filter(im => im.existing > 0).map(im => im.catName).join(", ");
+          if (!confirm(`Append rows to existing data in: ${names}. Proceed?`)) return;
+        }
+        updateCats(cur => {
+          let next = cur;
+          for (const { catId, newRows } of imports) {
+            next = next.map(c => c.id !== catId ? c : { ...c, rows: [...(c.rows || []), ...newRows] });
+          }
+          return next;
+        });
+        setImportStatus(`✓ Imported: ${imports.map(im => `${im.catName} (${im.newRows.length})`).join(", ")}`);
+        setTimeout(() => setImportStatus(""), 8000);
+      } catch (err) {
+        setImportStatus("Error reading file: " + err.message);
+        setTimeout(() => setImportStatus(""), 6000);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  // Build display rows: section headers interleaved with attribute rows
+  const displayRows = [];
+  let lastSection = null;
+  for (const col of cols) {
+    const sec = col.section || "";
+    if (sec !== lastSection) {
+      displayRows.push({ type: "header", label: sec });
+      lastSection = sec;
+    }
+    displayRows.push({ type: "attr", col });
+  }
+
+  const stationLabel = (row, i) => String(row.station_num || row.station || `S${i + 1}`);
+
+  const thBase = { padding: "8px 12px", fontWeight: 600, color: "#64748B", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap", borderBottom: "2px solid #E2E8F0", background: "#F8FAFC" };
+
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ overflowX: "auto", borderRadius: 8, border: "1px solid #E2E8F0" }}>
+        <table style={{ borderCollapse: "collapse", fontSize: 13, fontFamily: F, width: "max-content", minWidth: "100%" }}>
+          <thead>
+            <tr>
+              <th style={{ ...thBase, textAlign: "left", minWidth: 200, position: "sticky", left: 0, zIndex: 1 }}>Attribute</th>
+              {stations.map((row, i) => (
+                <th key={row.id} style={{ ...thBase, textAlign: "center", minWidth: 130 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+                    {stationLabel(row, i)}
+                    {canEdit && <button onClick={() => delStation(row.id)} style={{ ...S.btnDel, padding: "1px 4px", fontSize: 9, lineHeight: 1 }} title="Remove station">✕</button>}
+                  </div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          {stations.length === 0 ? (
+            <tbody>
+              <tr>
+                <td colSpan={2} style={{ padding: "20px 16px", color: "#CBD5E1", fontStyle: "italic", textAlign: "center", fontFamily: F }}>
+                  No stations yet.{canEdit ? " Click '+ Add Station' to begin." : ""}
+                </td>
+              </tr>
+            </tbody>
+          ) : (
+            <tbody>
+              {displayRows.map((item, idx) => {
+                if (item.type === "header") {
+                  if (!item.label) return null;
+                  return (
+                    <tr key={`sec_${idx}`} style={{ background: "#F1F5F9" }}>
+                      <td colSpan={stations.length + 1} style={{ padding: "5px 12px", fontWeight: 700, fontSize: 10, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.8, fontFamily: F }}>
+                        {item.label}
+                      </td>
+                    </tr>
+                  );
+                }
+                const col = item.col;
+                return (
+                  <tr key={col.key} style={{ borderBottom: "1px solid #F1F5F9" }}>
+                    <td style={{ padding: "6px 12px", color: "#1E293B", fontSize: 13, whiteSpace: "nowrap", background: "#FAFAFA", fontWeight: 500, position: "sticky", left: 0, borderRight: "1px solid #E2E8F0" }}>
+                      {col.label}
+                    </td>
+                    {stations.map(row => {
+                      const val = row[col.key];
+                      const isEditing = editCell?.rowId === row.id && editCell?.key === col.key;
+                      if (col.type === "boolean") {
+                        return (
+                          <td key={row.id} style={{ padding: "6px 12px", textAlign: "center", verticalAlign: "middle" }}>
+                            <input type="checkbox" checked={!!val} disabled={!canEdit}
+                              onChange={e => canEdit && updateCell(row.id, col.key, e.target.checked)}
+                              style={{ width: 16, height: 16, cursor: canEdit ? "pointer" : "default", accentColor: "#00C9A7" }} />
+                          </td>
+                        );
+                      }
+                      return (
+                        <td key={row.id} style={{ padding: "4px 8px", minWidth: 130, verticalAlign: "middle" }}
+                            onClick={() => canEdit && !isEditing && startEdit(row.id, col.key, val)}>
+                          {isEditing ? (
+                            <input type={col.type === "date" ? "date" : "text"} autoFocus
+                              value={editVal} onChange={e => setEditVal(e.target.value)}
+                              onBlur={commitEdit}
+                              onKeyDown={e => { if (e.key === "Enter") commitEdit(); if (e.key === "Escape") setEditCell(null); }}
+                              style={{ width: "100%", padding: "4px 6px", fontSize: 13, border: "1px solid #3B82F6", borderRadius: 4, outline: "none", fontFamily: F }} />
+                          ) : (
+                            <div style={{ padding: "4px 6px", minHeight: 24, borderRadius: 4, color: val ? "#0F172A" : "#CBD5E1", cursor: canEdit ? "pointer" : "default", fontStyle: val ? "normal" : "italic", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {col.type === "date" && val ? fmtDay(val) : (val || (canEdit ? "click to edit" : "—"))}
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          )}
+        </table>
+      </div>
+      {canEdit && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+          <button onClick={addStation} style={S.btnAddItem}>+ Add Station</button>
+          <button onClick={() => fileInputRef.current?.click()} style={{ ...S.btnAddItem, background: "#F0FDF4", color: "#15803D", border: "1px solid #BBF7D0" }} title="Supports .xlsx, .xls, .csv — export from Google Sheets first">📥 Import from Spreadsheet</button>
+          <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={handleImport} />
+          {importStatus && <span style={{ fontSize: 12, color: importStatus.startsWith("✓") ? "#15803D" : "#DC2626", fontFamily: F }}>{importStatus}</span>}
+        </div>
+      )}
+      {stations.length > 0 && <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F, marginTop: 4 }}>{stations.length} station{stations.length !== 1 ? "s" : ""}</div>}
+    </div>
+  );
+}
+
 /* ═══ FOLDER SECTION — renders a link/file folder category ═══ */
 function FolderSection({ cat, updateCats, user, canEdit, pid }) {
   const [addingItem, setAddingItem] = useState(false);
@@ -1595,7 +1816,9 @@ function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state,
           : activeCat.type === "program"
             ? <ProgramDetailsSection cat={activeCat} pid={pid} state={state} setState={setState} user={user} canEdit={canEdit} lang={lang} />
             : activeCat.type === "table"
-              ? <TableSection cat={activeCat} updateCats={updateCats} canEdit={canEdit} allCats={cats} />
+              ? TRANSPOSED_TABLE_IDS.has(activeCat.id)
+                ? <TransposedTableSection cat={activeCat} updateCats={updateCats} canEdit={canEdit} allCats={cats} />
+                : <TableSection cat={activeCat} updateCats={updateCats} canEdit={canEdit} allCats={cats} />
               : <FolderSection cat={activeCat} updateCats={updateCats} user={user} canEdit={canEdit} pid={pid} />
       )}
     </div>
