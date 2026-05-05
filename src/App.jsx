@@ -1924,15 +1924,167 @@ function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state,
   const activeCat = visibleCats.find(c => c.id === activeTab) || visibleCats[0];
   const isUserFolder = activeCat && !standardCatIds?.has(activeCat.id) && activeCat.type !== "checklist" && activeCat.type !== "program" && activeCat.type !== "table";
 
+  const [globalImportStatus, setGlobalImportStatus] = useState("");
+  const globalFileInputRef = useRef(null);
+
+  const handleGlobalImport = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const norm = s => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const wb = XLSX.read(ev.target.result, { type: "array" });
+        const tableCats = cats.filter(c => c.type === "table");
+        const tabLookup = {};
+        tableCats.forEach(c => { tabLookup[norm(c.name)] = c; });
+        // Fuzzy fallback: substring match when exact norm fails
+        const findCat = (sheetName) => {
+          const nsh = norm(sheetName);
+          return tabLookup[nsh] || tableCats.find(c => { const nc = norm(c.name); return nsh.includes(nc) || nc.includes(nsh); });
+        };
+        const pivotVertical = (raw) => {
+          const numStations = (raw[0] || []).length - 1;
+          const pivoted = [];
+          for (let si = 1; si <= numStations; si++) {
+            const row = {};
+            for (let ri = 0; ri < raw.length; ri++) {
+              const attr = String(raw[ri]?.[0] || "").trim().replace(/:$/, "");
+              if (!attr) continue;
+              row[attr] = raw[ri][si] ?? "";
+            }
+            if (Object.values(row).some(v => v !== "" && v !== null && v !== undefined)) pivoted.push(row);
+          }
+          return pivoted;
+        };
+        const imports = [];
+        for (const sheetName of wb.SheetNames) {
+          const matchedCat = findCat(sheetName);
+          if (!matchedCat) continue;
+          const ws = wb.Sheets[sheetName];
+          const raw2d = XLSX.utils.sheet_to_json(ws, { header: 1 });
+          const isVertical = norm(String(raw2d[0]?.[0] || "")) === "station" && raw2d[0]?.[1];
+          const uploadedRows = isVertical ? pivotVertical(raw2d) : XLSX.utils.sheet_to_json(ws, { defval: "" });
+          if (uploadedRows.length === 0) continue;
+          const tCols = matchedCat.columns || [];
+          const colMap = {};
+          for (const h of Object.keys(uploadedRows[0])) {
+            const nh = norm(h);
+            const match = tCols.find(c => norm(c.label) === nh || norm(c.key) === nh);
+            if (match) colMap[h] = { key: match.key, type: match.type };
+          }
+          if (Object.keys(colMap).length === 0) continue;
+          const newRows = uploadedRows.map(r => {
+            const row = { id: genId() };
+            tCols.forEach(c => { row[c.key] = c.type === "boolean" ? false : ""; });
+            for (const [h, { key, type }] of Object.entries(colMap)) {
+              const v = r[h];
+              row[key] = type === "boolean" ? (v === true || v === 1 || String(v).toLowerCase() === "true") : String(v ?? "");
+            }
+            return row;
+          });
+          imports.push({ catId: matchedCat.id, catName: matchedCat.name, newRows, existing: (matchedCat.rows || []).length });
+        }
+        if (imports.length === 0) {
+          setGlobalImportStatus("No matching sheets found. Sheet names must loosely match tab names (e.g. 'StationKits' → Station Kits).");
+          setTimeout(() => setGlobalImportStatus(""), 8000); return;
+        }
+        const hasExisting = imports.some(im => im.existing > 0);
+        if (hasExisting) {
+          const names = imports.filter(im => im.existing > 0).map(im => im.catName).join(", ");
+          if (!confirm(`This will append rows to tabs with existing data: ${names}. Proceed?`)) return;
+        }
+        updateCats(cur => {
+          let next = cur;
+          for (const { catId, newRows } of imports) {
+            next = next.map(c => c.id !== catId ? c : { ...c, rows: [...(c.rows || []), ...newRows] });
+          }
+          return next;
+        });
+        const summary = imports.map(im => `${im.catName} (${im.newRows.length} rows)`).join(", ");
+        setGlobalImportStatus(`✓ Imported: ${summary}`);
+        setTimeout(() => setGlobalImportStatus(""), 12000);
+      } catch (err) {
+        setGlobalImportStatus("Error reading file: " + err.message);
+        setTimeout(() => setGlobalImportStatus(""), 6000);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleGlobalExport = () => {
+    const tableCats = cats.filter(c => c.type === "table");
+    if (tableCats.length === 0) return;
+    const wb = XLSX.utils.book_new();
+    for (const cat of tableCats) {
+      const cols = cat.columns || [];
+      const rows = cat.rows || [];
+      const isTransposed = TRANSPOSED_TABLE_IDS.has(cat.id);
+      let ws;
+      if (isTransposed) {
+        // Vertical format: col attributes as rows, stations as columns
+        const stationLabels = rows.map((r, i) => String(r.station_num || r.station || `S${i + 1}`));
+        const aoa = [["Station", ...stationLabels]];
+        for (const col of cols) {
+          const rowData = [col.label, ...rows.map(r => {
+            const v = r[col.key];
+            return v === undefined || v === "" ? "" : v;
+          })];
+          aoa.push(rowData);
+        }
+        ws = XLSX.utils.aoa_to_sheet(aoa);
+      } else {
+        // Horizontal format: one row per data row
+        const headers = cols.map(c => c.label);
+        const jsonRows = rows.map(r => {
+          const obj = {};
+          cols.forEach(c => { obj[c.label] = r[c.key] ?? ""; });
+          return obj;
+        });
+        ws = jsonRows.length > 0
+          ? XLSX.utils.json_to_sheet(jsonRows, { header: headers })
+          : XLSX.utils.aoa_to_sheet([headers]);
+      }
+      // Sheet name max 31 chars (Excel limit)
+      XLSX.utils.book_append_sheet(wb, ws, cat.name.slice(0, 31));
+    }
+    const projectName = (project?.name || "project").replace(/[^a-z0-9]/gi, "_").slice(0, 30);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `${projectName}_${dateStr}.xlsx`);
+  };
+
   return (
     <div>
       {/* Active tab header with optional delete (user-created folders only) */}
       {activeCat && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F }}>{activeCat.name}</div>
-          {canEdit && isUserFolder && onDelFolder && (
-            <button style={{ ...S.btnDel, fontSize: 11, padding: "4px 10px" }} onClick={() => onDelFolder(activeCat.id)}>Delete Folder</button>
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {canEdit && (
+              <>
+                <button onClick={() => globalFileInputRef.current?.click()}
+                  style={{ ...S.btnAddItem, background: "#F0FDF4", color: "#15803D", border: "1px solid #BBF7D0", fontSize: 11 }}
+                  title="Import all matching sheets from an .xlsx file into their respective tabs">
+                  📥 Import from Spreadsheet
+                </button>
+                <input ref={globalFileInputRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={handleGlobalImport} />
+              </>
+            )}
+            <button onClick={handleGlobalExport}
+              style={{ ...S.btnAddItem, background: "#EFF6FF", color: "#1D4ED8", border: "1px solid #BFDBFE", fontSize: 11 }}
+              title="Export all table tabs to a single .xlsx file">
+              📤 Export to Spreadsheet
+            </button>
+            {canEdit && isUserFolder && onDelFolder && (
+              <button style={{ ...S.btnDel, fontSize: 11, padding: "4px 10px" }} onClick={() => onDelFolder(activeCat.id)}>Delete Folder</button>
+            )}
+          </div>
+        </div>
+      )}
+      {globalImportStatus && (
+        <div style={{ fontSize: 12, color: globalImportStatus.startsWith("✓") ? "#15803D" : "#DC2626", fontFamily: F, marginBottom: 8, padding: "6px 10px", background: globalImportStatus.startsWith("✓") ? "#F0FDF4" : "#FEF2F2", borderRadius: 6, border: `1px solid ${globalImportStatus.startsWith("✓") ? "#BBF7D0" : "#FECACA"}` }}>
+          {globalImportStatus}
         </div>
       )}
       {/* Active tab content */}
