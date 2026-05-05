@@ -596,16 +596,19 @@ const fmtDay = (iso) => { if (!iso) return "—"; return new Date(iso).toLocaleD
 const genId = () => `id_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 const getProjectDetails = (dd, pid) => {
   const cats = dd?.[pid]?.projectDetails || DEFAULT_PROJECT_DETAILS;
-  return cats.map(cat => {
+  const merged = cats.map(cat => {
     const tmpl = APP_TABLE_TEMPLATES.find(t => t.id === cat.id);
     if (!tmpl || cat.type !== "table") return cat;
-    // Additive merge: keep existing Firebase columns, append any new template columns not yet present
-    // (respects deletedCols so explicitly deleted columns don't come back)
+    // Additive column merge: keep Firebase cols, append new template cols not yet present
     const deletedKeys = new Set(cat.deletedCols || []);
     const existingKeys = new Set((cat.columns || []).map(c => c.key));
     const newCols = tmpl.columns.filter(c => !existingKeys.has(c.key) && !deletedKeys.has(c.key));
     return { ...cat, columns: [...(cat.columns || []), ...newCols] };
   });
+  // Also inject any template table cats missing from Firebase entirely (e.g. added after ensureProjectTemplate last ran)
+  const existingIds = new Set(merged.map(c => c.id));
+  const missingTmplCats = APP_TABLE_TEMPLATES.filter(t => !existingIds.has(t.id));
+  return [...merged, ...missingTmplCats];
 };
 const getCommercial = (dd, pid) => dd?.[pid]?.commercial || DEFAULT_COMMERCIAL;
 const isInst = (u) => u?.role === "admin" || (u?.email || "").endsWith("@instrumental.com");
