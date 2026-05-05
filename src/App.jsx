@@ -109,6 +109,18 @@ const SI_PIPELINE_STAGES = [
   { id: "sat",   label: "SAT",   color: "#059669" },
   { id: "live",  label: "Live",  color: "#10B981" },
 ];
+// Fixture-tracker timeline stages (separate from HubSpot pipeline above). 9 stages with spec colors; used only by the Timeline view.
+const SI_TIMELINE_STAGES = [
+  { id: "SIRD",       label: "SIRD",       color: "#6366F1" },
+  { id: "DFM",        label: "DFM",        color: "#A855F7" },
+  { id: "Quote",      label: "Quote",      color: "#EC4899" },
+  { id: "PO",         label: "PO",         color: "#F59E0B" },
+  { id: "Build",      label: "Build",      color: "#3B82F6" },
+  { id: "FAT",        label: "FAT",        color: "#10B981" },
+  { id: "InTransit",  label: "In Transit", color: "#F97316" },
+  { id: "SAT",        label: "SAT",        color: "#14B8A6" },
+  { id: "Live",       label: "Live",       color: "#22C55E" },
+];
 // HubSpot pipeline ID for "SI Partner Deployment". Mirrored in functions/index.js.
 const SI_PARTNER_PIPELINE_ID = "2206979797";
 // Backward-compat: map legacy 13-stage siStage keys to the new 8-stage keys (for projects that had old stage saved).
@@ -3837,12 +3849,16 @@ function ManageProjects({ state, setState }) {
 }
 
 /* ═══ ALL SI PROJECTS VIEW — v4.1.0 ═══ */
-function AllSIProjectsView({ user, state, setState, setView, setProject }) {
+function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFullscreen }) {
   const isSIAdminUser = user?.role === "si_admin" || user?.role === "admin" || user?.superAdmin;
   const SI_PIPELINE = "2206979797";
   const siProjects = (Array.isArray(state.projects) ? state.projects : []).filter(p => p.hubspotPipelineId === SI_PIPELINE);
   const tracker = state.siTracker || {};
   const [editing, setEditing] = useState(null); // { pid, field }
+  const [tab, setTab] = useState("tracker"); // "tracker" | "timeline"
+  const fullscreen = true;
+
+  useEffect(() => { setSiFullscreen?.(true); return () => setSiFullscreen?.(false); }, [setSiFullscreen]);
 
   const saveTracker = (pid, field, value) => {
     dbWrite(`appState/siTracker/${pid}/${field}`, value);
@@ -3868,42 +3884,79 @@ function AllSIProjectsView({ user, state, setState, setView, setProject }) {
 
   const allActiveProjects = (Array.isArray(state.projects) ? state.projects : []).filter(p => p.status !== "inactive");
 
+  const tabBtn = (id, label) => (
+    <button onClick={() => setTab(id)}
+      style={{
+        padding: "7px 16px",
+        border: `1px solid ${tab === id ? "#00C9A7" : "#E2E8F0"}`,
+        borderRadius: 8,
+        background: tab === id ? "#ECFDF5" : "#FFF",
+        color: tab === id ? "#00C9A7" : "#64748B",
+        fontFamily: F, fontSize: 13, fontWeight: 600, cursor: "pointer",
+      }}>
+      {label}
+    </button>
+  );
+
   return (
-    <div style={S.page}>
-      <h2 style={S.h2}>🤝 All SI Projects</h2>
-      <p style={S.sub}>{siProjects.length} project{siProjects.length !== 1 ? "s" : ""} in SI Partner Deployment pipeline</p>
-
-      {/* SI Kanban */}
-      <SIKanbanView projects={allActiveProjects} state={state} setState={setState} />
-
-      <div style={{ display: "flex", gap: 20, margin: "24px 0 16px", flexWrap: "wrap" }}>
-        <span style={{ fontFamily: F, fontSize: 14, color: "#64748B" }}>🔴 At-risk: <strong>{atRisk}</strong></span>
-        <span style={{ fontFamily: F, fontSize: 14, color: "#64748B" }}>🟡 Watch: <strong>{watch}</strong></span>
-        <span style={{ fontFamily: F, fontSize: 14, color: "#64748B" }}>🟢 Healthy: <strong>{healthy}</strong></span>
-      </div>
-      {siProjects.length === 0 ? (
-        <div style={S.empty}>No projects in SI Partner Deployment pipeline.</div>
-      ) : (
-        <div style={S.card}>
-          <div style={{ overflowX: "auto" }}>
-            <table style={S.table}>
-              <thead>
-                <tr>
-                  <th style={S.th}>Project</th>
-                  <th style={S.th}>HubSpot Stage</th>
-                  <th style={S.th}>SI Partner</th>
-                  <th style={S.th}>Risk</th>
-                  <th style={S.th}>Last Contact</th>
-                  <th style={S.th}>Next Milestone</th>
-                  <th style={S.th}>Notes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {siProjects.map(proj => <SIProjectRow key={proj.id} proj={proj} tracker={tracker} isSIAdminUser={isSIAdminUser} editing={editing} setEditing={setEditing} saveTracker={saveTracker} riskBadge={riskBadge} setProject={setProject} setView={setView} />)}
-              </tbody>
-            </table>
-          </div>
+    <div style={{ minHeight: "100vh", background: tab === "timeline" ? "#0F1117" : "#F8FAFC" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 24px", borderBottom: `1px solid ${tab === "timeline" ? "#2A2E3D" : "#E2E8F0"}`, background: tab === "timeline" ? "#0F1117" : "#FFF", position: "sticky", top: 0, zIndex: 10, flexWrap: "wrap" }}>
+        <button onClick={() => setView("projects_overview")}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px",
+            border: `1px solid ${tab === "timeline" ? "#2A2E3D" : "#E2E8F0"}`, borderRadius: 8,
+            background: tab === "timeline" ? "#171A23" : "#FFF",
+            color: tab === "timeline" ? "#E2E8F0" : "#64748B",
+            fontFamily: F, fontSize: 13, fontWeight: 600, cursor: "pointer",
+          }}>
+          ← Back to Overview
+        </button>
+        <h2 style={{ ...S.h2, fontSize: 20, margin: 0, color: tab === "timeline" ? "#E2E8F0" : "#0F172A" }}>🤝 All SI Projects</h2>
+        <div style={{ display: "flex", gap: 6 }}>
+          {tabBtn("tracker", "Tracker")}
+          {tabBtn("timeline", "Timeline")}
         </div>
+        <span style={{ fontFamily: F, fontSize: 13, color: tab === "timeline" ? "#94A3B8" : "#64748B", marginLeft: "auto" }}>
+          {siProjects.length} project{siProjects.length !== 1 ? "s" : ""} in SI Partner Deployment pipeline
+        </span>
+      </div>
+
+      {tab === "tracker" ? (
+        <div style={{ padding: "24px 32px 80px" }}>
+          <SIKanbanView projects={allActiveProjects} state={state} setState={setState} />
+
+          <div style={{ display: "flex", gap: 20, margin: "24px 0 16px", flexWrap: "wrap" }}>
+            <span style={{ fontFamily: F, fontSize: 14, color: "#64748B" }}>🔴 At-risk: <strong>{atRisk}</strong></span>
+            <span style={{ fontFamily: F, fontSize: 14, color: "#64748B" }}>🟡 Watch: <strong>{watch}</strong></span>
+            <span style={{ fontFamily: F, fontSize: 14, color: "#64748B" }}>🟢 Healthy: <strong>{healthy}</strong></span>
+          </div>
+          {siProjects.length === 0 ? (
+            <div style={S.empty}>No projects in SI Partner Deployment pipeline.</div>
+          ) : (
+            <div style={S.card}>
+              <div style={{ overflowX: "auto" }}>
+                <table style={S.table}>
+                  <thead>
+                    <tr>
+                      <th style={S.th}>Project</th>
+                      <th style={S.th}>HubSpot Stage</th>
+                      <th style={S.th}>SI Partner</th>
+                      <th style={S.th}>Risk</th>
+                      <th style={S.th}>Last Contact</th>
+                      <th style={S.th}>Next Milestone</th>
+                      <th style={S.th}>Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {siProjects.map(proj => <SIProjectRow key={proj.id} proj={proj} tracker={tracker} isSIAdminUser={isSIAdminUser} editing={editing} setEditing={setEditing} saveTracker={saveTracker} riskBadge={riskBadge} setProject={setProject} setView={setView} />)}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <SITimelineView projects={siProjects} tracker={tracker} setState={setState} isSIAdminUser={isSIAdminUser} fullscreen={fullscreen} />
       )}
     </div>
   );
@@ -4038,6 +4091,328 @@ function SIProjectRow({ proj, tracker, isSIAdminUser, editing, setEditing, saveT
   );
 }
 
+/* ═══ SI Timeline (Gantt) — Fixture Tracker spec §3.2 ═══ */
+function SITimelineView({ projects, tracker, setState, isSIAdminUser, fullscreen }) {
+  const today = new Date();
+  const ymStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const baseFrom = new Date(today.getFullYear(), today.getMonth() - 3, 1);
+  const baseTo   = new Date(today.getFullYear(), today.getMonth() + 9, 1);
+
+  const [fromYM, setFromYM] = useState(ymStr(baseFrom));
+  const [toYM, setToYM]     = useState(ymStr(baseTo));
+  const [showPlanned, setShowPlanned] = useState(true);
+  const [showActual,  setShowActual]  = useState(true);
+  const [expandedSIs, setExpandedSIs] = useState(() => new Set());
+  const [expandedProjects, setExpandedProjects] = useState(() => new Set());
+  const [tooltip, setTooltip] = useState(null);
+  const [editingPid, setEditingPid] = useState(null);
+
+  const chartRef = useRef(null);
+  const [chartWidth, setChartWidth] = useState(900);
+
+  useEffect(() => {
+    if (!chartRef.current) return;
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) setChartWidth(entry.contentRect.width);
+    });
+    ro.observe(chartRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  const months = useMemo(() => {
+    const [fy, fm] = fromYM.split("-").map(Number);
+    const [ty, tm] = toYM.split("-").map(Number);
+    const out = [];
+    let y = fy, m = fm;
+    if (!fy || !fm || !ty || !tm) return out;
+    while (y < ty || (y === ty && m <= tm)) {
+      out.push({ y, m });
+      m++;
+      if (m > 12) { m = 1; y++; }
+    }
+    return out;
+  }, [fromYM, toYM]);
+
+  const colWidth = months.length > 0 ? chartWidth / months.length : 0;
+
+  const dateToX = useCallback((dateStr) => {
+    if (!dateStr) return null;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return null;
+    const [fy, fm] = fromYM.split("-").map(Number);
+    const monthDiff = (d.getFullYear() - fy) * 12 + (d.getMonth() + 1 - fm);
+    const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    const dayFraction = (d.getDate() - 1) / daysInMonth;
+    return (monthDiff + dayFraction) * colWidth;
+  }, [fromYM, colWidth]);
+
+  const todayX = (() => {
+    const t = new Date();
+    const [fy, fm] = fromYM.split("-").map(Number);
+    if (!fy || !fm) return -1;
+    const monthDiff = (t.getFullYear() - fy) * 12 + (t.getMonth() + 1 - fm);
+    const daysInMonth = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
+    const dayFraction = (t.getDate() - 1) / daysInMonth;
+    return (monthDiff + dayFraction) * colWidth;
+  })();
+
+  const groups = useMemo(() => {
+    const g = {};
+    for (const p of projects) {
+      const si = tracker[p.id]?.siPartnerName || "Unassigned";
+      if (!g[si]) g[si] = [];
+      g[si].push(p);
+    }
+    return Object.keys(g).sort().map(name => ({ name, projects: g[name] }));
+  }, [projects, tracker]);
+
+  const saveStageDates = (pid, stageDates) => {
+    dbWrite(`appState/siTracker/${pid}/stageDates`, stageDates);
+    setState(prev => ({
+      ...prev,
+      siTracker: {
+        ...(prev.siTracker || {}),
+        [pid]: { ...(prev.siTracker?.[pid] || {}), stageDates },
+      },
+    }));
+  };
+
+  const toggleSI = (name) => setExpandedSIs(prev => { const n = new Set(prev); n.has(name) ? n.delete(name) : n.add(name); return n; });
+  const toggleProject = (pid) => setExpandedProjects(prev => { const n = new Set(prev); n.has(pid) ? n.delete(pid) : n.add(pid); return n; });
+
+  const ROW_H = 44;
+  const LABEL_W = 240;
+  const todayInRange = todayX >= 0 && todayX <= chartWidth;
+
+  // Dark palette scoped to this card (per design reference)
+  const D = {
+    bg: "#0F1117", panel: "#171A23", panelAlt: "#1C202C", border: "#2A2E3D",
+    text: "#E2E8F0", muted: "#94A3B8", mutedLow: "#64748B", accent: "#A78BFA", red: "#EF4444",
+  };
+
+  const tipText = (proj, stage, sd) => (
+    <span>
+      <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: stage.color, marginRight: 6 }} />
+      <strong>{proj.name} — {stage.label}</strong><br/>
+      Planned: {sd.plannedStart || "—"} → {sd.plannedEnd || "—"}<br/>
+      Actual: {sd.actualStart || "—"} → {sd.actualEnd || "—"}
+    </span>
+  );
+
+  const renderBars = (proj, stage, sd) => {
+    const out = [];
+    const barH = 16;
+    const planTop = (ROW_H - barH * 2 - 2) / 2;
+    const actTop  = planTop + barH + 2;
+    const onMove = (e) => setTooltip({ x: e.clientX, y: e.clientY, content: tipText(proj, stage, sd) });
+    const onLeave = () => setTooltip(null);
+    const labelStyle = { display: "flex", alignItems: "center", padding: "0 6px", fontFamily: F, fontSize: 10, fontWeight: 700, color: "#FFF", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "clip", letterSpacing: 0.3 };
+
+    if (showPlanned && sd.plannedStart && sd.plannedEnd) {
+      const x1 = dateToX(sd.plannedStart), x2 = dateToX(sd.plannedEnd);
+      if (x1 != null && x2 != null && x2 > x1) {
+        out.push(
+          <div key={stage.id + "-p"} onMouseEnter={onMove} onMouseMove={onMove} onMouseLeave={onLeave}
+            style={{ position: "absolute", left: x1, top: planTop, width: x2 - x1, height: barH, background: stage.color, opacity: 0.45, borderRadius: 3, ...labelStyle }}>
+            {stage.label}
+          </div>
+        );
+      }
+    }
+    if (showActual && sd.actualStart && sd.actualEnd) {
+      const x1 = dateToX(sd.actualStart), x2 = dateToX(sd.actualEnd);
+      if (x1 != null && x2 != null && x2 > x1) {
+        out.push(
+          <div key={stage.id + "-a"} onMouseEnter={onMove} onMouseMove={onMove} onMouseLeave={onLeave}
+            style={{ position: "absolute", left: x1, top: actTop, width: x2 - x1, height: barH, background: stage.color, opacity: 1, borderRadius: 3, ...labelStyle }}>
+            {stage.label}
+          </div>
+        );
+      }
+    }
+    return out;
+  };
+
+  const inputDark  = { fontFamily: F, fontSize: 13, padding: "6px 10px", border: `1px solid ${D.border}`, borderRadius: 6, background: D.panelAlt, color: D.text, outline: "none" };
+  const pillBtn = (active) => ({ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px", border: `1px solid ${active ? D.accent : D.border}`, borderRadius: 999, background: active ? "rgba(167,139,250,.12)" : D.panelAlt, color: active ? D.text : D.muted, fontFamily: F, fontSize: 12, fontWeight: 600, cursor: "pointer" });
+  const sampleBar = (opacity) => ({ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 70, height: 14, borderRadius: 3, background: D.accent, opacity, color: "#FFF", fontFamily: F, fontSize: 10, fontWeight: 700 });
+
+  return (
+    <div style={{ background: D.bg, color: D.text, borderRadius: fullscreen ? 0 : 14, padding: 0, border: fullscreen ? "none" : `1px solid ${D.border}`, overflow: "hidden", minHeight: fullscreen ? "calc(100vh - 60px)" : undefined }}>
+      {/* Legend */}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 18px", borderBottom: `1px solid ${D.border}`, fontFamily: F, fontSize: 12 }}>
+        <span style={{ fontWeight: 700, color: D.text }}>Legend:</span>
+        <span style={sampleBar(0.45)}>Planned</span>
+        <span style={{ color: D.muted }}>Planned</span>
+        <span style={sampleBar(1)}>Actual</span>
+        <span style={{ color: D.muted }}>Actual</span>
+      </div>
+
+      {/* Toolbar */}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 18px", borderBottom: `1px solid ${D.border}`, flexWrap: "wrap" }}>
+        <span style={{ fontFamily: F, fontSize: 12, color: D.muted, flex: 1 }}>Click [+] to expand a SI group.</span>
+        <button onClick={() => setShowPlanned(v => !v)} style={pillBtn(showPlanned)}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: showPlanned ? D.accent : D.mutedLow }} /> Planned
+        </button>
+        <button onClick={() => setShowActual(v => !v)} style={pillBtn(showActual)}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: showActual ? D.accent : D.mutedLow }} /> Actual
+        </button>
+        <span style={{ fontFamily: F, fontSize: 12, color: D.muted, marginLeft: 8 }}>From:</span>
+        <input type="month" value={fromYM} onChange={e => setFromYM(e.target.value)} style={inputDark} />
+        <span style={{ fontFamily: F, fontSize: 12, color: D.muted }}>To:</span>
+        <input type="month" value={toYM} onChange={e => setToYM(e.target.value)} style={inputDark} />
+      </div>
+
+      {projects.length === 0 ? (
+        <div style={{ padding: 36, textAlign: "center", color: D.muted, fontSize: 14, fontFamily: F }}>No SI projects to display.</div>
+      ) : (
+        <div>
+          {/* Month header */}
+          <div style={{ display: "flex", borderBottom: `1px solid ${D.border}`, background: D.panel }}>
+            <div style={{ width: LABEL_W, flexShrink: 0, padding: "10px 16px", fontFamily: F, fontSize: 11, fontWeight: 700, color: D.muted, textTransform: "uppercase", letterSpacing: 1 }}>Fixture / SI</div>
+            <div ref={chartRef} style={{ flex: 1, position: "relative", height: 36 }}>
+              {months.map((m, i) => (
+                <div key={i} style={{ position: "absolute", left: i * colWidth, top: 0, width: colWidth, textAlign: "center", borderLeft: i > 0 ? `1px solid ${D.border}` : "none", fontFamily: F, fontSize: 11, color: D.muted, padding: "10px 0", fontWeight: 600 }}>
+                  {new Date(m.y, m.m - 1, 1).toLocaleDateString("en-US", { month: "short", year: "numeric" })}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Body */}
+          <div style={{ position: "relative", background: D.bg }}>
+            {groups.map(group => {
+              const isExp = expandedSIs.has(group.name);
+              return (
+                <div key={group.name}>
+                  <div style={{ display: "flex", background: D.panel, borderBottom: `1px solid ${D.border}`, height: ROW_H, cursor: "pointer" }} onClick={() => toggleSI(group.name)}>
+                    <div style={{ width: LABEL_W, flexShrink: 0, padding: "10px 16px", fontFamily: F, fontSize: 13, fontWeight: 700, color: D.text, display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ width: 16, height: 16, display: "inline-flex", alignItems: "center", justifyContent: "center", border: `1px solid ${D.border}`, borderRadius: 3, fontSize: 11, color: D.muted, lineHeight: 1 }}>{isExp ? "−" : "+"}</span>
+                      {group.name} <span style={{ color: D.muted, fontWeight: 400 }}>({group.projects.length})</span>
+                    </div>
+                    <div style={{ flex: 1, position: "relative" }}>
+                      {todayInRange && <div style={{ position: "absolute", left: todayX, top: 0, bottom: 0, width: 2, background: D.red }} />}
+                    </div>
+                  </div>
+
+                  {isExp && group.projects.map(proj => {
+                    const stageDates = tracker[proj.id]?.stageDates || {};
+                    const projExp = expandedProjects.has(proj.id);
+                    return (
+                      <div key={proj.id}>
+                        <div style={{ display: "flex", borderBottom: `1px solid ${D.border}`, height: ROW_H, background: D.bg }}>
+                          <div style={{ width: LABEL_W, flexShrink: 0, padding: "10px 16px 10px 32px", fontFamily: F, fontSize: 13, color: D.text, display: "flex", alignItems: "center", gap: 8 }}>
+                            <span onClick={() => toggleProject(proj.id)} style={{ width: 14, height: 14, display: "inline-flex", alignItems: "center", justifyContent: "center", border: `1px solid ${D.border}`, borderRadius: 3, fontSize: 10, color: D.muted, cursor: "pointer", lineHeight: 1 }}>{projExp ? "−" : "+"}</span>
+                            <span style={{ width: 8, height: 8, borderRadius: "50%", background: D.accent, flexShrink: 0 }} />
+                            <span onClick={() => toggleProject(proj.id)} style={{ cursor: "pointer", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: D.text }}>{proj.name}</span>
+                            {isSIAdminUser && (
+                              <button onClick={() => setEditingPid(proj.id)}
+                                style={{ padding: "3px 9px", fontSize: 11, fontFamily: F, fontWeight: 600, border: `1px solid ${D.border}`, borderRadius: 6, background: D.panelAlt, color: D.muted, cursor: "pointer" }}>
+                                Detailed View
+                              </button>
+                            )}
+                          </div>
+                          <div style={{ flex: 1, position: "relative" }}>
+                            {todayInRange && <div style={{ position: "absolute", left: todayX, top: 0, bottom: 0, width: 2, background: D.red, zIndex: 2 }} />}
+                            {SI_TIMELINE_STAGES.map(stage => renderBars(proj, stage, stageDates[stage.id] || {}))}
+                          </div>
+                        </div>
+
+                        {projExp && SI_TIMELINE_STAGES.map(stage => {
+                          const sd = stageDates[stage.id] || {};
+                          return (
+                            <div key={stage.id} style={{ display: "flex", borderBottom: `1px solid ${D.border}`, height: ROW_H, background: D.bg }}>
+                              <div style={{ width: LABEL_W, flexShrink: 0, padding: "10px 16px 10px 56px", fontFamily: F, fontSize: 12, color: D.muted, display: "flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ width: 8, height: 8, background: stage.color, borderRadius: 2 }} />
+                                {stage.label}
+                              </div>
+                              <div style={{ flex: 1, position: "relative" }}>
+                                {todayInRange && <div style={{ position: "absolute", left: todayX, top: 0, bottom: 0, width: 2, background: D.red, zIndex: 2 }} />}
+                                {renderBars(proj, stage, sd)}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+            {todayInRange && (
+              <div style={{ position: "absolute", left: LABEL_W + todayX + 4, top: -16, fontFamily: F, fontSize: 10, color: D.red, fontWeight: 700, pointerEvents: "none", background: D.panel, padding: "1px 5px", borderRadius: 3 }}>Today</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {tooltip && (
+        <div style={{ position: "fixed", left: tooltip.x + 12, top: tooltip.y + 12, background: "#0F172A", color: "#F1F5F9", padding: "8px 12px", borderRadius: 8, fontFamily: F, fontSize: 12, pointerEvents: "none", zIndex: 1000, boxShadow: "0 4px 12px rgba(0,0,0,.2)", lineHeight: 1.5 }}>
+          {tooltip.content}
+        </div>
+      )}
+
+      {editingPid && (
+        <SIStageDatesModal
+          project={projects.find(p => p.id === editingPid)}
+          stageDates={tracker[editingPid]?.stageDates || {}}
+          onSave={(sd) => { saveStageDates(editingPid, sd); setEditingPid(null); }}
+          onClose={() => setEditingPid(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function SIStageDatesModal({ project, stageDates, onSave, onClose }) {
+  const [draft, setDraft] = useState(() => ({ ...stageDates }));
+  const update = (stageId, field, value) => setDraft(prev => ({ ...prev, [stageId]: { ...(prev[stageId] || {}), [field]: value } }));
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#FFF", borderRadius: 16, padding: 28, maxWidth: 760, width: "100%", maxHeight: "90vh", overflow: "auto" }}>
+        <h3 style={{ ...S.h3, marginBottom: 4 }}>Edit Stage Dates</h3>
+        <p style={{ ...S.sub, margin: "0 0 20px" }}>{project?.name}</p>
+        <table style={S.table}>
+          <thead>
+            <tr>
+              <th style={S.th}>Stage</th>
+              <th style={S.th}>Planned Start</th>
+              <th style={S.th}>Planned End</th>
+              <th style={S.th}>Actual Start</th>
+              <th style={S.th}>Actual End</th>
+            </tr>
+          </thead>
+          <tbody>
+            {SI_TIMELINE_STAGES.map(stage => {
+              const sd = draft[stage.id] || {};
+              return (
+                <tr key={stage.id}>
+                  <td style={S.td}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ width: 10, height: 10, background: stage.color, borderRadius: 2 }} />
+                      {stage.label}
+                    </span>
+                  </td>
+                  {["plannedStart", "plannedEnd", "actualStart", "actualEnd"].map(field => (
+                    <td key={field} style={S.td}>
+                      <input type="date" value={sd[field] || ""} onChange={(e) => update(stage.id, field, e.target.value)}
+                        style={{ fontFamily: F, fontSize: 13, padding: "4px 7px", border: "1px solid #CBD5E1", borderRadius: 6 }} />
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20 }}>
+          <button onClick={onClose} style={S.btnEdit}>Cancel</button>
+          <button onClick={() => onSave(draft)} style={{ ...S.btnEdit, background: "#00C9A7", color: "#FFF", borderColor: "#00C9A7" }}>Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ═══ APP — Auth, DB, routing ═══ */
 export default function App() {
   const [authChecked, setAuthChecked] = useState(false);
@@ -4056,6 +4431,7 @@ export default function App() {
   const [pendingUsers, setPendingUsers] = useState([]);
   const [lang, setLang] = useState("en");
   const [detailTabKey, setDetailTabKey] = useState(0);
+  const [siFullscreen, setSiFullscreen] = useState(false);
 
   // 1. Auth state + session timeout
   useEffect(() => {
@@ -4301,7 +4677,7 @@ export default function App() {
   const renderMain = () => {
     if (view === "chat") return <ChatView user={user} />;
     if (view === "projects_overview" && admin) return <ProjectsOverviewView state={state} setState={save} user={user} lang={lang} />;
-    if (view === "all_si_projects" && admin) return <AllSIProjectsView user={user} state={state} setState={save} setView={setView} setProject={setProject} />;
+    if (view === "all_si_projects" && admin) return <AllSIProjectsView user={user} state={state} setState={save} setView={setView} setProject={setProject} setSiFullscreen={setSiFullscreen} />;
     if (!hasProjectAccess && view !== "projects_overview" && view !== "admin" && view !== "manage" && view !== "chat" && view !== "all_si_projects") {
       return <div style={S.page}><div style={S.empty}>Access denied — you are not assigned to this project.</div></div>;
     }
@@ -4338,10 +4714,12 @@ export default function App() {
           ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
           ::selection { background: #00C9A733; }
         `}</style>
-        <Sidebar view={view} setView={setView} user={user} project={project} projects={userProjects} setProject={setProject} onLogout={onLogout} lang={lang} setLang={setLang} hasCommercialAccess={hasCommAccess} cats={projectCats} setDetailTab={(tabId) => { if (project?.id) localStorage.setItem(`dp_proj_tab_${project.id}`, tabId); setDetailTabKey(k => k + 1); setView("project_details"); }} />
+        {!siFullscreen && (
+          <Sidebar view={view} setView={setView} user={user} project={project} projects={userProjects} setProject={setProject} onLogout={onLogout} lang={lang} setLang={setLang} hasCommercialAccess={hasCommAccess} cats={projectCats} setDetailTab={(tabId) => { if (project?.id) localStorage.setItem(`dp_proj_tab_${project.id}`, tabId); setDetailTabKey(k => k + 1); setView("project_details"); }} />
+        )}
         <main style={{ ...S.main, padding: 0 }}>
-          <GlobalBotBar user={user} />
-          <div style={{ padding: "32px 40px" }}>{renderMain()}</div>
+          {!siFullscreen && <GlobalBotBar user={user} />}
+          <div style={{ padding: siFullscreen ? 0 : "32px 40px" }}>{renderMain()}</div>
         </main>
         <ProjectBotChat project={project} user={user} />
       </div>
