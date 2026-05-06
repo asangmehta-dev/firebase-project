@@ -3376,6 +3376,9 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
   // v4.1.0 — HubSpot property schema diagnostic
   const [schemaLoading, setSchemaLoading] = useState(false);
   const [schemaResult, setSchemaResult] = useState(null);
+  // v4.2.4 — List all HubSpot object types
+  const [allSchemasLoading, setAllSchemasLoading] = useState(false);
+  const [allSchemasResult, setAllSchemasResult] = useState(null);
   // v4.1.0 — Maintenance tab
   const [maintRun, setMaintRun] = useState(null);
   const [maintAlerts, setMaintAlerts] = useState({});
@@ -3657,6 +3660,50 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+          </div>
+
+          {/* v4.2.4 — List all HubSpot object types */}
+          <div style={{ ...S.card, marginBottom: 16, borderLeft: "3px solid #0EA5E9" }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 6 }}>🗂️ All HubSpot Object Types</div>
+            <p style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginBottom: 12 }}>
+              Lists every custom object schema in this portal — useful for discovering object type IDs and property names (e.g. Shipments, Inventory) before wiring up new sync features.
+            </p>
+            <button
+              style={{ ...S.btnMain, width: "auto", padding: "8px 16px", marginTop: 0, opacity: allSchemasLoading ? .5 : 1, background: "#0EA5E9", fontSize: 13 }}
+              disabled={allSchemasLoading}
+              onClick={async () => {
+                setAllSchemasLoading(true); setAllSchemasResult(null);
+                try {
+                  const fn = httpsCallable(functions, "listHubspotSchemas");
+                  const res = await fn({});
+                  setAllSchemasResult(res.data);
+                } catch(e) { setAllSchemasResult({ error: e.message || String(e) }); }
+                setAllSchemasLoading(false);
+              }}
+            >
+              {allSchemasLoading ? "Fetching…" : "List All Object Types"}
+            </button>
+            {allSchemasResult?.error && <p style={{ fontSize: 13, color: "#DC2626", marginTop: 10, fontFamily: F }}>Error: {allSchemasResult.error}</p>}
+            {Array.isArray(allSchemasResult) && (
+              <div style={{ marginTop: 12, maxHeight: 400, overflowY: "auto", fontSize: 12, fontFamily: "monospace", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 6, padding: 10 }}>
+                {allSchemasResult.map(s => (
+                  <div key={s.objectTypeId} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: "1px solid #E2E8F0" }}>
+                    <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 2 }}>
+                      {s.label} <span style={{ color: "#0EA5E9" }}>({s.name})</span> — <span style={{ color: "#64748B" }}>type: {s.objectTypeId}</span>
+                    </div>
+                    <div style={{ color: "#475569", paddingLeft: 8 }}>
+                      {s.properties.map(p => (
+                        <div key={p.name} style={{ display: "flex", gap: 12, padding: "1px 0" }}>
+                          <span style={{ color: "#6366F1", minWidth: 240 }}>{p.name}</span>
+                          <span style={{ color: "#64748B", minWidth: 80 }}>{p.type}</span>
+                          <span style={{ color: "#94A3B8" }}>{p.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>

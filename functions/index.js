@@ -628,25 +628,32 @@ async function runSync(token, commit, syncCtx) {
       console.warn("[stationKits] station kit sync failed (non-fatal):", stErr.message);
     }
 
-    await db.ref("hubspotPreview").set(null);
-    await db.ref("hubspotSync/status").set({ state: "success", ...summary });
-    await writeSyncLogEntry({
-      startedAt, finishedAt: new Date().toISOString(), durationMs: Date.now() - startedAtMs,
-      type: ctx.type, mode: "apply",
-      actorUid: ctx.actorUid || "system", actorEmail: ctx.actorEmail || null,
-      state: "success", total: incoming.length, newCount: newProjects.length, updatedCount: updatedProjects.length, error: null,
-    });
+    // Secondary ops — each wrapped so a log/status failure never masks a successful sync
+    try { await db.ref("hubspotPreview").set(null); } catch (e) { console.warn("preview clear:", e.message); }
+    try {
+      await db.ref("hubspotSync/status").set({ state: "success", ...summary });
+    } catch (e) { console.warn("status write:", e.message); }
+    try {
+      await writeSyncLogEntry({
+        startedAt, finishedAt: new Date().toISOString(), durationMs: Date.now() - startedAtMs,
+        type: ctx.type, mode: "apply",
+        actorUid: ctx.actorUid || "system", actorEmail: ctx.actorEmail || null,
+        state: "success", total: incoming.length, newCount: newProjects.length, updatedCount: updatedProjects.length, error: null,
+      });
+    } catch (e) { console.warn("log write:", e.message); }
 
     return { success: true, preview: false, ...summary };
   } catch (err) {
     console.error("HubSpot sync error:", err);
-    await db.ref("hubspotSync/status").set({ state: "error", error: err.message, startedAt });
-    await writeSyncLogEntry({
-      startedAt, finishedAt: new Date().toISOString(), durationMs: Date.now() - startedAtMs,
-      type: (syncCtx || {}).type || "scheduled", mode: commit ? "apply" : "preview",
-      actorUid: (syncCtx || {}).actorUid || "system", actorEmail: (syncCtx || {}).actorEmail || null,
-      state: "error", total: 0, newCount: 0, updatedCount: 0, error: String(err.message || err).slice(0, 500),
-    });
+    try { await db.ref("hubspotSync/status").set({ state: "error", error: err.message, startedAt }); } catch (e) { console.warn("error status write:", e.message); }
+    try {
+      await writeSyncLogEntry({
+        startedAt, finishedAt: new Date().toISOString(), durationMs: Date.now() - startedAtMs,
+        type: (syncCtx || {}).type || "scheduled", mode: commit ? "apply" : "preview",
+        actorUid: (syncCtx || {}).actorUid || "system", actorEmail: (syncCtx || {}).actorEmail || null,
+        state: "error", total: 0, newCount: 0, updatedCount: 0, error: String(err.message || err).slice(0, 500),
+      });
+    } catch (e) { console.warn("error log write:", e.message); }
     throw err;
   }
 }
@@ -1090,6 +1097,26 @@ exports.getHubspotCustomObjectSchema = functions.https.onCall(async (_data, cont
     fieldType: p.fieldType,
   }));
   return { objectType: OBJECT_TYPE, totalProperties: props.length, properties: props };
+});
+
+// Diagnostic: lists all custom object schemas in the HubSpot portal (admin-only).
+// Use to discover object type IDs and property names for objects not yet integrated.
+exports.listHubspotSchemas = functions.https.onCall(async (_data, context) => {
+  await requireAdmin(context);
+  const token = process.env.HUBSPOT_TOKEN;
+  if (!token) throw new functions.https.HttpsError("internal", "HUBSPOT_TOKEN not configured.");
+  const res = await fetch(
+    "https://api.hubapi.com/crm/v3/schemas",
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!res.ok) throw new functions.https.HttpsError("internal", `HubSpot schemas error: ${res.status} ${await res.text()}`);
+  const body = await res.json();
+  return (body.results || []).map(s => ({
+    name: s.name,
+    label: s.labels?.singular || s.name,
+    objectTypeId: s.objectTypeId,
+    properties: (s.properties || []).map(p => ({ name: p.name, label: p.label, type: p.type })),
+  }));
 });
 
 // Writeback: patches one or more date fields on the HubSpot custom object record.
