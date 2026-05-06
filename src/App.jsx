@@ -1455,6 +1455,12 @@ function TableSection({ cat, updateCats, canEdit, allCats = [] }) {
 
   return (
     <div style={{ marginBottom: 8 }}>
+      {canEdit && rows.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+          <button onClick={addRow} style={S.btnAddItem}>+ Add Row</button>
+          <button onClick={() => fileInputRef.current?.click()} style={{ ...S.btnAddItem, background: "#F0FDF4", color: "#15803D", border: "1px solid #BBF7D0" }} title="Supports .xlsx, .xls, .csv — export from Google Sheets first">📥 Import from Spreadsheet</button>
+        </div>
+      )}
       <div style={{ overflowX: "auto", borderRadius: 8, border: "1px solid #E2E8F0" }}>
         <table style={{ borderCollapse: "collapse", fontSize: 13, fontFamily: F, width: "max-content", minWidth: "100%" }}>
           <thead>
@@ -1683,6 +1689,12 @@ function TransposedTableSection({ cat, updateCats, canEdit, allCats = [] }) {
 
   return (
     <div style={{ marginBottom: 8 }}>
+      {canEdit && stations.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+          <button onClick={addStation} style={S.btnAddItem}>+ Add Station</button>
+          <button onClick={() => fileInputRef.current?.click()} style={{ ...S.btnAddItem, background: "#F0FDF4", color: "#15803D", border: "1px solid #BBF7D0" }} title="Supports .xlsx, .xls, .csv — export from Google Sheets first">📥 Import from Spreadsheet</button>
+        </div>
+      )}
       <div style={{ overflowX: "auto", borderRadius: 8, border: "1px solid #E2E8F0" }}>
         <table style={{ borderCollapse: "collapse", fontSize: 13, fontFamily: F, width: "max-content", minWidth: "100%" }}>
           <thead>
@@ -2186,7 +2198,14 @@ function ChecklistSection({ cat, cats, updateCats, user, canEdit, pid, lang }) {
   const updateMilestone = (msId, updater) => {
     updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, milestones: (c.milestones||[]).map(ms => ms.id !== msId ? ms : updater(ms)) }));
   };
-  const toggleCheck = (msId, ckId) => updateMilestone(msId, ms => ({ ...ms, checklist: (ms.checklist || []).map(ck => ck.id !== ckId ? ck : { ...ck, checked: !ck.checked }) }));
+  const toggleCheck = (msId, ckId) => updateMilestone(msId, ms => ({
+    ...ms,
+    checklist: (ms.checklist || []).map(ck => {
+      if (ck.id !== ckId) return ck;
+      const nowChecked = !ck.checked;
+      return { ...ck, checked: nowChecked, checkedAt: nowChecked ? new Date().toISOString() : null, checkedBy: nowChecked ? (user.name || user.email || "Unknown") : null };
+    }),
+  }));
   const startEdit = (msId, ckId, label) => { setEditingTask({ msId, ckId }); setEditLabel(label); };
   const commitEdit = () => {
     if (!editingTask) return;
@@ -2286,17 +2305,22 @@ function ChecklistSection({ cat, cats, updateCats, user, canEdit, pid, lang }) {
                             style={{ flex: 1, padding: "4px 8px", fontSize: 13, fontFamily: F, border: "1px solid #C7D2FE", borderRadius: 6, outline: "none" }}
                           />
                         ) : (
-                          <span
-                            style={{
-                              flex: 1, fontSize: 13, fontFamily: F, padding: "8px 0",
-                              color: ck.na ? "#94A3B8" : "#1E293B",
-                              textDecoration: ck.na ? "line-through" : "none",
-                              cursor: canCheck ? "text" : "default",
-                              userSelect: "none",
-                            }}
-                            onDoubleClick={() => { if (canCheck) startEdit(ms.id, ck.id, ck.label); }}
-                            title={canCheck ? "Double-click to edit" : undefined}
-                          >{ck.label}</span>
+                          <div style={{ flex: 1 }}>
+                            <span
+                              style={{
+                                fontSize: 13, fontFamily: F, padding: "8px 0", display: "block",
+                                color: ck.na ? "#94A3B8" : "#1E293B",
+                                textDecoration: ck.na ? "line-through" : "none",
+                                cursor: canCheck ? "text" : "default",
+                                userSelect: "none",
+                              }}
+                              onDoubleClick={() => { if (canCheck) startEdit(ms.id, ck.id, ck.label); }}
+                              title={canCheck ? "Double-click to edit" : undefined}
+                            >{ck.label}</span>
+                            {ck.checked && ck.checkedBy && (
+                              <div style={{ fontSize: 11, color: "#00C9A7", fontFamily: F, paddingBottom: 4 }}>✓ {ck.checkedBy} · {fmtDate(ck.checkedAt)}</div>
+                            )}
+                          </div>
                         )}
                         {ck.ownership && !isEditing && <span style={{ fontSize: 11, color: "#94A3B8", flexShrink: 0 }}>· {ck.ownership}</span>}
                         {canCheck && (
@@ -3126,6 +3150,7 @@ function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
   const allProjects = useMemo(() => projectsToArray(state.projects), [state.projects]);
   const activeProjects = useMemo(() => allProjects.filter(p => p.status === "active"), [allProjects]);
   const [selPipeline, setSelPipeline] = useState(PIPELINE_LIST[0]?.id || "");
+  const [pipelineViewMode, setPipelineViewMode] = useState("list");
   const [demandExpanded, setDemandExpanded] = useState(null); // which hw row is expanded to show per-project
   const canEditDemand = isInst(user); // Any Instrumental user can add custom demand types
 
@@ -3321,9 +3346,18 @@ function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
           ))}
         </div>
 
-        {/* ═══ STAGE BREAKDOWN (existing, active-only) ═══ */}
-        <h3 style={{ ...S.h3, marginBottom: 6 }}>Projects by Stage (Active Only)</h3>
-        <p style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginBottom: 14 }}>Detailed project list per pipeline stage. Select a pipeline to drill in.</p>
+        {/* ═══ STAGE BREAKDOWN — list or kanban view ═══ */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, flexWrap: "wrap", gap: 8 }}>
+          <h3 style={{ ...S.h3, margin: 0 }}>Projects by Stage (Active Only)</h3>
+          <div style={{ display: "flex", gap: 4 }}>
+            {["list", "kanban"].map(mode => (
+              <button key={mode} onClick={() => setPipelineViewMode(mode)} style={{ padding: "5px 14px", borderRadius: 8, border: `1.5px solid ${pipelineViewMode === mode ? "#00C9A7" : "#E2E8F0"}`, background: pipelineViewMode === mode ? "#ECFDF5" : "#FFF", color: pipelineViewMode === mode ? "#059669" : "#64748B", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: F }}>
+                {mode === "list" ? "☰ List" : "⬛ Kanban"}
+              </button>
+            ))}
+          </div>
+        </div>
+        <p style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginBottom: 14 }}>Active project count per pipeline stage. Select a pipeline to drill in.</p>
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {PIPELINE_LIST.map(pl => {
@@ -3339,6 +3373,35 @@ function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
         </div>
         {pipelineProjects.length === 0 ? (
           <div style={S.empty}>No active projects in this pipeline.</div>
+        ) : pipelineViewMode === "kanban" ? (
+          (() => {
+            const KANBAN_COLORS = ["#00C9A7", "#3B82F6", "#8B5CF6", "#F59E0B", "#10B981", "#EC4899", "#F97316", "#64748B"];
+            return (
+              <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 12 }}>
+                {activeStages.map(([stageId, stage], idx) => {
+                  const projs = byStage[stageId] || [];
+                  const color = KANBAN_COLORS[idx % KANBAN_COLORS.length];
+                  return (
+                    <div key={stageId} style={{ minWidth: 200, maxWidth: 240, flex: "0 0 auto", background: "#F8FAFC", borderRadius: 12, border: "2px solid #F1F5F9", padding: 12 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: 4, background: color, flexShrink: 0 }} />
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#0F172A", fontFamily: F, lineHeight: 1.3 }}>{stage.label}</div>
+                        <Chip small color={`${color}22`} fg={color}>{projs.length}</Chip>
+                      </div>
+                      {projs.map(proj => (
+                        <div key={proj.id} style={{ background: "#FFF", borderRadius: 8, padding: "8px 10px", marginBottom: 6, border: "1px solid #E2E8F0", fontSize: 12, fontFamily: F }}>
+                          <div style={{ fontWeight: 600, color: "#0F172A", marginBottom: 2 }}>{proj.customer || proj.name}<HubspotLinkIcon project={proj} /></div>
+                          {proj.name !== proj.customer && <div style={{ color: "#94A3B8", fontSize: 11, marginBottom: 2 }}>{proj.name}</div>}
+                          <div style={{ color: "#94A3B8", fontSize: 11 }}>{proj.stations || 0} stn{proj.isSI ? " · SI" : ""}</div>
+                        </div>
+                      ))}
+                      {projs.length === 0 && <div style={{ fontSize: 11, color: "#CBD5E1", fontStyle: "italic", fontFamily: F, padding: "8px 0" }}>No projects</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()
         ) : (
           activeStages.map(([stageId, stage]) => {
             const projs = byStage[stageId] || [];
