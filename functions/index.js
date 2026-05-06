@@ -9,6 +9,7 @@ const db = admin.database();
 /* ═══ CONFIG ═══ */
 const OBJECT_TYPE = "2-39524389";
 const SHIPMENT_OBJECT_TYPE = "2-39524475"; // Shipments custom object; primaryDisplayProperty = shipment_tracking_number (INxxx)
+const STATION_KIT_TYPE_ID = "2-39260531";  // Station Kits custom object — used to traverse Kit→Shipment associations
 const PROPERTIES = [
   "project_name", "hs_object_id", "app_project_id__c", "number_of_stations__c",
   "company_codename", "hs_pipeline", "hs_pipeline_stage",
@@ -453,47 +454,64 @@ function buildHardwareFromKits(projectKitIds, kitProps, componentsByKit, existin
   return [...hsItems, ...manualItems];
 }
 
-// Batch-read project → shipment associations, then fetch shipment_tracking_number (INxxx) for each.
-// Returns { byProject: { projectHsId: ["INxxx", ...] } } — only includes shipments with a non-empty tracking number.
-async function fetchShipmentsForProjects(token, projectHsIds) {
-  if (!projectHsIds.length) return { byProject: {} };
+// Traverse Kit→Shipment associations to find INxxx numbers per project.
+// HubSpot has no direct Project→Shipment association; shipments are linked to Station Kits.
+// kitsByProject: { projectHsId: [kitId, ...] } — from fetchKitsForProjects, already available.
+// Returns { projectHsId: ["INxxx", ...] } for projects that have shipments.
+// All fetch calls use a 15s AbortController timeout to prevent silent hangs from blocking the sync.
+async function fetchShipmentsViaKits(token, kitsByProject) {
+  const allKitIds = [...new Set(Object.values(kitsByProject).flat())];
+  if (!allKitIds.length) return {};
   const BATCH = 100;
-  const byProjectId = {}; // projectHsId → [shipmentObjectId, ...]
+  const FETCH_TIMEOUT_MS = 15000;
 
-  for (let i = 0; i < projectHsIds.length; i += BATCH) {
-    const batch = projectHsIds.slice(i, i + BATCH);
+  // Step 1: Kit → Shipment associations
+  const kitToShipmentIds = {}; // kitId → [shipmentObjectId, ...]
+  for (let i = 0; i < allKitIds.length; i += BATCH) {
+    const batch = allKitIds.slice(i, i + BATCH);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
     try {
       const res = await fetch(
-        `https://api.hubapi.com/crm/v4/associations/${OBJECT_TYPE}/${SHIPMENT_OBJECT_TYPE}/batch/read`,
+        `https://api.hubapi.com/crm/v4/associations/${STATION_KIT_TYPE_ID}/${SHIPMENT_OBJECT_TYPE}/batch/read`,
         {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({ inputs: batch.map(id => ({ id: String(id) })) }),
+          signal: ctrl.signal,
         }
       );
-      if (!res.ok) { console.warn("[shipments] project→shipment assoc batch error:", res.status); continue; }
+      clearTimeout(timer);
+      if (!res.ok) { console.warn("[shipments] kit→shipment assoc batch error:", res.status); continue; }
       const data = await res.json();
       for (const result of (data.results || [])) {
-        byProjectId[String(result.from.id)] = (result.to || []).map(t => String(t.toObjectId));
+        const ids = (result.to || []).map(t => String(t.toObjectId));
+        if (ids.length) kitToShipmentIds[String(result.from.id)] = ids;
       }
     } catch (e) {
-      console.warn("[shipments] project→shipment assoc batch failed:", e.message);
+      clearTimeout(timer);
+      console.warn("[shipments] kit→shipment assoc batch failed:", e.name === "AbortError" ? "timeout (15s)" : e.message);
     }
   }
 
-  const allShipmentIds = [...new Set(Object.values(byProjectId).flat())];
-  if (!allShipmentIds.length) return { byProject: {} };
+  const allShipmentIds = [...new Set(Object.values(kitToShipmentIds).flat())];
+  if (!allShipmentIds.length) return {};
+  console.log(`[shipments] found ${allShipmentIds.length} unique shipment IDs across all kits`);
 
-  // Fetch shipment_tracking_number (the INxxx field) for each shipment
+  // Step 2: Fetch shipment_tracking_number (INxxx) for each shipment
   const shipmentNums = {}; // shipmentObjectId → "INxxx"
   for (let i = 0; i < allShipmentIds.length; i += BATCH) {
     const batch = allShipmentIds.slice(i, i + BATCH);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
     try {
       const res = await fetch(`https://api.hubapi.com/crm/v3/objects/${SHIPMENT_OBJECT_TYPE}/batch/read`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ inputs: batch.map(id => ({ id })), properties: ["shipment_tracking_number"] }),
+        signal: ctrl.signal,
       });
+      clearTimeout(timer);
       if (!res.ok) continue;
       const data = await res.json();
       for (const obj of (data.results || [])) {
@@ -501,17 +519,20 @@ async function fetchShipmentsForProjects(token, projectHsIds) {
         if (num) shipmentNums[obj.id] = num;
       }
     } catch (e) {
-      console.warn("[shipments] shipment props batch failed:", e.message);
+      clearTimeout(timer);
+      console.warn("[shipments] shipment props batch failed:", e.name === "AbortError" ? "timeout (15s)" : e.message);
     }
   }
 
-  // Build byProject: projectHsId → ["INxxx", ...]
+  // Step 3: Map project → unique INxxx numbers via kit intermediaries
   const byProject = {};
-  for (const [projectHsId, shipmentIds] of Object.entries(byProjectId)) {
-    const nums = shipmentIds.map(sid => shipmentNums[sid]).filter(Boolean);
+  for (const [projectHsId, kitIds] of Object.entries(kitsByProject)) {
+    const nums = [...new Set(
+      kitIds.flatMap(kid => (kitToShipmentIds[kid] || []).map(sid => shipmentNums[sid])).filter(Boolean)
+    )];
     if (nums.length) byProject[projectHsId] = nums;
   }
-  return { byProject };
+  return byProject;
 }
 
 /* v4.0.3: Firebase Realtime DB rejects `undefined` in .set() values — recursively swap to null. */
@@ -657,9 +678,9 @@ async function runSync(token, commit, syncCtx) {
       await db.ref("appState/docData").set(sanitizeForFirebase(docData));
     }
 
-    // Shared docData snapshot — populated inside the station kits block and reused by the shipments block.
-    // Avoids a redundant full docData read (305+ projects) for shipments.
+    // Shared state hoisted so the shipments block can reuse data already fetched by station kits.
     let latestDocData = {};
+    let kitsByProject = {}; // projectHsId → [kitId, ...]; populated by station kits, consumed by shipments
 
     // Station Kits sync — batch-read project→kit associations via v4 API, populate _hardwareTracking.
     // Wrapped in try/catch: station kit failures must not abort the main project sync.
@@ -669,6 +690,7 @@ async function runSync(token, commit, syncCtx) {
         const { kitTypeId, componentTypeId } = stationTypes;
         const projectHsIds = incoming.map(p => p.hubspotId).filter(Boolean);
         const { byProject, kitProps } = await fetchKitsForProjects(token, projectHsIds, kitTypeId);
+        kitsByProject = byProject; // save for shipments traversal
         const allKitIds = [...new Set(Object.values(byProject).flat())];
         console.log(`[stationKits] projects with kits: ${Object.keys(byProject).length}, total unique kit IDs: ${allKitIds.length}`);
         const componentsByKit = await fetchComponentsForKits(token, kitTypeId, componentTypeId, allKitIds);
@@ -694,11 +716,11 @@ async function runSync(token, commit, syncCtx) {
       console.warn("[stationKits] station kit sync failed (non-fatal):", stErr.message);
     }
 
-    // Shipment Details sync — populate pd_shipment_details rows with INxxx numbers from HubSpot Shipments object.
-    // Only adds item_num; never overwrites existing rows that already have the same INxxx; leaves all other columns blank.
+    // Shipment Details sync — traverse Kit→Shipment associations (the actual HubSpot link) to find INxxx numbers.
+    // Shipments are linked to Station Kits, not directly to Projects — so we reuse kitsByProject from above.
+    // Only adds item_num; never overwrites existing rows; leaves all other columns blank for manual fill-in.
     try {
-      const projectHsIds = incoming.map(p => p.hubspotId).filter(Boolean);
-      const { byProject: shipmentsByProject } = await fetchShipmentsForProjects(token, projectHsIds);
+      const shipmentsByProject = await fetchShipmentsViaKits(token, kitsByProject);
       const projectsWithShipments = Object.keys(shipmentsByProject);
       console.log(`[shipments] projects with shipments: ${projectsWithShipments.length}`);
 

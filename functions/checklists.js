@@ -376,7 +376,7 @@ const SI_CHECKLIST = {
 /* ═══ v4.1.0 TABLE TEMPLATES & DEPLOYMENT REQUIREMENT DOCS ═══ */
 
 const storageBaseUrl = (filename) =>
-  `https://firebasestorage.googleapis.com/v0/b/deploymentportal-5ec3a.appspot.com/o/${encodeURIComponent("templates/deployment_requirements/" + filename)}?alt=media`;
+  `https://firebasestorage.googleapis.com/v0/b/deploymentportal-5ec3a.firebasestorage.app/o/${encodeURIComponent("templates/deployment_requirements/" + filename)}?alt=media`;
 
 const DEPLOYMENT_REQUIREMENTS_FOLDER = {
   id: "pd_deployment_requirements",
