@@ -657,6 +657,10 @@ async function runSync(token, commit, syncCtx) {
       await db.ref("appState/docData").set(sanitizeForFirebase(docData));
     }
 
+    // Shared docData snapshot — populated inside the station kits block and reused by the shipments block.
+    // Avoids a redundant full docData read (305+ projects) for shipments.
+    let latestDocData = {};
+
     // Station Kits sync — batch-read project→kit associations via v4 API, populate _hardwareTracking.
     // Wrapped in try/catch: station kit failures must not abort the main project sync.
     try {
@@ -672,7 +676,7 @@ async function runSync(token, commit, syncCtx) {
         console.log(`[stationKits] total components found: ${totalComponents}`, totalComponents > 0 ? "sample:" : "(none)", totalComponents > 0 ? JSON.stringify(Object.values(componentsByKit)[0]?.[0]) : "");
 
         const hwUpdates = {};
-        const latestDocData = (await db.ref("appState/docData").once("value")).val() || {};
+        latestDocData = (await db.ref("appState/docData").once("value")).val() || {};
         for (const [projectHsId, kitIds] of Object.entries(byProject)) {
           const pid = `hs_${projectHsId}`;
           const existingHW = latestDocData[pid]?._hardwareTracking;
@@ -699,7 +703,11 @@ async function runSync(token, commit, syncCtx) {
       console.log(`[shipments] projects with shipments: ${projectsWithShipments.length}`);
 
       if (projectsWithShipments.length > 0) {
-        const latestForShipments = (await db.ref("appState/docData").once("value")).val() || {};
+        // Reuse latestDocData from station kits block (same data; station kits only writes _hardwareTracking).
+        // Fall back to a fresh read if station kits threw before populating it.
+        const latestForShipments = Object.keys(latestDocData).length > 0
+          ? latestDocData
+          : (await db.ref("appState/docData").once("value")).val() || {};
         const shipmentUpdates = {};
 
         for (const projectHsId of projectsWithShipments) {
@@ -858,7 +866,7 @@ async function applyChecklistToProject(projectId, isSI) {
 }
 
 /* ═══ SCHEDULED SYNC — Tue & Fri 9am PDT (16:00 UTC) ═══ */
-exports.scheduledHubspotSync = functions.runWith({ memory: "512MB" }).pubsub
+exports.scheduledHubspotSync = functions.runWith({ memory: "8GB", timeoutSeconds: 300 }).pubsub
   .schedule("0 16 * * 2,5")
   .timeZone("America/Los_Angeles")
   .onRun(async () => {
@@ -868,7 +876,7 @@ exports.scheduledHubspotSync = functions.runWith({ memory: "512MB" }).pubsub
   });
 
 /* ═══ MANUAL SYNC — callable from Admin Panel ═══ */
-exports.manualHubspotSync = functions.runWith({ memory: "512MB" }).https.onCall(async (data, context) => {
+exports.manualHubspotSync = functions.runWith({ memory: "8GB", timeoutSeconds: 300 }).https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
 
   const userSnap = await db.ref(`users/${context.auth.uid}`).once("value");
