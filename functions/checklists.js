@@ -375,8 +375,7 @@ const SI_CHECKLIST = {
 
 /* ═══ v4.1.0 TABLE TEMPLATES & DEPLOYMENT REQUIREMENT DOCS ═══ */
 
-const storageBaseUrl = (filename) =>
-  `https://firebasestorage.googleapis.com/v0/b/deploymentportal-5ec3a.firebasestorage.app/o/${encodeURIComponent("templates/deployment_requirements/" + filename)}?alt=media`;
+const storageDocPath = (filename) => `templates/deployment_requirements/${filename}`;
 
 const DEPLOYMENT_REQUIREMENTS_FOLDER = {
   id: "pd_deployment_requirements",
@@ -384,16 +383,16 @@ const DEPLOYMENT_REQUIREMENTS_FOLDER = {
   type: "folder",
   accessLevel: "open",
   items: [
-    { id: "doc_self_deploy",       name: "Self-Deploy Main Installation Document",        url: storageBaseUrl("3 Self-Deploy_Main Installation Document - 250708.pdf"),           source: "system", type: "pdf" },
-    { id: "doc_internet_req",      name: "Instrumental Internet Requirements",              url: storageBaseUrl("Instrumental Internet Requirements.pdf"),                         source: "system", type: "pdf" },
-    { id: "doc_space_req",         name: "Instrumental Station Space Requirements",         url: storageBaseUrl("Instrumental Station Space Requirements.pdf"),                    source: "system", type: "pdf" },
-    { id: "doc_mes_questionnaire", name: "MES Questionnaire v4",                            url: storageBaseUrl("MES Questionnaire v4.pdf"),                                       source: "system", type: "pdf" },
-    { id: "doc_network_req",       name: "OPS-00003 — Instrumental Network Requirements",   url: storageBaseUrl("OPS-00003_Rev 00_Instrumental Network Requirements.pdf"),         source: "system", type: "pdf" },
-    { id: "doc_facility_req",      name: "OPS-00004 — Facility Requirements Intro Slides",  url: storageBaseUrl("OPS-00004_Rev01_INST - Facility Requirements Intro Slides.pptx"),  source: "system", type: "pptx" },
-    { id: "doc_pwr_apac",          name: "Site Readiness Spec — APAC 2026.1",               url: storageBaseUrl("PWR-APAC-2026.1_SiteReadinessSpec.pdf"),                          source: "system", type: "pdf" },
-    { id: "doc_pwr_eu",            name: "Site Readiness Spec — EU 2026.1",                 url: storageBaseUrl("PWR-EU-2026.1_SiteReadinessSpec.pdf"),                            source: "system", type: "pdf" },
-    { id: "doc_pwr_us",            name: "Site Readiness Spec — US 2026.2",                 url: storageBaseUrl("PWR-US-2026.2_SiteReadinessSpec.pdf"),                            source: "system", type: "pdf" },
-    { id: "doc_power_slides",      name: "Regional Power Requirements Slides",               url: storageBaseUrl("Regional_Power_Slides.pptx"),                                     source: "system", type: "pptx" },
+    { id: "doc_self_deploy",       name: "Self-Deploy Main Installation Document",        storagePath: storageDocPath("3 Self-Deploy_Main Installation Document - 250708.pdf"),           source: "system", type: "pdf" },
+    { id: "doc_internet_req",      name: "Instrumental Internet Requirements",              storagePath: storageDocPath("Instrumental Internet Requirements.pdf"),                         source: "system", type: "pdf" },
+    { id: "doc_space_req",         name: "Instrumental Station Space Requirements",         storagePath: storageDocPath("Instrumental Station Space Requirements.pdf"),                    source: "system", type: "pdf" },
+    { id: "doc_mes_questionnaire", name: "MES Questionnaire v4",                            storagePath: storageDocPath("MES Questionnaire v4.pdf"),                                       source: "system", type: "pdf" },
+    { id: "doc_network_req",       name: "OPS-00003 — Instrumental Network Requirements",   storagePath: storageDocPath("OPS-00003_Rev 00_Instrumental Network Requirements.pdf"),         source: "system", type: "pdf" },
+    { id: "doc_facility_req",      name: "OPS-00004 — Facility Requirements Intro Slides",  storagePath: storageDocPath("OPS-00004_Rev01_INST - Facility Requirements Intro Slides.pptx"),  source: "system", type: "pptx" },
+    { id: "doc_pwr_apac",          name: "Site Readiness Spec — APAC 2026.1",               storagePath: storageDocPath("PWR-APAC-2026.1_SiteReadinessSpec.pdf"),                          source: "system", type: "pdf" },
+    { id: "doc_pwr_eu",            name: "Site Readiness Spec — EU 2026.1",                 storagePath: storageDocPath("PWR-EU-2026.1_SiteReadinessSpec.pdf"),                            source: "system", type: "pdf" },
+    { id: "doc_pwr_us",            name: "Site Readiness Spec — US 2026.2",                 storagePath: storageDocPath("PWR-US-2026.2_SiteReadinessSpec.pdf"),                            source: "system", type: "pdf" },
+    { id: "doc_power_slides",      name: "Regional Power Requirements Slides",               storagePath: storageDocPath("Regional_Power_Slides.pptx"),                                     source: "system", type: "pptx" },
   ],
 };
 

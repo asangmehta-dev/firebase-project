@@ -3,6 +3,20 @@ const admin = require("firebase-admin");
 const fetch = require("node-fetch");
 const { buildProjectDetails, buildCommercialFolders, TABLE_TEMPLATES, DEPLOYMENT_REQUIREMENTS_FOLDER } = require("./checklists");
 
+const FETCH_TIMEOUT_MS = 15000;
+async function fetchWithTimeout(url, options = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { ...options, signal: ctrl.signal });
+    clearTimeout(timer);
+    return res;
+  } catch (e) {
+    clearTimeout(timer);
+    throw e;
+  }
+}
+
 admin.initializeApp();
 const db = admin.database();
 
@@ -232,7 +246,7 @@ async function fetchAllHubspotObjects(token) {
   let after = null;
   do {
     const url = `https://api.hubapi.com/crm/v3/objects/${OBJECT_TYPE}?limit=100&properties=${PROPERTIES}${after ? `&after=${after}` : ""}`;
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetchWithTimeout(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) throw new Error(`HubSpot API error: ${res.status} ${await res.text()}`);
     const data = await res.json();
     all.push(...(data.results || []));
@@ -260,7 +274,7 @@ function normalizeCategory(cat) {
 // Returns null if not found — callers handle gracefully.
 async function discoverStationObjectTypes(token) {
   try {
-    const res = await fetch("https://api.hubapi.com/crm/v3/schemas", {
+    const res = await fetchWithTimeout("https://api.hubapi.com/crm/v3/schemas", {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return null;
@@ -280,7 +294,7 @@ async function discoverStationObjectTypes(token) {
     // Always fetch the kit schema to discover actual associated component types
     if (kitTypeId) {
       try {
-        const schemaRes = await fetch(`https://api.hubapi.com/crm/v3/schemas/${kitTypeId}`, {
+        const schemaRes = await fetchWithTimeout(`https://api.hubapi.com/crm/v3/schemas/${kitTypeId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (schemaRes.ok) {
@@ -322,7 +336,7 @@ async function fetchKitsForProjects(token, projectHsIds, kitTypeId) {
   for (let i = 0; i < projectHsIds.length; i += BATCH) {
     const batch = projectHsIds.slice(i, i + BATCH);
     try {
-      const res = await fetch(
+      const res = await fetchWithTimeout(
         `https://api.hubapi.com/crm/v4/associations/${OBJECT_TYPE}/${kitTypeId}/batch/read`,
         {
           method: "POST",
@@ -345,7 +359,7 @@ async function fetchKitsForProjects(token, projectHsIds, kitTypeId) {
   for (let i = 0; i < allKitIds.length; i += BATCH) {
     const batch = allKitIds.slice(i, i + BATCH);
     try {
-      const res = await fetch(`https://api.hubapi.com/crm/v3/objects/${kitTypeId}/batch/read`, {
+      const res = await fetchWithTimeout(`https://api.hubapi.com/crm/v3/objects/${kitTypeId}/batch/read`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -376,7 +390,7 @@ async function fetchComponentsForKits(token, kitTypeId, componentTypeId, kitIds)
   for (let i = 0; i < kitIds.length; i += BATCH) {
     const batch = kitIds.slice(i, i + BATCH);
     try {
-      const res = await fetch(`https://api.hubapi.com/crm/v4/associations/${kitTypeId}/${componentTypeId}/batch/read`, {
+      const res = await fetchWithTimeout(`https://api.hubapi.com/crm/v4/associations/${kitTypeId}/${componentTypeId}/batch/read`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ inputs: batch.map(id => ({ id })) }),
@@ -402,7 +416,7 @@ async function fetchComponentsForKits(token, kitTypeId, componentTypeId, kitIds)
   for (let i = 0; i < allCompIds.length; i += BATCH) {
     const batch = allCompIds.slice(i, i + BATCH);
     try {
-      const res = await fetch(`https://api.hubapi.com/crm/v3/objects/${componentTypeId}/batch/read`, {
+      const res = await fetchWithTimeout(`https://api.hubapi.com/crm/v3/objects/${componentTypeId}/batch/read`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ inputs: batch.map(id => ({ id })), properties: ["asset_sn", "name", "category_master", "category", "model_number", "model"] }),
@@ -463,25 +477,20 @@ async function fetchShipmentsViaKits(token, kitsByProject) {
   const allKitIds = [...new Set(Object.values(kitsByProject).flat())];
   if (!allKitIds.length) return {};
   const BATCH = 100;
-  const FETCH_TIMEOUT_MS = 15000;
 
   // Step 1: Kit → Shipment associations
   const kitToShipmentIds = {}; // kitId → [shipmentObjectId, ...]
   for (let i = 0; i < allKitIds.length; i += BATCH) {
     const batch = allKitIds.slice(i, i + BATCH);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
     try {
-      const res = await fetch(
+      const res = await fetchWithTimeout(
         `https://api.hubapi.com/crm/v4/associations/${STATION_KIT_TYPE_ID}/${SHIPMENT_OBJECT_TYPE}/batch/read`,
         {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({ inputs: batch.map(id => ({ id: String(id) })) }),
-          signal: ctrl.signal,
         }
       );
-      clearTimeout(timer);
       if (!res.ok) { console.warn("[shipments] kit→shipment assoc batch error:", res.status); continue; }
       const data = await res.json();
       for (const result of (data.results || [])) {
@@ -489,7 +498,6 @@ async function fetchShipmentsViaKits(token, kitsByProject) {
         if (ids.length) kitToShipmentIds[String(result.from.id)] = ids;
       }
     } catch (e) {
-      clearTimeout(timer);
       console.warn("[shipments] kit→shipment assoc batch failed:", e.name === "AbortError" ? "timeout (15s)" : e.message);
     }
   }
@@ -502,16 +510,12 @@ async function fetchShipmentsViaKits(token, kitsByProject) {
   const shipmentNums = {}; // shipmentObjectId → "INxxx"
   for (let i = 0; i < allShipmentIds.length; i += BATCH) {
     const batch = allShipmentIds.slice(i, i + BATCH);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
     try {
-      const res = await fetch(`https://api.hubapi.com/crm/v3/objects/${SHIPMENT_OBJECT_TYPE}/batch/read`, {
+      const res = await fetchWithTimeout(`https://api.hubapi.com/crm/v3/objects/${SHIPMENT_OBJECT_TYPE}/batch/read`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ inputs: batch.map(id => ({ id })), properties: ["shipment_tracking_number"] }),
-        signal: ctrl.signal,
       });
-      clearTimeout(timer);
       if (!res.ok) continue;
       const data = await res.json();
       for (const obj of (data.results || [])) {
@@ -519,7 +523,6 @@ async function fetchShipmentsViaKits(token, kitsByProject) {
         if (num) shipmentNums[obj.id] = num;
       }
     } catch (e) {
-      clearTimeout(timer);
       console.warn("[shipments] shipment props batch failed:", e.name === "AbortError" ? "timeout (15s)" : e.message);
     }
   }

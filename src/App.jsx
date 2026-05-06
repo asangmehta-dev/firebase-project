@@ -145,25 +145,6 @@ const DEFAULT_PROJECT_DETAILS = [
   { id: "pd_cad", name: "CAD & Drawings", accessLevel: "open", items: [] },
 ];
 
-/* v4.1.0: Table templates + deployment requirement docs — mirror functions/checklists.js. Used for lazy migration + rendering. */
-const storageBaseUrl = (filename) =>
-  `https://firebasestorage.googleapis.com/v0/b/deploymentportal-5ec3a.appspot.com/o/${encodeURIComponent("templates/deployment_requirements/" + filename)}?alt=media`;
-
-const APP_DEPLOY_REQ_FOLDER = {
-  id: "pd_deployment_requirements", name: "Hardware & MES Deployment Requirements", type: "folder", accessLevel: "open",
-  items: [
-    { id: "doc_self_deploy",       name: "Self-Deploy Main Installation Document",        url: storageBaseUrl("3 Self-Deploy_Main Installation Document - 250708.pdf"),           source: "system", type: "pdf" },
-    { id: "doc_internet_req",      name: "Instrumental Internet Requirements",              url: storageBaseUrl("Instrumental Internet Requirements.pdf"),                         source: "system", type: "pdf" },
-    { id: "doc_space_req",         name: "Instrumental Station Space Requirements",         url: storageBaseUrl("Instrumental Station Space Requirements.pdf"),                    source: "system", type: "pdf" },
-    { id: "doc_mes_questionnaire", name: "MES Questionnaire v4",                            url: storageBaseUrl("MES Questionnaire v4.pdf"),                                       source: "system", type: "pdf" },
-    { id: "doc_network_req",       name: "OPS-00003 — Instrumental Network Requirements",   url: storageBaseUrl("OPS-00003_Rev 00_Instrumental Network Requirements.pdf"),         source: "system", type: "pdf" },
-    { id: "doc_facility_req",      name: "OPS-00004 — Facility Requirements Intro Slides",  url: storageBaseUrl("OPS-00004_Rev01_INST - Facility Requirements Intro Slides.pptx"),  source: "system", type: "pptx" },
-    { id: "doc_pwr_apac",          name: "Site Readiness Spec — APAC 2026.1",               url: storageBaseUrl("PWR-APAC-2026.1_SiteReadinessSpec.pdf"),                          source: "system", type: "pdf" },
-    { id: "doc_pwr_eu",            name: "Site Readiness Spec — EU 2026.1",                 url: storageBaseUrl("PWR-EU-2026.1_SiteReadinessSpec.pdf"),                            source: "system", type: "pdf" },
-    { id: "doc_pwr_us",            name: "Site Readiness Spec — US 2026.2",                 url: storageBaseUrl("PWR-US-2026.2_SiteReadinessSpec.pdf"),                            source: "system", type: "pdf" },
-    { id: "doc_power_slides",      name: "Regional Power Requirements Slides",               url: storageBaseUrl("Regional_Power_Slides.pptx"),                                     source: "system", type: "pptx" },
-  ],
-};
 
 const APP_TABLE_TEMPLATES = [
   { id: "pd_station_kits", name: "Station Kits", type: "table", accessLevel: "open", columns: [
@@ -1843,6 +1824,23 @@ function FolderSection({ cat, updateCats, user, canEdit, pid }) {
   const [itemForm, setItemForm] = useState({ name: "", url: "", type: "link", lang: "en" });
   const items = (cat.items || []).filter(i => !i._userDeleted);
 
+  // System docs are stored with storagePath (new) or ?alt=media URL (legacy).
+  // getDownloadURL returns a token-bearing URL the browser can follow without auth headers.
+  const openSystemDoc = async (item) => {
+    try {
+      let storagePath = item.storagePath;
+      if (!storagePath && item.url) {
+        const m = item.url.match(/\/o\/([^?]+)/);
+        if (m) storagePath = decodeURIComponent(m[1]);
+      }
+      if (!storagePath) { window.open(item.url, "_blank", "noopener,noreferrer"); return; }
+      const url = await getDownloadURL(sRef(storage, storagePath));
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      alert("Could not load document. Please try again.");
+    }
+  };
+
   const addItem = () => {
     if (!itemForm.name.trim()) return;
     const url = commitUrl(itemForm.url); if (url === null) return;
@@ -1865,7 +1863,11 @@ function FolderSection({ cat, updateCats, user, canEdit, pid }) {
         <div key={item.id} style={{ ...S.docItemRow, border: item.source === "system" ? "1px dashed #E2E8F0" : undefined, borderRadius: item.source === "system" ? 6 : undefined, padding: item.source === "system" ? "8px 10px" : undefined, marginBottom: 4 }}>
           <span style={{ fontSize: 14 }}>{item.type === "link" ? "🔗" : fileIcon(item.name)}</span>
           <div style={{ flex: 1 }}>
-            {item.url ? <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 15, fontWeight: 500, color: "#0284C7", textDecoration: "none", fontFamily: F }}>{item.name}</a> : <span style={{ fontSize: 15, fontFamily: F }}>{item.name}</span>}
+            {item.source === "system"
+              ? <span onClick={() => openSystemDoc(item)} style={{ fontSize: 15, fontWeight: 500, color: "#0284C7", cursor: "pointer", textDecoration: "underline", fontFamily: F }}>{item.name}</span>
+              : item.url
+                ? <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 15, fontWeight: 500, color: "#0284C7", textDecoration: "none", fontFamily: F }}>{item.name}</a>
+                : <span style={{ fontSize: 15, fontFamily: F }}>{item.name}</span>}
             <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F, display: "flex", gap: 6, alignItems: "center" }}>
               {item.source === "system" ? <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "#FFF4F0", color: "#C2410C", fontWeight: 600 }}>SYSTEM</span> : `${item.addedBy} · ${fmtDate(item.addedAt)}`}
             </div>
