@@ -8,6 +8,7 @@ const db = admin.database();
 
 /* ═══ CONFIG ═══ */
 const OBJECT_TYPE = "2-39524389";
+const SHIPMENT_OBJECT_TYPE = "2-39524475"; // Shipments custom object; primaryDisplayProperty = shipment_tracking_number (INxxx)
 const PROPERTIES = [
   "project_name", "hs_object_id", "app_project_id__c", "number_of_stations__c",
   "company_codename", "hs_pipeline", "hs_pipeline_stage",
@@ -452,6 +453,67 @@ function buildHardwareFromKits(projectKitIds, kitProps, componentsByKit, existin
   return [...hsItems, ...manualItems];
 }
 
+// Batch-read project → shipment associations, then fetch shipment_tracking_number (INxxx) for each.
+// Returns { byProject: { projectHsId: ["INxxx", ...] } } — only includes shipments with a non-empty tracking number.
+async function fetchShipmentsForProjects(token, projectHsIds) {
+  if (!projectHsIds.length) return { byProject: {} };
+  const BATCH = 100;
+  const byProjectId = {}; // projectHsId → [shipmentObjectId, ...]
+
+  for (let i = 0; i < projectHsIds.length; i += BATCH) {
+    const batch = projectHsIds.slice(i, i + BATCH);
+    try {
+      const res = await fetch(
+        `https://api.hubapi.com/crm/v4/associations/${OBJECT_TYPE}/${SHIPMENT_OBJECT_TYPE}/batch/read`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ inputs: batch.map(id => ({ id: String(id) })) }),
+        }
+      );
+      if (!res.ok) { console.warn("[shipments] project→shipment assoc batch error:", res.status); continue; }
+      const data = await res.json();
+      for (const result of (data.results || [])) {
+        byProjectId[String(result.from.id)] = (result.to || []).map(t => String(t.toObjectId));
+      }
+    } catch (e) {
+      console.warn("[shipments] project→shipment assoc batch failed:", e.message);
+    }
+  }
+
+  const allShipmentIds = [...new Set(Object.values(byProjectId).flat())];
+  if (!allShipmentIds.length) return { byProject: {} };
+
+  // Fetch shipment_tracking_number (the INxxx field) for each shipment
+  const shipmentNums = {}; // shipmentObjectId → "INxxx"
+  for (let i = 0; i < allShipmentIds.length; i += BATCH) {
+    const batch = allShipmentIds.slice(i, i + BATCH);
+    try {
+      const res = await fetch(`https://api.hubapi.com/crm/v3/objects/${SHIPMENT_OBJECT_TYPE}/batch/read`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ inputs: batch.map(id => ({ id })), properties: ["shipment_tracking_number"] }),
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      for (const obj of (data.results || [])) {
+        const num = obj.properties?.shipment_tracking_number;
+        if (num) shipmentNums[obj.id] = num;
+      }
+    } catch (e) {
+      console.warn("[shipments] shipment props batch failed:", e.message);
+    }
+  }
+
+  // Build byProject: projectHsId → ["INxxx", ...]
+  const byProject = {};
+  for (const [projectHsId, shipmentIds] of Object.entries(byProjectId)) {
+    const nums = shipmentIds.map(sid => shipmentNums[sid]).filter(Boolean);
+    if (nums.length) byProject[projectHsId] = nums;
+  }
+  return { byProject };
+}
+
 /* v4.0.3: Firebase Realtime DB rejects `undefined` in .set() values — recursively swap to null. */
 function sanitizeForFirebase(value) {
   if (value === undefined) return null;
@@ -626,6 +688,55 @@ async function runSync(token, commit, syncCtx) {
       }
     } catch (stErr) {
       console.warn("[stationKits] station kit sync failed (non-fatal):", stErr.message);
+    }
+
+    // Shipment Details sync — populate pd_shipment_details rows with INxxx numbers from HubSpot Shipments object.
+    // Only adds item_num; never overwrites existing rows that already have the same INxxx; leaves all other columns blank.
+    try {
+      const projectHsIds = incoming.map(p => p.hubspotId).filter(Boolean);
+      const { byProject: shipmentsByProject } = await fetchShipmentsForProjects(token, projectHsIds);
+      const projectsWithShipments = Object.keys(shipmentsByProject);
+      console.log(`[shipments] projects with shipments: ${projectsWithShipments.length}`);
+
+      if (projectsWithShipments.length > 0) {
+        const latestForShipments = (await db.ref("appState/docData").once("value")).val() || {};
+        const shipmentUpdates = {};
+
+        for (const projectHsId of projectsWithShipments) {
+          const pid = `hs_${projectHsId}`;
+          const incomingNums = shipmentsByProject[projectHsId]; // ["IN00785", "IN00790", ...]
+          const existingPD = latestForShipments[pid]?.projectDetails || [];
+          const existingArr = Array.isArray(existingPD) ? existingPD : Object.values(existingPD);
+          const shipmentCat = existingArr.find(c => c && c.id === "pd_shipment_details");
+          const existingRows = shipmentCat?.rows || [];
+          const existingNums = new Set(existingRows.map(r => r.item_num).filter(Boolean));
+
+          const newRows = incomingNums
+            .filter(num => !existingNums.has(num))
+            .map(num => ({ item_num: num }));
+
+          if (newRows.length > 0) {
+            const mergedRows = [...existingRows, ...newRows];
+            if (shipmentCat) {
+              // pd_shipment_details cat exists — update its rows
+              const updatedPD = existingArr.map(c => c.id === "pd_shipment_details" ? { ...c, rows: mergedRows } : c);
+              shipmentUpdates[`appState/docData/${pid}/projectDetails`] = sanitizeForFirebase(updatedPD);
+            } else {
+              // No pd_shipment_details yet — append it with just the new rows
+              const updatedPD = [...existingArr, { id: "pd_shipment_details", name: "Shipment Details", type: "table", accessLevel: "open", columns: [], rows: mergedRows }];
+              shipmentUpdates[`appState/docData/${pid}/projectDetails`] = sanitizeForFirebase(updatedPD);
+            }
+            console.log(`[shipments] ${pid}: added ${newRows.length} new shipment row(s): ${newRows.map(r => r.item_num).join(", ")}`);
+          }
+        }
+
+        if (Object.keys(shipmentUpdates).length > 0) {
+          await db.ref().update(shipmentUpdates);
+          console.log(`[shipments] synced shipment details for ${Object.keys(shipmentUpdates).length} project(s)`);
+        }
+      }
+    } catch (shipErr) {
+      console.warn("[shipments] shipment sync failed (non-fatal):", shipErr.message);
     }
 
     // Secondary ops — each wrapped so a log/status failure never masks a successful sync
