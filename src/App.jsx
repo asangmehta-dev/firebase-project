@@ -3465,7 +3465,7 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
   const runPreview = async () => {
     setSyncLoading(true); setSyncMsg(""); setSyncPreview(null);
     try {
-      const fn = httpsCallable(functions, "manualHubspotSync", { timeout: 300000 });
+      const fn = httpsCallable(functions, "manualHubspotSync", { timeout: 560000 });
       await fn({ commit: false });
       // Preview data written to hubspotPreview/ — read it once
       const snap = await new Promise(r => onValue(ref(db, "hubspotPreview"), r, { onlyOnce: true }));
@@ -3481,7 +3481,7 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
     if (!confirm(`Apply sync? This will update ${syncPreview?.length || 0} projects in the webapp.`)) return;
     setApplyLoading(true); setSyncMsg("");
     try {
-      const fn = httpsCallable(functions, "manualHubspotSync", { timeout: 300000 });
+      const fn = httpsCallable(functions, "manualHubspotSync", { timeout: 560000 });
       const res = await fn({ commit: true });
       setSyncMsg(`✓ Sync applied: ${res.data?.newCount || 0} new, ${res.data?.updatedCount || 0} updated.`);
       setSyncPreview(null);

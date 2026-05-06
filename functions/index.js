@@ -891,7 +891,7 @@ async function applyChecklistToProject(projectId, isSI) {
 }
 
 /* ═══ SCHEDULED SYNC — Tue & Fri 9am PDT (16:00 UTC) ═══ */
-exports.scheduledHubspotSync = functions.runWith({ memory: "8GB", timeoutSeconds: 300 }).pubsub
+exports.scheduledHubspotSync = functions.runWith({ memory: "8GB", timeoutSeconds: 540 }).pubsub
   .schedule("0 16 * * 2,5")
   .timeZone("America/Los_Angeles")
   .onRun(async () => {
@@ -901,7 +901,7 @@ exports.scheduledHubspotSync = functions.runWith({ memory: "8GB", timeoutSeconds
   });
 
 /* ═══ MANUAL SYNC — callable from Admin Panel ═══ */
-exports.manualHubspotSync = functions.runWith({ memory: "8GB", timeoutSeconds: 300 }).https.onCall(async (data, context) => {
+exports.manualHubspotSync = functions.runWith({ memory: "8GB", timeoutSeconds: 540 }).https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
 
   const userSnap = await db.ref(`users/${context.auth.uid}`).once("value");
