@@ -815,7 +815,15 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
           const EXTERNAL_VISIBLE = new Set(["pd_specs", "pd_cad", "pd_deployment_requirements"]);
           const subCats = cats.filter(c => c.type !== "program");
           const items = (subCats.length > 0 ? subCats : APP_TABLE_TEMPLATES)
-            .filter(c => admin || EXTERNAL_VISIBLE.has(c.id));
+            .filter(c => admin || EXTERNAL_VISIBLE.has(c.id))
+            .sort((a, b) => {
+              const ai = TAB_ORDER.indexOf(a.id);
+              const bi = TAB_ORDER.indexOf(b.id);
+              if (ai === -1 && bi === -1) return 0;
+              if (ai === -1) return 1;
+              if (bi === -1) return -1;
+              return ai - bi;
+            });
           return items.map(cat => {
             const icon = cat.type === "table" ? "📊" : cat.type === "checklist" ? "📋" : "📁";
             const isActive = view === "project_details" && localStorage.getItem(`dp_proj_tab_${project.id}`) === cat.id;
@@ -1910,6 +1918,14 @@ function FolderSection({ cat, updateCats, user, canEdit, pid }) {
   );
 }
 
+const TAB_ORDER = [
+  "pd_team", "pd_deployment_requirements", "pd_cad",
+  "inst_external_checklist", "inst_internal_checklist",
+  "pd_specs", "pd_station_kits", "pd_in_factory_install", "pd_camera_settings",
+  "pd_sop_plan", "pd_mes_station_plan", "pd_serialization", "pd_sku_configs",
+  "pd_shipment_details", "pd_reference_info",
+];
+
 /* ═══ PROJECT TABS VIEW — tabbed nav for all project categories ═══ */
 function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state, setState, lang, onDelFolder, standardCatIds }) {
   // External users see only 3 specific folders; tables + checklists are Instrumental-only.
@@ -1919,12 +1935,14 @@ function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state,
       .filter(c => c.type !== "program")
       .filter(c => isInst(user) || EXTERNAL_VISIBLE.has(c.id));
     if (!isInst(user)) return filtered;
-    // Instrumental: tables leftmost, then folders, then checklists
-    return [
-      ...filtered.filter(c => c.type === "table"),
-      ...filtered.filter(c => c.type !== "table" && c.type !== "checklist"),
-      ...filtered.filter(c => c.type === "checklist"),
-    ];
+    return [...filtered].sort((a, b) => {
+      const ai = TAB_ORDER.indexOf(a.id);
+      const bi = TAB_ORDER.indexOf(b.id);
+      if (ai === -1 && bi === -1) return 0;
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
   })();
 
   const [activeTab, setActiveTab] = useState(() => {
