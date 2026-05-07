@@ -157,6 +157,110 @@ const EXTERNAL_CHECKLIST = {
   ],
 };
 
+const MES_INTEGRATION_CHECKLIST = {
+  id: "inst_mes_integration_checklist",
+  name: "MES Integration Checklist",
+  accessLevel: "open",
+  type: "checklist",
+  items: [],
+  milestones: [
+    { id: "mes_ms_1", name: "1. Network & Connectivity", description: "Confirm server access, protocols, and network topology.", color: "#00C9A7", checklist: [
+      g("mes_1_1", "MES/SFC server hostname provided"),
+      g("mes_1_2", "MES/SFC server IP address provided (fallback)"),
+      g("mes_1_3", "Port number confirmed"),
+      g("mes_1_4", "Protocol confirmed (HTTP or HTTPS)"),
+      g("mes_1_5", "SSL certificate bundle (.pem) confirmed (if HTTPS)"),
+      g("mes_1_6", "Network topology documented (direct access or proxy/firewall)"),
+      g("mes_1_7", "IP allowlisting requirements for Instrumental stations confirmed"),
+      g("mes_1_8", "Dual Ethernet requirement confirmed (Instrumental Cloud vs MES network)"),
+    ], links: [], signatures: [] },
+    { id: "mes_ms_2", name: "2. SSL Certificate", description: "Provide SSL certificate for HTTPS MES connections.", color: "#3B82F6", checklist: [
+      g("mes_2_1", "CA bundle / certificate file (.pem) provided for MES server"),
+      g("mes_2_2", "Certificate expiration date confirmed"),
+      g("mes_2_3", "Certificate renewal contact provided (Name / Email)"),
+    ], links: [], signatures: [] },
+    { id: "mes_ms_3", name: "3. API Endpoints", description: "Document all endpoints: health check, route validation, result reporting, serial lookup.", color: "#A855F7", checklist: [
+      g("mes_3_1_1", "Health Check — Full URL provided"),
+      g("mes_3_1_2", "Health Check — HTTP method confirmed (GET / POST)"),
+      g("mes_3_1_3", "Health Check — Expected success response documented"),
+      g("mes_3_2_1", "Route Validation (Before Check) — Full URL provided"),
+      g("mes_3_2_2", "Route Validation — HTTP method confirmed"),
+      g("mes_3_2_3", "Route Validation — Request payload fields documented"),
+      g("mes_3_2_4", "Route Validation — Example request provided"),
+      g("mes_3_2_5", "Route Validation — Example success response provided"),
+      g("mes_3_2_6", "Route Validation — Example failure response provided"),
+      g("mes_3_2_7", "Route Validation — Success vs. failure field identified"),
+      g("mes_3_3_1", "Result Reporting (After Test) — Full URL provided"),
+      g("mes_3_3_2", "Result Reporting — HTTP method confirmed"),
+      g("mes_3_3_3", "Result Reporting — Request payload fields documented"),
+      g("mes_3_3_4", "Result Reporting — Example PASS request provided"),
+      g("mes_3_3_5", "Result Reporting — Example FAIL request provided"),
+      g("mes_3_3_6", "Result Reporting — Example success response provided"),
+      g("mes_3_3_7", "Result Reporting — Example failure response provided"),
+      g("mes_3_3_8", "Result Reporting — Error codes for failures confirmed"),
+      g("mes_3_3_9", "Result Reporting — Sub-test vs overall PASS/FAIL reporting confirmed"),
+      g("mes_3_4_1", "Serial Lookup — Dedicated endpoint availability confirmed"),
+      g("mes_3_4_2", "Serial Lookup — Full URL provided (if applicable)"),
+      g("mes_3_4_3", "Serial Lookup — Source confirmed (dedicated endpoint or route validation response)"),
+      g("mes_3_4_4", "Serial Lookup — Returned fields per unit documented"),
+      g("mes_3_4_5", "Serial Lookup — Example request provided"),
+      g("mes_3_4_6", "Serial Lookup — Example response provided"),
+    ], links: [], signatures: [] },
+    { id: "mes_ms_4", name: "4. Station Names & Route Configuration", description: "Document exact MES station names and routing logic.", color: "#F59E0B", checklist: [
+      g("mes_4_1", "All MES/SFC station names and descriptions documented"),
+      g("mes_4_9", "Rework / fail route handling confirmed"),
+      g("mes_4_10", "Multi-MES-name mapping per physical station confirmed"),
+      g("mes_4_11", "MACHINE_CODE or STATION_ID values confirmed per station"),
+    ], links: [], signatures: [] },
+    { id: "mes_ms_5", name: "5. Authentication & Credentials", description: "Provide API credentials and authentication method.", color: "#DC2626", checklist: [
+      g("mes_5_1", "MES API authentication method confirmed (API key, token, basic auth, etc.)"),
+      g("mes_5_2", "Credentials provided or acquisition process documented"),
+      g("mes_5_3", "Employee ID requirement confirmed"),
+      g("mes_5_4", "Employee ID value or assignment process provided (if required)"),
+      g("mes_5_5", "Separate credentials for test vs. production environments confirmed"),
+    ], links: [], signatures: [] },
+    { id: "mes_ms_6", name: "6. Test Environment", description: "Provide test server details and sample serial numbers.", color: "#0284C7", checklist: [
+      g("mes_6_1", "Test / staging MES server availability confirmed"),
+      g("mes_6_2", "Test server URL provided"),
+      g("mes_6_3", "Test station name for development provided"),
+      g("mes_6_4", "2–3 valid test serial numbers provided"),
+      g("mes_6_5", "Test environment restrictions documented (hours of availability, rate limits, etc.)"),
+    ], links: [], signatures: [] },
+    { id: "mes_ms_7", name: "7. Error Handling & Edge Cases", description: "Confirm behavior for all failure and edge-case scenarios.", color: "#64748B", checklist: [
+      g("mes_7_1", "Wrong station scan behavior confirmed (error code / message)"),
+      g("mes_7_2", "Unknown unit in MES behavior confirmed"),
+      g("mes_7_3", "Duplicate result submission behavior confirmed"),
+      g("mes_7_4", "Retest / retry policy documented"),
+      g("mes_7_5", "MES unreachable behavior confirmed (block line or allow inspection to continue)"),
+      g("mes_7_6", "Expected API response time confirmed (for setting timeout values)"),
+      g("mes_7_7", "API rate limits confirmed"),
+    ], links: [], signatures: [] },
+    { id: "mes_ms_8", name: "8. Data Format & Serial Number Details", description: "Confirm serial number formats, barcodes, and timezone.", color: "#059669", checklist: [
+      g("mes_8_1", "Unit serial number format and 2–3 examples provided"),
+      g("mes_8_2", "Serial number case-sensitivity confirmed"),
+      g("mes_8_3", "Config / SKU barcodes confirmed (in addition to serial numbers)"),
+      g("mes_8_4", "Config / SKU barcode format and examples provided (if applicable)"),
+      g("mes_8_5", "Subassembly serial numbers linked to units confirmed"),
+      g("mes_8_6", "Subassembly types and serial formats documented (if applicable)"),
+      g("mes_8_7", "Timestamp timezone confirmed"),
+    ], links: [], signatures: [] },
+    { id: "mes_ms_9", name: "9. Go-Live Readiness", description: "Final validation sign-off before production go-live.", color: "#00C9A7", checklist: [
+      g("mes_9_1", "Network connectivity confirmed — stations can reach MES server"),
+      g("mes_9_2", "SSL certificate provided and installed on stations"),
+      g("mes_9_3", "Test serial numbers validated against test environment"),
+      g("mes_9_4", "Route validation tested for all station names"),
+      g("mes_9_5", "Result reporting tested — PASS and FAIL scenarios"),
+      g("mes_9_6", "Serial lookup tested (if applicable)"),
+      g("mes_9_7", "Error scenarios tested (wrong station, unknown SN, MES down)"),
+      g("mes_9_8", "Production MES credentials provided to Instrumental"),
+      g("mes_9_9", "Customer sign-off on integration behavior obtained"),
+    ], links: [], signatures: [
+      { id: "mes_sig_customer", role: "Customer",         name: "", email: "", signed: false, signedAt: null },
+      { id: "mes_sig_tpm",      role: "Instrumental TPM", name: "", email: "", signed: false, signedAt: null },
+    ] },
+  ],
+};
+
 const SI_CHECKLIST = {
   id: "inst_si_checklist",
   name: "SI Deployment Checklist",
@@ -625,6 +729,8 @@ function buildProjectDetails(isSI) {
     ...TABLE_TEMPLATES.map(t => JSON.parse(JSON.stringify(t))),
     { id: "pd_reference_info", name: "Reference Info", type: "folder", accessLevel: "open", items: [] },
   ];
+  // MES Integration Checklist — added for all project types
+  folders.push(JSON.parse(JSON.stringify(MES_INTEGRATION_CHECKLIST)));
   // Checklist: SI projects get SI checklist; standard projects get Internal + External
   if (isSI) {
     folders.push(JSON.parse(JSON.stringify(SI_CHECKLIST)));
@@ -648,4 +754,4 @@ function buildInstrumentalCategories(isSI) {
   return buildProjectDetails(isSI);
 }
 
-module.exports = { buildInstrumentalCategories, buildProjectDetails, buildCommercialFolders, INTERNAL_CHECKLIST, EXTERNAL_CHECKLIST, SI_CHECKLIST, TABLE_TEMPLATES, DEPLOYMENT_REQUIREMENTS_FOLDER };
+module.exports = { buildInstrumentalCategories, buildProjectDetails, buildCommercialFolders, INTERNAL_CHECKLIST, EXTERNAL_CHECKLIST, MES_INTEGRATION_CHECKLIST, SI_CHECKLIST, TABLE_TEMPLATES, DEPLOYMENT_REQUIREMENTS_FOLDER };

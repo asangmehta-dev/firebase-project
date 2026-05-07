@@ -316,6 +316,108 @@ const APP_TABLE_TEMPLATES = [
 ];
 
 const APP_REFERENCE_INFO_FOLDER = { id: "pd_reference_info", name: "Reference Info", type: "folder", accessLevel: "open", items: [] };
+const APP_MES_CHECKLIST_TEMPLATE = (() => {
+  const ck = (id, label, o = "") => ({ id, label, checked: false, na: false, ownership: o, startDate: null, projectedDate: null, actualDate: null, sopLink: null });
+  return {
+    id: "inst_mes_integration_checklist", name: "MES Integration Checklist", accessLevel: "open", type: "checklist", items: [],
+    milestones: [
+      { id: "mes_ms_1", name: "1. Network & Connectivity", description: "Confirm server access, protocols, and network topology.", color: "#00C9A7", checklist: [
+        ck("mes_1_1", "MES/SFC server hostname provided"),
+        ck("mes_1_2", "MES/SFC server IP address provided (fallback)"),
+        ck("mes_1_3", "Port number confirmed"),
+        ck("mes_1_4", "Protocol confirmed (HTTP or HTTPS)"),
+        ck("mes_1_5", "SSL certificate bundle (.pem) confirmed (if HTTPS)"),
+        ck("mes_1_6", "Network topology documented (direct access or proxy/firewall)"),
+        ck("mes_1_7", "IP allowlisting requirements for Instrumental stations confirmed"),
+        ck("mes_1_8", "Dual Ethernet requirement confirmed (Instrumental Cloud vs MES network)"),
+      ], links: [], signatures: [] },
+      { id: "mes_ms_2", name: "2. SSL Certificate", description: "Provide SSL certificate for HTTPS MES connections.", color: "#3B82F6", checklist: [
+        ck("mes_2_1", "CA bundle / certificate file (.pem) provided for MES server"),
+        ck("mes_2_2", "Certificate expiration date confirmed"),
+        ck("mes_2_3", "Certificate renewal contact provided (Name / Email)"),
+      ], links: [], signatures: [] },
+      { id: "mes_ms_3", name: "3. API Endpoints", description: "Document all endpoints: health check, route validation, result reporting, serial lookup.", color: "#A855F7", checklist: [
+        ck("mes_3_1_1", "Health Check — Full URL provided"),
+        ck("mes_3_1_2", "Health Check — HTTP method confirmed (GET / POST)"),
+        ck("mes_3_1_3", "Health Check — Expected success response documented"),
+        ck("mes_3_2_1", "Route Validation (Before Check) — Full URL provided"),
+        ck("mes_3_2_2", "Route Validation — HTTP method confirmed"),
+        ck("mes_3_2_3", "Route Validation — Request payload fields documented"),
+        ck("mes_3_2_4", "Route Validation — Example request provided"),
+        ck("mes_3_2_5", "Route Validation — Example success response provided"),
+        ck("mes_3_2_6", "Route Validation — Example failure response provided"),
+        ck("mes_3_2_7", "Route Validation — Success vs. failure field identified"),
+        ck("mes_3_3_1", "Result Reporting (After Test) — Full URL provided"),
+        ck("mes_3_3_2", "Result Reporting — HTTP method confirmed"),
+        ck("mes_3_3_3", "Result Reporting — Request payload fields documented"),
+        ck("mes_3_3_4", "Result Reporting — Example PASS request provided"),
+        ck("mes_3_3_5", "Result Reporting — Example FAIL request provided"),
+        ck("mes_3_3_6", "Result Reporting — Example success response provided"),
+        ck("mes_3_3_7", "Result Reporting — Example failure response provided"),
+        ck("mes_3_3_8", "Result Reporting — Error codes for failures confirmed"),
+        ck("mes_3_3_9", "Result Reporting — Sub-test vs overall PASS/FAIL reporting confirmed"),
+        ck("mes_3_4_1", "Serial Lookup — Dedicated endpoint availability confirmed"),
+        ck("mes_3_4_2", "Serial Lookup — Full URL provided (if applicable)"),
+        ck("mes_3_4_3", "Serial Lookup — Source confirmed (dedicated endpoint or route validation response)"),
+        ck("mes_3_4_4", "Serial Lookup — Returned fields per unit documented"),
+        ck("mes_3_4_5", "Serial Lookup — Example request provided"),
+        ck("mes_3_4_6", "Serial Lookup — Example response provided"),
+      ], links: [], signatures: [] },
+      { id: "mes_ms_4", name: "4. Station Names & Route Configuration", description: "Document exact MES station names and routing logic.", color: "#F59E0B", checklist: [
+        ck("mes_4_1",  "All MES/SFC station names and descriptions documented"),
+        ck("mes_4_9",  "Rework / fail route handling confirmed"),
+        ck("mes_4_10", "Multi-MES-name mapping per physical station confirmed"),
+        ck("mes_4_11", "MACHINE_CODE or STATION_ID values confirmed per station"),
+      ], links: [], signatures: [] },
+      { id: "mes_ms_5", name: "5. Authentication & Credentials", description: "Provide API credentials and authentication method.", color: "#DC2626", checklist: [
+        ck("mes_5_1", "MES API authentication method confirmed (API key, token, basic auth, etc.)"),
+        ck("mes_5_2", "Credentials provided or acquisition process documented"),
+        ck("mes_5_3", "Employee ID requirement confirmed"),
+        ck("mes_5_4", "Employee ID value or assignment process provided (if required)"),
+        ck("mes_5_5", "Separate credentials for test vs. production environments confirmed"),
+      ], links: [], signatures: [] },
+      { id: "mes_ms_6", name: "6. Test Environment", description: "Provide test server details and sample serial numbers.", color: "#0284C7", checklist: [
+        ck("mes_6_1", "Test / staging MES server availability confirmed"),
+        ck("mes_6_2", "Test server URL provided"),
+        ck("mes_6_3", "Test station name for development provided"),
+        ck("mes_6_4", "2–3 valid test serial numbers provided"),
+        ck("mes_6_5", "Test environment restrictions documented (hours, rate limits, etc.)"),
+      ], links: [], signatures: [] },
+      { id: "mes_ms_7", name: "7. Error Handling & Edge Cases", description: "Confirm behavior for all failure and edge-case scenarios.", color: "#64748B", checklist: [
+        ck("mes_7_1", "Wrong station scan behavior confirmed (error code / message)"),
+        ck("mes_7_2", "Unknown unit in MES behavior confirmed"),
+        ck("mes_7_3", "Duplicate result submission behavior confirmed"),
+        ck("mes_7_4", "Retest / retry policy documented"),
+        ck("mes_7_5", "MES unreachable behavior confirmed (block line or allow inspection to continue)"),
+        ck("mes_7_6", "Expected API response time confirmed (for setting timeout values)"),
+        ck("mes_7_7", "API rate limits confirmed"),
+      ], links: [], signatures: [] },
+      { id: "mes_ms_8", name: "8. Data Format & Serial Number Details", description: "Confirm serial number formats, barcodes, and timezone.", color: "#059669", checklist: [
+        ck("mes_8_1", "Unit serial number format and 2–3 examples provided"),
+        ck("mes_8_2", "Serial number case-sensitivity confirmed"),
+        ck("mes_8_3", "Config / SKU barcodes confirmed (in addition to serial numbers)"),
+        ck("mes_8_4", "Config / SKU barcode format and examples provided (if applicable)"),
+        ck("mes_8_5", "Subassembly serial numbers linked to units confirmed"),
+        ck("mes_8_6", "Subassembly types and serial formats documented (if applicable)"),
+        ck("mes_8_7", "Timestamp timezone confirmed"),
+      ], links: [], signatures: [] },
+      { id: "mes_ms_9", name: "9. Go-Live Readiness", description: "Final validation sign-off before production go-live.", color: "#00C9A7", checklist: [
+        ck("mes_9_1", "Network connectivity confirmed — stations can reach MES server"),
+        ck("mes_9_2", "SSL certificate provided and installed on stations"),
+        ck("mes_9_3", "Test serial numbers validated against test environment"),
+        ck("mes_9_4", "Route validation tested for all station names"),
+        ck("mes_9_5", "Result reporting tested — PASS and FAIL scenarios"),
+        ck("mes_9_6", "Serial lookup tested (if applicable)"),
+        ck("mes_9_7", "Error scenarios tested (wrong station, unknown SN, MES down)"),
+        ck("mes_9_8", "Production MES credentials provided to Instrumental"),
+        ck("mes_9_9", "Customer sign-off on integration behavior obtained"),
+      ], links: [], signatures: [
+        { id: "mes_sig_customer", role: "Customer",         name: "", email: "", signed: false, signedAt: null },
+        { id: "mes_sig_tpm",      role: "Instrumental TPM", name: "", email: "", signed: false, signedAt: null },
+      ] },
+    ],
+  };
+})();
 // These 4 tabs use a transposed layout: attributes as rows, stations as columns (mirrors Excel format)
 const TRANSPOSED_TABLE_IDS = new Set(["pd_station_kits", "pd_in_factory_install", "pd_camera_settings", "pd_led_settings"]);
 const DEFAULT_COMMERCIAL = [
@@ -586,10 +688,11 @@ const getProjectDetails = (dd, pid) => {
     const newCols = tmpl.columns.filter(c => !existingKeys.has(c.key) && !deletedKeys.has(c.key));
     return { ...cat, columns: [...(cat.columns || []), ...newCols] };
   });
-  // Also inject any template table cats missing from Firebase entirely (e.g. added after ensureProjectTemplate last ran)
+  // Also inject any template cats missing from Firebase entirely (e.g. added after ensureProjectTemplate last ran)
   const existingIds = new Set(merged.map(c => c.id));
   const missingTmplCats = APP_TABLE_TEMPLATES.filter(t => !existingIds.has(t.id));
-  return [...merged, ...missingTmplCats];
+  const missingChecklistCats = [APP_MES_CHECKLIST_TEMPLATE].filter(t => !existingIds.has(t.id));
+  return [...merged, ...missingTmplCats, ...missingChecklistCats];
 };
 const getCommercial = (dd, pid) => dd?.[pid]?.commercial || DEFAULT_COMMERCIAL;
 const isInst = (u) => u?.role === "admin" || (u?.email || "").endsWith("@instrumental.com");
@@ -1073,6 +1176,7 @@ function ProjectOverviewSection({ project, state, setState, user }) {
     { key: "actualServiceStartDate", label: "Actual Service Start Date", type: "date" },
     { key: "targetBuildDate", label: "Target Build Date", type: "date" },
     { key: "actualDeployDate", label: "Actual Deploy Date", type: "date" },
+    { key: "webappProjectId", label: "Webapp Project ID", type: "text", instOnly: true },
   ];
 
   const Field = ({ label, value, placeholder, readOnly, badge }) => (
@@ -1105,12 +1209,12 @@ function ProjectOverviewSection({ project, state, setState, user }) {
       <div style={{ ...S.card, marginBottom: 12 }}>
         <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F, marginBottom: 10 }}>Key project dates and status. {canEdit && project?.hubspotId ? "Date changes sync to HubSpot automatically on save." : canEdit ? "No HubSpot record linked — dates saved locally only." : ""}</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
-          {WRITABLE.map(f => editing ? (
+          {WRITABLE.filter(f => !f.instOnly || canEdit).map(f => editing ? (
             <div key={f.key} style={{ padding: "10px 14px", background: "#F8FAFC", borderRadius: 8, border: "1px solid #F1F5F9" }}>
               <div style={{ fontSize: 11, color: "#64748B", fontFamily: F, textTransform: "uppercase", letterSpacing: .5, fontWeight: 600, marginBottom: 4 }}>{f.label}</div>
               <input type={f.type} style={{ ...S.inp, padding: "4px 8px", fontSize: 13 }} value={draft[f.key] || ""} onChange={e => setDraft(d => ({ ...d, [f.key]: e.target.value }))} />
             </div>
-          ) : <Field key={f.key} label={f.label} value={overview[f.key] ? fmtDay(overview[f.key]) : ""} />)}
+          ) : <Field key={f.key} label={f.label} value={f.type === "date" ? (overview[f.key] ? fmtDay(overview[f.key]) : "") : (overview[f.key] || "")} />)}
           <Field label="Target Build Date at Deal Close" value={targetBuildAtDealClose ? fmtDay(targetBuildAtDealClose) : ""} readOnly badge="HubSpot" />
           <Field label="Associated CS Program ID" value={csProgramId} readOnly badge="HubSpot" />
         </div>
@@ -1920,7 +2024,7 @@ function FolderSection({ cat, updateCats, user, canEdit, pid }) {
 
 const TAB_ORDER = [
   "pd_team", "pd_deployment_requirements", "pd_cad",
-  "inst_external_checklist", "inst_internal_checklist",
+  "inst_external_checklist", "inst_mes_integration_checklist", "inst_internal_checklist",
   "pd_specs", "pd_station_kits", "pd_in_factory_install", "pd_camera_settings",
   "pd_sop_plan", "pd_mes_station_plan", "pd_serialization", "pd_sku_configs",
   "pd_shipment_details", "pd_reference_info",
@@ -2142,7 +2246,7 @@ function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state,
 const STANDARD_CAT_IDS = new Set([
   ...APP_TABLE_TEMPLATES.map(t => t.id),
   "pd_specs", "pd_program", "pd_cad", "pd_deployment_requirements", "pd_reference_info",
-  "inst_internal_checklist", "inst_external_checklist", "inst_si_checklist",
+  "inst_internal_checklist", "inst_external_checklist", "inst_mes_integration_checklist", "inst_si_checklist",
 ]);
 
 /* ═══ PROJECT DETAILS VIEW — v4.1.0: tabbed nav with lazy migration ═══ */
