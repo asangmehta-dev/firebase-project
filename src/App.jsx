@@ -5058,7 +5058,7 @@ export default function App() {
   const projectsArr = Array.isArray(state.projects) ? state.projects : (state.projects ? Object.values(state.projects) : []);
   const userProjects = projectsArr.filter(p => user.role === "admin" || (user.projects||[]).includes(p.id));
   const admin = isInst(user);
-  const projectCats = (project && state.docData?.[project.id]?.projectDetails) || [];
+  const projectCats = project ? getProjectDetails(state.docData, project.id) : [];
   const hasProjectAccess = !project || user.role === "admin" || admin || (user.projects||[]).includes(project.id);
   // Commercial access: admin always has it; others need explicit grant in commercialAccess/{pid}/{uid}
   const hasCommAccess = user.role === "admin" || (project && state.commercialAccess?.[project.id]?.[user.id]);
