@@ -2024,7 +2024,7 @@ function FolderSection({ cat, updateCats, user, canEdit, pid }) {
 
 const TAB_ORDER = [
   "pd_team", "pd_deployment_requirements", "pd_cad",
-  "inst_external_checklist", "inst_mes_integration_checklist", "inst_internal_checklist",
+  "inst_external_checklist", "inst_internal_checklist", "inst_mes_integration_checklist",
   "pd_specs", "pd_station_kits", "pd_in_factory_install", "pd_camera_settings",
   "pd_sop_plan", "pd_mes_station_plan", "pd_serialization", "pd_sku_configs",
   "pd_shipment_details", "pd_reference_info",
@@ -2359,7 +2359,24 @@ function ChecklistSection({ cat, cats, updateCats, user, canEdit, pid, lang }) {
   return (
     <div style={{ ...S.card, marginBottom: 12, borderLeft: "3px solid #6366F1" }}>
       <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 12 }}>{cat.name}</div>
-      {(cat.milestones || []).map(ms => {
+      {cat.id === "inst_mes_integration_checklist" && (
+        <div style={{ marginBottom: 14, padding: "10px 14px", background: cat.mesRequired ? "#F0FDF4" : "#F8FAFC", borderRadius: 8, border: `1px solid ${cat.mesRequired ? "#BBF7D0" : "#E2E8F0"}`, display: "flex", alignItems: "center", gap: 10 }}>
+          <input type="checkbox" id="mes_required_toggle" checked={!!cat.mesRequired}
+            onChange={() => canEdit && updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, mesRequired: !c.mesRequired }))}
+            style={{ width: 16, height: 16, cursor: canEdit ? "pointer" : "default", accentColor: "#15803D" }}
+            disabled={!canEdit}
+          />
+          <label htmlFor="mes_required_toggle" style={{ fontSize: 14, fontWeight: 600, color: cat.mesRequired ? "#15803D" : "#64748B", fontFamily: F, cursor: canEdit ? "pointer" : "default" }}>
+            MES integration is required for this project
+          </label>
+        </div>
+      )}
+      {cat.id === "inst_mes_integration_checklist" && !cat.mesRequired && (
+        <div style={{ padding: "24px 0", textAlign: "center", color: "#94A3B8", fontFamily: F, fontSize: 13, fontStyle: "italic" }}>
+          {canEdit ? "Check the box above to enable MES integration tracking for this project." : "MES integration is not required for this project."}
+        </div>
+      )}
+      {(cat.id !== "inst_mes_integration_checklist" || !!cat.mesRequired) && (cat.milestones || []).map(ms => {
         const items = ms.checklist || [];
         const activeChecks = items.filter(ck => !ck.na);
         const doneCount = activeChecks.filter(ck => ck.checked).length;
