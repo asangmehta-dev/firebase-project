@@ -2315,6 +2315,8 @@ function ChecklistSection({ cat, cats, updateCats, user, canEdit, pid, lang }) {
   const [newTaskLabel, setNewTaskLabel] = useState("");
   const [editingTask, setEditingTask] = useState(null); // { msId, ckId }
   const [editLabel, setEditLabel] = useState("");
+  const [editingNotes, setEditingNotes] = useState(null); // { msId, ckId }
+  const [notesValue, setNotesValue] = useState("");
   const toggleExpand = (msId) => setExpanded(prev => ({ ...prev, [msId]: !prev[msId] }));
 
   const updateMilestone = (msId, updater) => {
@@ -2352,6 +2354,15 @@ function ChecklistSection({ cat, cats, updateCats, user, canEdit, pid, lang }) {
   const deleteTask = (msId, ckId) => {
     if (!confirm("Delete this task?")) return;
     updateMilestone(msId, ms => ({ ...ms, checklist: (ms.checklist || []).filter(ck => ck.id !== ckId) }));
+  };
+  const startEditNotes = (msId, ckId, current) => { setEditingNotes({ msId, ckId }); setNotesValue(current || ""); };
+  const saveNotes = () => {
+    if (!editingNotes) return;
+    updateMilestone(editingNotes.msId, ms => ({
+      ...ms,
+      checklist: (ms.checklist || []).map(ck => ck.id !== editingNotes.ckId ? ck : { ...ck, notes: notesValue.trim() || null }),
+    }));
+    setEditingNotes(null); setNotesValue("");
   };
 
   const canCheck = canEdit || isInst(user); // Instrumental users can tick + add/delete tasks
@@ -2459,6 +2470,23 @@ function ChecklistSection({ cat, cats, updateCats, user, canEdit, pid, lang }) {
                             {ck.checked && ck.checkedBy && (
                               <div style={{ fontSize: 11, color: "#00C9A7", fontFamily: F, paddingBottom: 4 }}>✓ {ck.checkedBy} · {fmtDate(ck.checkedAt)}</div>
                             )}
+                            {/* Notes */}
+                            {editingNotes?.msId === ms.id && editingNotes?.ckId === ck.id ? (
+                              <textarea
+                                autoFocus rows={2}
+                                value={notesValue}
+                                onChange={e => setNotesValue(e.target.value)}
+                                onBlur={saveNotes}
+                                onKeyDown={e => { if (e.key === "Escape") { setEditingNotes(null); setNotesValue(""); } }}
+                                placeholder="Add a note…"
+                                style={{ width: "100%", marginTop: 4, marginBottom: 4, padding: "4px 6px", fontSize: 12, fontFamily: F, border: "1px solid #C7D2FE", borderRadius: 5, outline: "none", resize: "vertical", color: "#475569" }}
+                              />
+                            ) : (ck.notes || canCheck) ? (
+                              <div
+                                onClick={() => canCheck && startEditNotes(ms.id, ck.id, ck.notes || "")}
+                                style={{ fontSize: 12, fontFamily: F, color: ck.notes ? "#475569" : "#CBD5E1", fontStyle: ck.notes ? "normal" : "italic", marginTop: 2, marginBottom: 4, cursor: canCheck ? "text" : "default", minHeight: 16, lineHeight: "1.4" }}
+                              >{ck.notes || "Add note…"}</div>
+                            ) : null}
                           </div>
                         )}
                         {ck.ownership && !isEditing && <span style={{ fontSize: 11, color: "#94A3B8", flexShrink: 0 }}>· {ck.ownership}</span>}
