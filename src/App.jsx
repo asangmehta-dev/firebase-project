@@ -418,6 +418,21 @@ const APP_MES_CHECKLIST_TEMPLATE = (() => {
     ],
   };
 })();
+// Additive patches for existing checklist milestones — applied in getProjectDetails so existing projects
+// pick up new items and name changes without a backfill run.
+const mk = (id, label, o = "") => ({ id, label, checked: false, na: false, ownership: o, startDate: null, projectedDate: null, actualDate: null, sopLink: null });
+const CHECKLIST_PATCHES = [
+  {
+    catId: "inst_external_checklist", msId: "ext_ms_6",
+    newName: "6. Validation & Production Integration (SAT / FAT)",
+    newItems: [
+      mk("ext_6_5", "Check and pass: calibration", "FDE"),
+      mk("ext_6_6", "Check and pass: alignment", "FDE"),
+      mk("ext_6_7", "Check and pass with CSE: product image taken post calibration", "FDE, CSE"),
+      mk("ext_6_8", "Any additional on-site testing for motion sensing, pneumatic control / movement, custom nest / station press fit design or others (add details in notes)", "FDE, TPM"),
+    ],
+  },
+];
 // These 4 tabs use a transposed layout: attributes as rows, stations as columns (mirrors Excel format)
 const TRANSPOSED_TABLE_IDS = new Set(["pd_station_kits", "pd_in_factory_install", "pd_camera_settings", "pd_led_settings"]);
 const DEFAULT_COMMERCIAL = [
@@ -692,7 +707,21 @@ const getProjectDetails = (dd, pid) => {
   const existingIds = new Set(merged.map(c => c.id));
   const missingTmplCats = APP_TABLE_TEMPLATES.filter(t => !existingIds.has(t.id));
   const missingChecklistCats = [APP_MES_CHECKLIST_TEMPLATE].filter(t => !existingIds.has(t.id));
-  return [...merged, ...missingTmplCats, ...missingChecklistCats];
+  // Apply additive patches: rename milestones + inject new checklist items for existing projects
+  const patched = [...merged, ...missingTmplCats, ...missingChecklistCats].map(cat => {
+    const patch = CHECKLIST_PATCHES.find(p => p.catId === cat.id);
+    if (!patch || cat.type !== "checklist") return cat;
+    return {
+      ...cat,
+      milestones: (cat.milestones || []).map(ms => {
+        if (ms.id !== patch.msId) return ms;
+        const existingItemIds = new Set((ms.checklist || []).map(ck => ck.id));
+        const newItems = patch.newItems.filter(ni => !existingItemIds.has(ni.id));
+        return { ...ms, name: patch.newName || ms.name, checklist: [...(ms.checklist || []), ...newItems] };
+      }),
+    };
+  });
+  return patched;
 };
 const getCommercial = (dd, pid) => dd?.[pid]?.commercial || DEFAULT_COMMERCIAL;
 const isInst = (u) => u?.role === "admin" || (u?.email || "").endsWith("@instrumental.com");

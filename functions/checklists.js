@@ -129,11 +129,15 @@ const EXTERNAL_CHECKLIST = {
       g("ext_5_5", "Local support contact identified", "TPM"),
       g("ext_5_6", "Test sample ready to be used for setup and inspection", "TPM"),
     ], links: [], signatures: [] },
-    { id: "ext_ms_6", name: "6. Validation & Production Integration (SAT)", description: "Golden units, defect samples, and acceptance criteria.", color: "#DC2626", gatedBy: "External KO, Internal KO, Line Access, Station Location & Layout", checklist: [
+    { id: "ext_ms_6", name: "6. Validation & Production Integration (SAT / FAT)", description: "Golden units, defect samples, and acceptance criteria.", color: "#DC2626", gatedBy: "External KO, Internal KO, Line Access, Station Location & Layout", checklist: [
       g("ext_6_1", "Test unit(s) available for validation", "FDE, TPM"),
       g("ext_6_2", "Known defect samples available (red rabbits)", "FDE, TPM"),
       g("ext_6_3", "Acceptance criteria and type (SAT vs FAT) agreed and quantitatively defined (what = 'working')", "FDE, TPM"),
       g("ext_6_4", "MES Validation 4 core capabilities & Sign-off", "FDE, TPM"),
+      g("ext_6_5", "Check and pass: calibration", "FDE"),
+      g("ext_6_6", "Check and pass: alignment", "FDE"),
+      g("ext_6_7", "Check and pass with CSE: product image taken post calibration", "FDE, CSE"),
+      g("ext_6_8", "Any additional on-site testing for motion sensing, pneumatic control / movement, custom nest / station press fit design or others (add details in notes)", "FDE, TPM"),
     ], links: [], signatures: [] },
     { id: "ext_ms_7", name: "7. Coordination & Communication post External KO", description: "Stakeholder matrix and escalation paths.", color: "#64748B", gating: true, gatedBy: "External KO, Internal KO", checklist: [
       g("ext_7_1",   "External stakeholder matrix clearly assigned", "TPM"),
