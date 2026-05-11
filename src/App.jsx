@@ -433,6 +433,12 @@ const CHECKLIST_PATCHES = [
     ],
   },
 ];
+// Standard folder templates auto-injected for any project missing them (e.g. older projects pre-dating the folder)
+const STANDARD_FOLDER_TEMPLATES = [
+  { id: "pd_specs", name: "Design Specifications & Integration Docs", accessLevel: "open", items: [] },
+  { id: "pd_cad",   name: "CAD & Drawings",                           accessLevel: "open", items: [] },
+  APP_REFERENCE_INFO_FOLDER,
+];
 // These 4 tabs use a transposed layout: attributes as rows, stations as columns (mirrors Excel format)
 const TRANSPOSED_TABLE_IDS = new Set(["pd_station_kits", "pd_in_factory_install", "pd_camera_settings", "pd_led_settings"]);
 const DEFAULT_COMMERCIAL = [
@@ -706,9 +712,10 @@ const getProjectDetails = (dd, pid) => {
   // Also inject any template cats missing from Firebase entirely (e.g. added after ensureProjectTemplate last ran)
   const existingIds = new Set(merged.map(c => c.id));
   const missingTmplCats = APP_TABLE_TEMPLATES.filter(t => !existingIds.has(t.id));
+  const missingFolderCats = STANDARD_FOLDER_TEMPLATES.filter(t => !existingIds.has(t.id));
   const missingChecklistCats = [APP_MES_CHECKLIST_TEMPLATE].filter(t => !existingIds.has(t.id));
   // Apply additive patches: rename milestones + inject new checklist items for existing projects
-  const patched = [...merged, ...missingTmplCats, ...missingChecklistCats].map(cat => {
+  const patched = [...merged, ...missingTmplCats, ...missingFolderCats, ...missingChecklistCats].map(cat => {
     const patch = CHECKLIST_PATCHES.find(p => p.catId === cat.id);
     if (!patch || cat.type !== "checklist") return cat;
     return {
