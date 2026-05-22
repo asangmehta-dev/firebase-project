@@ -333,8 +333,9 @@ async function fetchKitsForProjects(token, projectHsIds, kitTypeId) {
   const BATCH = 100;
   const byProject = {};
 
-  for (let i = 0; i < projectHsIds.length; i += BATCH) {
-    const batch = projectHsIds.slice(i, i + BATCH);
+  const projBatches = [];
+  for (let i = 0; i < projectHsIds.length; i += BATCH) projBatches.push(projectHsIds.slice(i, i + BATCH));
+  await Promise.all(projBatches.map(async (batch) => {
     try {
       const res = await fetchWithTimeout(
         `https://api.hubapi.com/crm/v4/associations/${OBJECT_TYPE}/${kitTypeId}/batch/read`,
@@ -344,7 +345,7 @@ async function fetchKitsForProjects(token, projectHsIds, kitTypeId) {
           body: JSON.stringify({ inputs: batch.map(id => ({ id: String(id) })) }),
         }
       );
-      if (!res.ok) { console.warn("[stationKits] project→kit assoc batch error:", res.status); continue; }
+      if (!res.ok) { console.warn("[stationKits] project→kit assoc batch error:", res.status); return; }
       const data = await res.json();
       for (const result of (data.results || [])) {
         byProject[String(result.from.id)] = (result.to || []).map(t => String(t.toObjectId));
@@ -352,12 +353,13 @@ async function fetchKitsForProjects(token, projectHsIds, kitTypeId) {
     } catch (e) {
       console.warn("[stationKits] project→kit assoc batch failed:", e.message);
     }
-  }
+  }));
 
   const allKitIds = [...new Set(Object.values(byProject).flat())];
   const kitProps = {};
-  for (let i = 0; i < allKitIds.length; i += BATCH) {
-    const batch = allKitIds.slice(i, i + BATCH);
+  const kitBatches = [];
+  for (let i = 0; i < allKitIds.length; i += BATCH) kitBatches.push(allKitIds.slice(i, i + BATCH));
+  await Promise.all(kitBatches.map(async (batch) => {
     try {
       const res = await fetchWithTimeout(`https://api.hubapi.com/crm/v3/objects/${kitTypeId}/batch/read`, {
         method: "POST",
@@ -367,13 +369,13 @@ async function fetchKitsForProjects(token, projectHsIds, kitTypeId) {
           properties: ["station_kit_sn", "name", "computer_sn", "status", "station_type"],
         }),
       });
-      if (!res.ok) continue;
+      if (!res.ok) return;
       const data = await res.json();
       for (const obj of (data.results || [])) kitProps[obj.id] = obj.properties || {};
     } catch (e) {
       console.warn("[stationKits] kit props batch failed:", e.message);
     }
-  }
+  }));
 
   return { byProject, kitProps };
 }
@@ -385,10 +387,11 @@ async function fetchComponentsForKits(token, kitTypeId, componentTypeId, kitIds)
   const componentsByKit = {};
   const BATCH = 100;
 
-  // Step 1: batch-read kit→component associations
+  // Step 1: batch-read kit→component associations (parallel)
+  const assocBatches = [];
+  for (let i = 0; i < kitIds.length; i += BATCH) assocBatches.push(kitIds.slice(i, i + BATCH));
   let firstBatchLogged = false;
-  for (let i = 0; i < kitIds.length; i += BATCH) {
-    const batch = kitIds.slice(i, i + BATCH);
+  await Promise.all(assocBatches.map(async (batch) => {
     try {
       const res = await fetchWithTimeout(`https://api.hubapi.com/crm/v4/associations/${kitTypeId}/${componentTypeId}/batch/read`, {
         method: "POST",
@@ -397,10 +400,10 @@ async function fetchComponentsForKits(token, kitTypeId, componentTypeId, kitIds)
       });
       const rawText = await res.text();
       if (!firstBatchLogged) {
-        console.log(`[stationKits] assoc batch status=${res.status}, sample response:`, rawText.slice(0, 400));
         firstBatchLogged = true;
+        console.log(`[stationKits] assoc batch status=${res.status}, sample response:`, rawText.slice(0, 400));
       }
-      if (!res.ok) continue;
+      if (!res.ok) return;
       const data = JSON.parse(rawText);
       for (const result of (data.results || [])) {
         componentsByKit[result.from.id] = (result.to || []).map(t => t.toObjectId);
@@ -408,26 +411,27 @@ async function fetchComponentsForKits(token, kitTypeId, componentTypeId, kitIds)
     } catch (e) {
       console.warn("[stationKits] assoc batch failed:", e.message);
     }
-  }
+  }));
 
-  // Step 2: batch-read component properties
+  // Step 2: batch-read component properties (parallel)
   const allCompIds = [...new Set(Object.values(componentsByKit).flat())];
   const compProps = {};
-  for (let i = 0; i < allCompIds.length; i += BATCH) {
-    const batch = allCompIds.slice(i, i + BATCH);
+  const compBatches = [];
+  for (let i = 0; i < allCompIds.length; i += BATCH) compBatches.push(allCompIds.slice(i, i + BATCH));
+  await Promise.all(compBatches.map(async (batch) => {
     try {
       const res = await fetchWithTimeout(`https://api.hubapi.com/crm/v3/objects/${componentTypeId}/batch/read`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ inputs: batch.map(id => ({ id })), properties: ["asset_sn", "name", "category_master", "category", "model_number", "model"] }),
       });
-      if (!res.ok) continue;
+      if (!res.ok) return;
       const data = await res.json();
       for (const obj of (data.results || [])) compProps[obj.id] = obj.properties || {};
     } catch (e) {
       console.warn("[stationKits] component batch read failed:", e.message);
     }
-  }
+  }));
 
   // Step 3: build final map kitId → components array
   const result = {};
@@ -478,10 +482,11 @@ async function fetchShipmentsViaKits(token, kitsByProject) {
   if (!allKitIds.length) return {};
   const BATCH = 100;
 
-  // Step 1: Kit → Shipment associations
+  // Step 1: Kit → Shipment associations (parallel)
   const kitToShipmentIds = {}; // kitId → [shipmentObjectId, ...]
-  for (let i = 0; i < allKitIds.length; i += BATCH) {
-    const batch = allKitIds.slice(i, i + BATCH);
+  const kitShipBatches = [];
+  for (let i = 0; i < allKitIds.length; i += BATCH) kitShipBatches.push(allKitIds.slice(i, i + BATCH));
+  await Promise.all(kitShipBatches.map(async (batch) => {
     try {
       const res = await fetchWithTimeout(
         `https://api.hubapi.com/crm/v4/associations/${STATION_KIT_TYPE_ID}/${SHIPMENT_OBJECT_TYPE}/batch/read`,
@@ -491,7 +496,7 @@ async function fetchShipmentsViaKits(token, kitsByProject) {
           body: JSON.stringify({ inputs: batch.map(id => ({ id: String(id) })) }),
         }
       );
-      if (!res.ok) { console.warn("[shipments] kit→shipment assoc batch error:", res.status); continue; }
+      if (!res.ok) { console.warn("[shipments] kit→shipment assoc batch error:", res.status); return; }
       const data = await res.json();
       for (const result of (data.results || [])) {
         const ids = (result.to || []).map(t => String(t.toObjectId));
@@ -500,23 +505,24 @@ async function fetchShipmentsViaKits(token, kitsByProject) {
     } catch (e) {
       console.warn("[shipments] kit→shipment assoc batch failed:", e.name === "AbortError" ? "timeout (15s)" : e.message);
     }
-  }
+  }));
 
   const allShipmentIds = [...new Set(Object.values(kitToShipmentIds).flat())];
   if (!allShipmentIds.length) return {};
   console.log(`[shipments] found ${allShipmentIds.length} unique shipment IDs across all kits`);
 
-  // Step 2: Fetch shipment_tracking_number (INxxx) for each shipment
+  // Step 2: Fetch shipment_tracking_number (INxxx) for each shipment (parallel)
   const shipmentNums = {}; // shipmentObjectId → "INxxx"
-  for (let i = 0; i < allShipmentIds.length; i += BATCH) {
-    const batch = allShipmentIds.slice(i, i + BATCH);
+  const shipPropBatches = [];
+  for (let i = 0; i < allShipmentIds.length; i += BATCH) shipPropBatches.push(allShipmentIds.slice(i, i + BATCH));
+  await Promise.all(shipPropBatches.map(async (batch) => {
     try {
       const res = await fetchWithTimeout(`https://api.hubapi.com/crm/v3/objects/${SHIPMENT_OBJECT_TYPE}/batch/read`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ inputs: batch.map(id => ({ id })), properties: ["shipment_tracking_number"] }),
       });
-      if (!res.ok) continue;
+      if (!res.ok) return;
       const data = await res.json();
       for (const obj of (data.results || [])) {
         const num = obj.properties?.shipment_tracking_number;
@@ -525,7 +531,7 @@ async function fetchShipmentsViaKits(token, kitsByProject) {
     } catch (e) {
       console.warn("[shipments] shipment props batch failed:", e.name === "AbortError" ? "timeout (15s)" : e.message);
     }
-  }
+  }));
 
   // Step 3: Map project → unique INxxx numbers via kit intermediaries
   const byProject = {};
