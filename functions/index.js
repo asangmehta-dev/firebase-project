@@ -649,46 +649,10 @@ async function runSync(token, commit, syncCtx) {
     // Ensure schema version is set so the app-side migration can skip
     await db.ref("_schemaVersion").set("v3.2.0");
 
-    // v4.0.2 — Backfill project templates for ALL projects, not just new ones.
-    // Reason: many projects synced before v3.2.0/v4.0.0 don't have projectDetails or have folders without checklists.
-    // Also: use SI Partner pipeline membership (not the loose isSI flag) — [SI]-tagged Hardware Deployment projects
-    // should get the regular Internal+External checklist per spec.
-    const docDataSnap = await db.ref("appState/docData").once("value");
-    const docData = docDataSnap.val() || {};
-    let docDataChanged = false;
+    // Template injection for new projects is handled client-side by getProjectDetails() in App.jsx
+    // and server-side by the backfillChecklists CF. Doing it here required reading/writing the full
+    // 20MB appState/docData on every sync run, which consistently caused 540s timeouts.
 
-    for (const np of incoming) {
-      const pid = np.id;
-      const useSiChecklist = np.hubspotPipelineId === SI_PARTNER_PIPELINE_ID;
-      if (!docData[pid]) { docData[pid] = {}; docDataChanged = true; }
-
-      const existingPd = docData[pid].projectDetails;
-      const existingArr = Array.isArray(existingPd) ? existingPd : (existingPd && typeof existingPd === "object" ? Object.values(existingPd) : []);
-      const hasChecklist = existingArr.some(c => c && c.type === "checklist");
-
-      if (!existingPd || existingArr.length === 0) {
-        docData[pid].projectDetails = buildProjectDetails(useSiChecklist);
-        docDataChanged = true;
-      } else if (!hasChecklist) {
-        // Preserve existing folders, append the checklist sections only.
-        const newCats = buildProjectDetails(useSiChecklist);
-        const checklistCats = newCats.filter(c => c.type === "checklist");
-        docData[pid].projectDetails = [...existingArr, ...checklistCats];
-        docDataChanged = true;
-      }
-
-      if (!docData[pid].commercial) {
-        docData[pid].commercial = buildCommercialFolders();
-        docDataChanged = true;
-      }
-    }
-
-    if (docDataChanged) {
-      await db.ref("appState/docData").set(sanitizeForFirebase(docData));
-    }
-
-    // Shared state hoisted so the shipments block can reuse data already fetched by station kits.
-    let latestDocData = {};
     let kitsByProject = {}; // projectHsId → [kitId, ...]; populated by station kits, consumed by shipments
 
     // Station Kits sync — batch-read project→kit associations via v4 API, populate _hardwareTracking.
@@ -706,12 +670,17 @@ async function runSync(token, commit, syncCtx) {
         const totalComponents = Object.values(componentsByKit).reduce((s, a) => s + a.length, 0);
         console.log(`[stationKits] total components found: ${totalComponents}`, totalComponents > 0 ? "sample:" : "(none)", totalComponents > 0 ? JSON.stringify(Object.values(componentsByKit)[0]?.[0]) : "");
 
+        // Read only _hardwareTracking for projects that have kits (parallel targeted reads)
+        const existingHWByPid = {};
+        await Promise.all(Object.keys(byProject).map(async (projectHsId) => {
+          const pid = `hs_${projectHsId}`;
+          const snap = await db.ref(`appState/docData/${pid}/_hardwareTracking`).once("value");
+          existingHWByPid[pid] = snap.val() || null;
+        }));
         const hwUpdates = {};
-        latestDocData = (await db.ref("appState/docData").once("value")).val() || {};
         for (const [projectHsId, kitIds] of Object.entries(byProject)) {
           const pid = `hs_${projectHsId}`;
-          const existingHW = latestDocData[pid]?._hardwareTracking;
-          const hwArray = buildHardwareFromKits(kitIds, kitProps, componentsByKit, existingHW);
+          const hwArray = buildHardwareFromKits(kitIds, kitProps, componentsByKit, existingHWByPid[pid]);
           hwUpdates[`appState/docData/${pid}/_hardwareTracking`] = sanitizeForFirebase(hwArray);
         }
         if (Object.keys(hwUpdates).length > 0) {
@@ -734,17 +703,19 @@ async function runSync(token, commit, syncCtx) {
       console.log(`[shipments] projects with shipments: ${projectsWithShipments.length}`);
 
       if (projectsWithShipments.length > 0) {
-        // Reuse latestDocData from station kits block (same data; station kits only writes _hardwareTracking).
-        // Fall back to a fresh read if station kits threw before populating it.
-        const latestForShipments = Object.keys(latestDocData).length > 0
-          ? latestDocData
-          : (await db.ref("appState/docData").once("value")).val() || {};
+        // Read only projectDetails for projects with shipments (parallel targeted reads)
+        const pdByPid = {};
+        await Promise.all(projectsWithShipments.map(async (projectHsId) => {
+          const pid = `hs_${projectHsId}`;
+          const snap = await db.ref(`appState/docData/${pid}/projectDetails`).once("value");
+          pdByPid[projectHsId] = snap.val() || [];
+        }));
         const shipmentUpdates = {};
 
         for (const projectHsId of projectsWithShipments) {
           const pid = `hs_${projectHsId}`;
           const incomingNums = shipmentsByProject[projectHsId]; // ["IN00785", "IN00790", ...]
-          const existingPD = latestForShipments[pid]?.projectDetails || [];
+          const existingPD = pdByPid[projectHsId] || [];
           const existingArr = Array.isArray(existingPD) ? existingPD : Object.values(existingPD);
           const shipmentCat = existingArr.find(c => c && c.id === "pd_shipment_details");
           const existingRows = shipmentCat?.rows || [];
