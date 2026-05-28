@@ -4453,13 +4453,23 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
   // Per-tab theme: each tab remembers its own preference. Timeline
   // defaults to light (Gantt reads better there); others default to dark.
   // Mirrors fixture_tracker's nav.js theme persistence.
-  const DEFAULT_THEME_BY_TAB = { timeline: "light" };
+  // Per-tab body theme defaults — match the look in the design screenshots:
+  // tab-specific overrides win; anything not listed falls back to "dark".
+  const DEFAULT_THEME_BY_TAB = {
+    dashboard:       "light",
+    si_sird_gen:     "light",
+    si_testplan_gen: "light",
+    misc_docs:       "light",
+    timeline:        "dark",
+    kanban:          "dark",
+    si_fleet:        "dark",
+  };
   const getThemeForTab = (t) => {
     try {
       const saved = localStorage.getItem(`dp_si_theme.${t}`);
       if (saved === "light" || saved === "dark") return saved;
     } catch (_) {}
-    return DEFAULT_THEME_BY_TAB[t] || "dark";
+    return DEFAULT_THEME_BY_TAB[t] || "light";
   };
   const [theme, setThemeState] = useState(() => getThemeForTab("dashboard"));
   // Re-derive whenever the active tab changes.
@@ -4657,6 +4667,8 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
                 <div style={siS.empty}>
                   No projects match "{search}". <button onClick={() => setSearch("")} style={{ background: "none", border: 0, color: "#2563EB", cursor: "pointer", padding: 0, textDecoration: "underline", fontFamily: SI_F, fontSize: "inherit" }}>Clear search</button>
                 </div>
+              ) : !state.siProjectsLoaded ? (
+                <div style={{ ...siS.empty, color: siS.textMuted }}>Loading projects…</div>
               ) : (
                 <EmptyStateWithAutoImport isSIAdminUser={isSIAdminUser} actor={actor}
                   onOpenImport={() => setShowImport(true)}
@@ -7268,24 +7280,24 @@ function SIKanbanBoard({ projectList, onOpen }) {
   }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ ...siS.card, padding: "10px 14px", fontSize: 12, color: "#64748B" }}>
+      <div style={{ ...siS.card, padding: "10px 14px", fontSize: 12, color: siS.textMuted }}>
         Read-only — stage is set from the Timeline view.
       </div>
       <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 8 }}>
         {SI_STAGES.map(stage => (
           <div key={stage}
-            style={{ minWidth: 220, width: 220, flexShrink: 0, background: "#FFF", border: "1px solid #E2E8F0", borderRadius: 8, display: "flex", flexDirection: "column", maxHeight: "75vh" }}>
-            <div style={{ padding: "10px 12px", borderBottom: "1px solid #F1F5F9", display: "flex", alignItems: "center", gap: 6 }}>
+            style={{ minWidth: 220, width: 220, flexShrink: 0, background: siS.cardBg, border: `1px solid ${siS.cardBorder}`, borderRadius: 8, display: "flex", flexDirection: "column", maxHeight: "75vh" }}>
+            <div style={{ padding: "10px 12px", borderBottom: `1px solid ${siS.cardBorder}`, display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ width: 9, height: 9, borderRadius: "50%", background: SI_STAGE_COLORS[stage], flexShrink: 0 }}></span>
-              <span style={{ fontFamily: SI_F, fontSize: 12, fontWeight: 700, color: "#0F172A", textTransform: "uppercase", letterSpacing: 0.5, flex: 1 }}>{stage}</span>
-              <span style={{ background: "#F1F5F9", color: "#64748B", padding: "1px 7px", borderRadius: 999, fontFamily: SI_F, fontSize: 11, fontWeight: 700 }}>{byStage[stage].length}</span>
+              <span style={{ fontFamily: SI_F, fontSize: 12, fontWeight: 700, color: siS.text, textTransform: "uppercase", letterSpacing: 0.5, flex: 1 }}>{stage}</span>
+              <span style={{ background: siS.cardSoft, color: siS.textMuted, padding: "1px 7px", borderRadius: 999, fontFamily: SI_F, fontSize: 11, fontWeight: 700 }}>{byStage[stage].length}</span>
             </div>
             <div style={{ padding: 8, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
               {byStage[stage].map(p => (
                 <button key={p.pid} onClick={() => onOpen(p.pid)}
-                  style={{ background: siS.cardSoft, border: "1px solid #E2E8F0", borderLeft: p.is_blocked ? "3px solid #DC2626" : "3px solid transparent", borderRadius: 6, padding: "8px 10px", cursor: "pointer", textAlign: "left", fontFamily: SI_F }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A", marginBottom: 4 }}>{p.name}</div>
-                  <div style={{ fontSize: 11, color: "#64748B" }}>{p.si_name || "—"}{p.customer ? ` · ${p.customer}` : ""}{p.cm_site ? ` · ${p.cm_site}` : ""}</div>
+                  style={{ background: siS.cardSoft, border: `1px solid ${siS.cardBorder}`, borderLeft: p.is_blocked ? "3px solid #DC2626" : `3px solid ${siS.cardBorder}`, borderRadius: 6, padding: "8px 10px", cursor: "pointer", textAlign: "left", fontFamily: SI_F }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: siS.text, marginBottom: 4 }}>{p.name}</div>
+                  <div style={{ fontSize: 11, color: siS.textMuted }}>{p.si_name || "—"}{p.customer ? ` · ${p.customer}` : ""}{p.cm_site ? ` · ${p.cm_site}` : ""}</div>
                 </button>
               ))}
             </div>
@@ -8119,8 +8131,14 @@ function AICoverageDocImportButton({ pid, sections, actor }) {
    menu (New / Import / Sample) when localhost:5000 isn't reachable. */
 function EmptyStateWithAutoImport({ isSIAdminUser, actor, onOpenImport, onOpenNew }) {
   const siS = useSIS();
-  const [probe, setProbe] = useState({ state: "checking" });
+  // Only probe localhost:5000 when the user is actually running on localhost.
+  // On the deployed origin the fetch always fails (CORS / no localhost) and
+  // showing "checking… / not reachable" text just looks broken.
+  const isLocalDev = typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+  const [probe, setProbe] = useState(isLocalDev ? { state: "checking" } : { state: "missing" });
   useEffect(() => {
+    if (!isLocalDev) return;
     let cancelled = false;
     (async () => {
       try {
@@ -8137,7 +8155,7 @@ function EmptyStateWithAutoImport({ isSIAdminUser, actor, onOpenImport, onOpenNe
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [isLocalDev]);
   if (!isSIAdminUser) {
     return <div style={siS.empty}>No SI projects yet.</div>;
   }
@@ -8169,10 +8187,11 @@ function EmptyStateWithAutoImport({ isSIAdminUser, actor, onOpenImport, onOpenNe
       </div>
     );
   }
-  // localhost:5000 unreachable → fall back to the three-button menu.
+  // No projects yet (or localhost source unreachable in dev) — show the
+  // standard new/import/sample menu.
   return (
     <div style={{ ...siS.empty, padding: 30, display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-      <div>No SI projects yet, and localhost:5000 isn't reachable.</div>
+      <div>No SI projects yet.</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
         <button onClick={onOpenNew}
           style={{ padding: "7px 14px", border: "1px solid #2563EB", borderRadius: 8, background: "#2563EB", color: "#FFF", fontFamily: SI_F, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
@@ -8183,9 +8202,11 @@ function EmptyStateWithAutoImport({ isSIAdminUser, actor, onOpenImport, onOpenNe
           🎲 Try sample data
         </button>
       </div>
-      <div style={{ fontSize: 11.5, color: "#94A3B8" }}>
-        If localhost:5000 is running, start it then refresh this page to auto-detect.
-      </div>
+      {isLocalDev && (
+        <div style={{ fontSize: 11.5, color: "#94A3B8" }}>
+          If localhost:5000 (fixture_tracker) is running, start it then refresh this page to auto-detect.
+        </div>
+      )}
     </div>
   );
 }
@@ -10336,7 +10357,7 @@ export default function App() {
       // SI Projects (manually-created via the All SI Projects page; not
       // synced from HubSpot). Stored as a map of {pid: projectRecord}.
       unsubs.push(onValue(ref(db, "appState/siProjects"), (s) => {
-        setState(prev => ({ ...prev, siProjects: s.val() || {} }));
+        setState(prev => ({ ...prev, siProjects: s.val() || {}, siProjectsLoaded: true }));
       }));
     } else {
       // External users — listen only to assigned projects/docData. Parent reads are blocked by rules.
