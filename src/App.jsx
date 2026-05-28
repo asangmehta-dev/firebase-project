@@ -4826,7 +4826,7 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
         )}
 
         {tab === "timeline" && <SIGanttView projectList={projectList} onOpen={setSelectedPid} theme={theme} actor={actor} />}
-        {tab === "kanban"   && <SIKanbanBoard projectList={projectList} onOpen={setSelectedPid} />}
+        {tab === "kanban"   && <SIKanbanBoard hubspotProjects={state.projects || []} />}
         {tab === "si_fleet"        && <SIFleetScorecard projectList={projectList} />}
         {tab === "si_sird_gen"     && <SIRDGeneratorView    projectList={projectList} isSIAdminUser={isSIAdminUser} user={user}  initialPid={pendingPid} onConsumeInitialPid={() => setPendingPid(null)} />}
         {tab === "si_testplan_gen" && <TestPlanGeneratorView projectList={projectList} isSIAdminUser={isSIAdminUser} user={user}  initialPid={pendingPid} onConsumeInitialPid={() => setPendingPid(null)} />}
@@ -7284,40 +7284,88 @@ function SlideActivity({ pid, T }) {
   );
 }
 
-function SIKanbanBoard({ projectList, onOpen }) {
+// Kanban is the source-of-truth view for HubSpot pipeline state. It reads
+// directly from the HubSpot-synced `projects` collection (filtered to the
+// SI Partner Deployment pipeline) and is read-only — stage changes happen
+// in HubSpot. Other SI tabs (Dashboard, Timeline, drill-in) keep using the
+// manually-maintained `siProjects` RTDB collection.
+const HUBSPOT_TO_SI_STAGE = {
+  sird: "SIRD", dfm: "DFM", quote: "Quote", po: "PO",
+  build: "Build", fat: "FAT", sat: "SAT", live: "Live",
+};
+const NEW_PROJECT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;  // 14 days
+
+function SIKanbanBoard({ hubspotProjects }) {
   const siS = useSIS();
+  // Filter to the SI Partner Deployment pipeline, active only.
+  const list = (hubspotProjects || []).filter(p =>
+    p.status === "active" && p.hubspotPipelineId === SI_PARTNER_PIPELINE_ID
+  );
+  const now = Date.now();
+  const isNew = (p) => {
+    const raw = p.createdAt || p.created_at || p.createDate || p.updatedAt;
+    if (!raw) return false;
+    const t = typeof raw === "number" ? raw : Date.parse(raw);
+    return Number.isFinite(t) && (now - t) <= NEW_PROJECT_WINDOW_MS;
+  };
   const byStage = {};
   for (const s of SI_STAGES) byStage[s] = [];
-  for (const p of projectList) {
-    const s = effectiveStage(p);
-    if (byStage[s]) byStage[s].push(p);
+  for (const p of list) {
+    const hsStage = normalizeSiStage(p.siStage);                  // lowercase id
+    const stage = HUBSPOT_TO_SI_STAGE[hsStage] || "SIRD";          // canonical
+    if (byStage[stage]) byStage[stage].push(p);
   }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ ...siS.card, padding: "10px 14px", fontSize: 12, color: siS.textMuted }}>
-        Read-only — stage is set from the Timeline view.
+      <div style={{ ...siS.card, padding: "10px 14px", fontFamily: SI_F, fontSize: 12, color: siS.textMuted, display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#6366F1", flexShrink: 0 }} />
+        <span><strong style={{ color: siS.text }}>Read-only</strong> — pulled from HubSpot. {list.length} project{list.length === 1 ? "" : "s"} in the SI Partner Deployment pipeline.</span>
       </div>
-      <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 8 }}>
-        {SI_STAGES.map(stage => (
-          <div key={stage}
-            style={{ minWidth: 220, width: 220, flexShrink: 0, background: siS.cardBg, border: `1px solid ${siS.cardBorder}`, borderRadius: 8, display: "flex", flexDirection: "column", maxHeight: "75vh" }}>
-            <div style={{ padding: "10px 12px", borderBottom: `1px solid ${siS.cardBorder}`, display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ width: 9, height: 9, borderRadius: "50%", background: SI_STAGE_COLORS[stage], flexShrink: 0 }}></span>
-              <span style={{ fontFamily: SI_F, fontSize: 12, fontWeight: 700, color: siS.text, textTransform: "uppercase", letterSpacing: 0.5, flex: 1 }}>{stage}</span>
-              <span style={{ background: siS.cardSoft, color: siS.textMuted, padding: "1px 7px", borderRadius: 999, fontFamily: SI_F, fontSize: 11, fontWeight: 700 }}>{byStage[stage].length}</span>
+      {list.length === 0 ? (
+        <div style={{ ...siS.empty, color: siS.textMuted }}>
+          No active projects in the SI Partner Deployment pipeline yet. They'll appear here as soon as HubSpot syncs them in.
+        </div>
+      ) : (
+        <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 8 }}>
+          {SI_STAGES.map(stage => (
+            <div key={stage}
+              style={{ minWidth: 220, width: 220, flexShrink: 0, background: siS.cardBg, border: `1px solid ${siS.cardBorder}`, borderRadius: 8, display: "flex", flexDirection: "column", maxHeight: "75vh" }}>
+              <div style={{ padding: "10px 12px", borderBottom: `1px solid ${siS.cardBorder}`, display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 9, height: 9, borderRadius: "50%", background: SI_STAGE_COLORS[stage], flexShrink: 0 }}></span>
+                <span style={{ fontFamily: SI_F, fontSize: 12, fontWeight: 700, color: siS.text, textTransform: "uppercase", letterSpacing: 0.5, flex: 1 }}>{stage}</span>
+                <span style={{ background: siS.cardSoft, color: siS.textMuted, padding: "1px 7px", borderRadius: 999, fontFamily: SI_F, fontSize: 11, fontWeight: 700 }}>{byStage[stage].length}</span>
+              </div>
+              <div style={{ padding: 8, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
+                {byStage[stage].map(p => {
+                  const url = hubspotProjectUrl(p);
+                  const fresh = isNew(p);
+                  const Card = (
+                    <div style={{ background: siS.cardSoft, border: `1px solid ${siS.cardBorder}`, borderRadius: 6, padding: "8px 10px", fontFamily: SI_F }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                        <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: siS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                        {fresh && (
+                          <span style={{ background: "#16A34A", color: "#FFF", padding: "1px 6px", borderRadius: 999, fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4 }}>NEW</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 11, color: siS.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {p.customer || "—"}{p.stations ? ` · ${p.stations} stn` : ""}
+                      </div>
+                    </div>
+                  );
+                  return url ? (
+                    <a key={p.id} href={url} target="_blank" rel="noopener" title="Open in HubSpot"
+                      style={{ textDecoration: "none", display: "block" }}>
+                      {Card}
+                    </a>
+                  ) : (
+                    <div key={p.id}>{Card}</div>
+                  );
+                })}
+              </div>
             </div>
-            <div style={{ padding: 8, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
-              {byStage[stage].map(p => (
-                <button key={p.pid} onClick={() => onOpen(p.pid)}
-                  style={{ background: siS.cardSoft, border: `1px solid ${siS.cardBorder}`, borderLeft: p.is_blocked ? "3px solid #DC2626" : `3px solid ${siS.cardBorder}`, borderRadius: 6, padding: "8px 10px", cursor: "pointer", textAlign: "left", fontFamily: SI_F }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: siS.text, marginBottom: 4 }}>{p.name}</div>
-                  <div style={{ fontSize: 11, color: siS.textMuted }}>{p.si_name || "—"}{p.customer ? ` · ${p.customer}` : ""}{p.cm_site ? ` · ${p.cm_site}` : ""}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
