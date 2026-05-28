@@ -4478,8 +4478,12 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
     setThemeState(t);
     try { localStorage.setItem(`dp_si_theme.${tab}`, t); } catch (_) {}
   };
-  const T = THEMES[theme] || THEMES.light;
   const [selectedPid, setSelectedPid] = useState(null);
+  // The project drill-in is intentionally always light, regardless of the
+  // tab the user clicked through from (Dashboard / Timeline / Kanban). The
+  // tab's own theme resumes the moment they go back.
+  const effectiveTheme = selectedPid ? "light" : theme;
+  const T = THEMES[effectiveTheme] || THEMES.light;
   const [editing, setEditing]         = useState(null);
   const [showNew, setShowNew]         = useState(false);
   const [manageOpen, setManageOpen]   = useState(false);
