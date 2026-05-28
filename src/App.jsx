@@ -7378,7 +7378,10 @@ function SIFleetScorecard({ projectList }) {
     return onValue(r, s => setNotes(s.val() || {}));
   }, []);
   const [openSi, setOpenSi] = useState(null);
+  const [chartPid, setChartPid] = useState(null);  // null = all projects under this SI
   const [refreshKey, setRefreshKey] = useState(0);
+  // Reset chart-scope whenever the opened SI changes.
+  useEffect(() => { setChartPid(null); }, [openSi]);
 
   // ── Top-level KPIs ────────────────────────────────────────────────
   const kpis = useMemo(() => {
@@ -7538,11 +7541,15 @@ function SIFleetScorecard({ projectList }) {
         if (!r) return null;
         const siKey = openSi.toLowerCase().replace(/[^a-z0-9]+/g, "_");
         const note = notes[siKey] || {};
-        // Per-stage average slippage
+        // Chart scope: a single project if chartPid is set, otherwise all
+        // projects under this SI.
+        const scopedItems = chartPid ? r.items.filter(p => p.pid === chartPid) : r.items;
+        const scopedProject = chartPid ? r.items.find(p => p.pid === chartPid) : null;
+        // Per-stage average slippage over scopedItems
         const stages = ["SIRD", "DFM", "Quote", "PO", "Build", "FAT", "In Transit", "SAT"];
         const slipByStage = stages.map(s => {
           const diffs = [];
-          for (const p of r.items) {
+          for (const p of scopedItems) {
             const sd = p.stage_dates?.[s];
             if (!sd?.planned_end || !sd?.actual_end) continue;
             const pe = new Date(sd.planned_end), ae = new Date(sd.actual_end);
@@ -7574,7 +7581,21 @@ function SIFleetScorecard({ projectList }) {
             <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 18 }}>
               {/* Chart */}
               <div>
-                <div style={{ fontFamily: SI_F, fontSize: 10.5, color: siS.textMuted, textTransform: "uppercase", letterSpacing: 0.6, fontWeight: 700, marginBottom: 6 }}>Average slippage per stage (days)</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <div style={{ fontFamily: SI_F, fontSize: 10.5, color: siS.textMuted, textTransform: "uppercase", letterSpacing: 0.6, fontWeight: 700 }}>
+                    Average slippage per stage (days)
+                  </div>
+                  <span style={{ fontFamily: SI_F, fontSize: 11, color: siS.textMuted }}>
+                    · {scopedProject ? scopedProject.name : `${r.items.length} project${r.items.length === 1 ? "" : "s"}`}
+                  </span>
+                  <div style={{ flex: 1 }} />
+                  {chartPid && (
+                    <button onClick={() => setChartPid(null)}
+                      style={{ padding: "3px 10px", border: `1px solid ${siS.cardBorder}`, borderRadius: 999, background: "transparent", color: siS.link, fontFamily: SI_F, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+                      Show all projects
+                    </button>
+                  )}
+                </div>
                 <svg viewBox={`0 0 ${chartW} ${chartH}`} style={{ width: "100%", height: chartH, maxWidth: chartW }}>
                   {/* y-axis ticks + gridlines */}
                   {ticks.map((t, i) => {
@@ -7602,20 +7623,32 @@ function SIFleetScorecard({ projectList }) {
                 </svg>
               </div>
 
-              {/* Project list */}
+              {/* Project list — click a row to scope the chart to it */}
               <div>
-                <div style={{ fontFamily: SI_F, fontSize: 10.5, color: siS.textMuted, textTransform: "uppercase", letterSpacing: 0.6, fontWeight: 700, marginBottom: 8 }}>Projects</div>
-                <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <div style={{ fontFamily: SI_F, fontSize: 10.5, color: siS.textMuted, textTransform: "uppercase", letterSpacing: 0.6, fontWeight: 700 }}>Projects</div>
+                  <span style={{ fontFamily: SI_F, fontSize: 10.5, color: siS.textMuted, fontStyle: "italic" }}>click to filter chart</span>
+                </div>
+                <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
                   {r.items.map(p => {
                     const es = effectiveStage(p);
                     const fatStatus = p?.test_plans?.fat?.signed_off_at ? "SIGNED" : p?.test_plans?.fat?.status?.toUpperCase() || "PENDING";
                     const satStatus = p?.test_plans?.sat?.signed_off_at ? "SIGNED" : p?.test_plans?.sat?.status?.toUpperCase() || "PENDING";
+                    const isSelected = chartPid === p.pid;
                     const pill = (text, bg, fg) => (
                       <span style={{ background: bg, color: fg, padding: "1px 7px", borderRadius: 999, fontFamily: SI_F, fontSize: 10, fontWeight: 700, letterSpacing: 0.3, textTransform: "uppercase" }}>{text}</span>
                     );
                     return (
-                      <li key={p.pid} style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: SI_F, fontSize: 12 }}>
-                        <span style={{ color: siS.link, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 280 }}>{p.name}</span>
+                      <li key={p.pid}
+                        onClick={() => setChartPid(isSelected ? null : p.pid)}
+                        title={isSelected ? "Click to show all projects" : "Click to filter chart to this project"}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 6, fontFamily: SI_F, fontSize: 12,
+                          padding: "5px 8px", borderRadius: 6, cursor: "pointer",
+                          background: isSelected ? siS.cardSoft : "transparent",
+                          border: `1px solid ${isSelected ? siS.link : "transparent"}`,
+                        }}>
+                        <span style={{ color: siS.link, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }}>{p.name}</span>
                         {pill(es, SI_STAGE_COLORS[es] || "#94A3B8", "#FFF")}
                         {p.is_blocked && pill("BLOCKED", "#FECACA", "#991B1B")}
                         {pill(`FAT: ${fatStatus}`, siS.cardSoft, siS.textMuted)}
