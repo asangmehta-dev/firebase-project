@@ -4550,9 +4550,19 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
     setSelectedPid(null);
   }
 
+  // When the drill-in's "Manage in <Generator>" link is clicked, we want the
+  // destination tab's project picker to be pre-set to the project the user
+  // was just looking at. `pendingPid` carries the pid across the tab switch;
+  // the target view consumes it via its `initialPid` prop and then clears it.
+  const [pendingPid, setPendingPid] = useState(null);
   const navCtx = useMemo(() => ({
-    goToTab: (tabId) => { setSelectedPid(null); setTab(tabId); },
-  }), []);
+    goToTab: (tabId, opts) => {
+      const carry = (opts && opts.pid) || selectedPid || null;
+      if (carry) setPendingPid(carry);
+      setSelectedPid(null);
+      setTab(tabId);
+    },
+  }), [selectedPid]);
 
   // Helper used by the regular return below to wrap the whole view in
   // the preview + style + nav contexts and render the modal once.
@@ -4818,9 +4828,9 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
         {tab === "timeline" && <SIGanttView projectList={projectList} onOpen={setSelectedPid} theme={theme} actor={actor} />}
         {tab === "kanban"   && <SIKanbanBoard projectList={projectList} onOpen={setSelectedPid} />}
         {tab === "si_fleet"        && <SIFleetScorecard projectList={projectList} />}
-        {tab === "si_sird_gen"     && <SIRDGeneratorView projectList={projectList} isSIAdminUser={isSIAdminUser} user={user} />}
-        {tab === "si_testplan_gen" && <TestPlanGeneratorView projectList={projectList} isSIAdminUser={isSIAdminUser} user={user} />}
-        {tab === "misc_docs"       && <MiscDocumentsView projectList={projectList} isSIAdminUser={isSIAdminUser} actor={actor} />}
+        {tab === "si_sird_gen"     && <SIRDGeneratorView    projectList={projectList} isSIAdminUser={isSIAdminUser} user={user}  initialPid={pendingPid} onConsumeInitialPid={() => setPendingPid(null)} />}
+        {tab === "si_testplan_gen" && <TestPlanGeneratorView projectList={projectList} isSIAdminUser={isSIAdminUser} user={user}  initialPid={pendingPid} onConsumeInitialPid={() => setPendingPid(null)} />}
+        {tab === "misc_docs"       && <MiscDocumentsView    projectList={projectList} isSIAdminUser={isSIAdminUser} actor={actor} initialPid={pendingPid} onConsumeInitialPid={() => setPendingPid(null)} />}
         </>}
       </div>
 
@@ -7321,9 +7331,12 @@ function SIKanbanBoard({ projectList, onOpen }) {
 /* Manage > Misc Documents — project picker + misc-only upload zone.
    This is the project Dashboard's Misc section, exposed standalone so
    the user can manage misc docs without opening each project. */
-function MiscDocumentsView({ projectList, isSIAdminUser, actor }) {
+function MiscDocumentsView({ projectList, isSIAdminUser, actor, initialPid, onConsumeInitialPid }) {
   const siS = useSIS();
-  const [pid, setPid] = useState("");
+  const [pid, setPid] = useState(initialPid || "");
+  useEffect(() => {
+    if (initialPid) { setPid(initialPid); onConsumeInitialPid && onConsumeInitialPid(); }
+  }, [initialPid]);
   const project = pid ? projectList.find(p => p.pid === pid) : null;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -8491,9 +8504,12 @@ function SIRDSubscribersSection({ pid, project, isSIAdminUser, actor }) {
   );
 }
 
-function SIRDGeneratorView({ projectList, isSIAdminUser, user }) {
+function SIRDGeneratorView({ projectList, isSIAdminUser, user, initialPid, onConsumeInitialPid }) {
   const siS = useSIS();
-  const [pid, setPid] = useState("");
+  const [pid, setPid] = useState(initialPid || "");
+  useEffect(() => {
+    if (initialPid) { setPid(initialPid); onConsumeInitialPid && onConsumeInitialPid(); }
+  }, [initialPid]);
   const project = pid ? projectList.find(p => p.pid === pid) : null;
   const responses = project?.sird_responses || {};
   const versions = Object.entries(project?.sird_versions || {})
@@ -9130,7 +9146,7 @@ function NewTestPlanModal({ kind, pid, actor, onClose, onCreated }) {
   );
 }
 
-function TestPlanGeneratorView({ projectList, isSIAdminUser, user }) {
+function TestPlanGeneratorView({ projectList, isSIAdminUser, user, initialPid, onConsumeInitialPid }) {
   const siS = useSIS();
   const [mode, setMode] = useState("generate"); // generate | library
   const actor = user?.email || user?.name || "unknown";
@@ -9161,14 +9177,17 @@ function TestPlanGeneratorView({ projectList, isSIAdminUser, user }) {
       </div>
       {mode === "library"
         ? <TestPlanLibraryView isSIAdminUser={isSIAdminUser} actor={actor} />
-        : <TestPlanGeneratePane projectList={projectList} isSIAdminUser={isSIAdminUser} user={user} />}
+        : <TestPlanGeneratePane projectList={projectList} isSIAdminUser={isSIAdminUser} user={user} initialPid={initialPid} onConsumeInitialPid={onConsumeInitialPid} />}
     </div>
   );
 }
 
-function TestPlanGeneratePane({ projectList, isSIAdminUser, user }) {
+function TestPlanGeneratePane({ projectList, isSIAdminUser, user, initialPid, onConsumeInitialPid }) {
   const siS = useSIS();
-  const [pid, setPid] = useState("");
+  const [pid, setPid] = useState(initialPid || "");
+  useEffect(() => {
+    if (initialPid) { setPid(initialPid); onConsumeInitialPid && onConsumeInitialPid(); }
+  }, [initialPid]);
   const [planType, setPlanType] = useState("fat");
   const [editingPlan, setEditingPlan] = useState(null);  // "fat" | "sat" | null
   const [newPlanModal, setNewPlanModal] = useState(null); // "fat" | "sat" | null
