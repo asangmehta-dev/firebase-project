@@ -4571,13 +4571,13 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
   // transparent unselected, slightly lighter selected. Colors flip with
   // the theme so the toggle visibly changes the nav too.
   const navTab = (id, label) => (
-    <button onClick={() => setTab(id)}
+    <button onClick={() => { setSelectedPid(null); setTab(id); }}
       style={{
         padding: "6px 14px",
-        border: `1px solid ${tab === id ? NAV_BORDER : "transparent"}`,
+        border: `1px solid ${tab === id && !selectedPid ? NAV_BORDER : "transparent"}`,
         borderRadius: 6,
-        background: tab === id ? NAV_HOVER : "transparent",
-        color: tab === id ? NAV_TEXT : NAV_MUTED,
+        background: tab === id && !selectedPid ? NAV_HOVER : "transparent",
+        color: tab === id && !selectedPid ? NAV_TEXT : NAV_MUTED,
         fontFamily: SI_F, fontSize: 13, fontWeight: 600, cursor: "pointer",
       }}>{label}</button>
   );
