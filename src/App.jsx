@@ -4538,7 +4538,7 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
   const isEditing = (pid, field) => editing?.pid === pid && editing?.field === field;
 
   const previewCtx = useMemo(() => ({ openPreview: (f) => setPreviewFile(f) }), []);
-  const siS = useMemo(() => themedSI(T), [theme]);
+  const siS = useMemo(() => themedSI(T), [T]);
 
   // Drill-in is rendered as a sub-view INSIDE the AllSIProjectsView's
   // shared top nav, so logo + tabs + theme toggle stay visible. The
