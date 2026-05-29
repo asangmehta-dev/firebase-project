@@ -7353,7 +7353,11 @@ function extractSiName(rawName) {
 }
 
 // Turn HubSpot's per-stage entered/exited dates into our timeline schema.
-// Each entry becomes { actual_start, actual_end } on the matching stage.
+// HubSpot's "date entered <stage>" and "date exited <stage>" are populated
+// when the project moves through the SI Partner Deployment pipeline; we
+// treat that progression as the PLANNED timeline (the baseline schedule)
+// so the user can layer actual deltas on top.
+//
 // If `existing` is provided, we merge non-destructively — only fill keys
 // that are currently empty, so manual edits are preserved.
 function buildStageDatesFromHubspot(hubspotStageDates, existing = {}) {
@@ -7362,9 +7366,9 @@ function buildStageDatesFromHubspot(hubspotStageDates, existing = {}) {
   for (const [stage, dates] of Object.entries(hubspotStageDates)) {
     const cur = out[stage] || {};
     const next = { ...cur };
-    if (!cur.actual_start && dates?.entered) next.actual_start = dates.entered;
-    if (!cur.actual_end   && dates?.exited)  next.actual_end   = dates.exited;
-    if (next.actual_start || next.actual_end || cur.planned_start || cur.planned_end) {
+    if (!cur.planned_start && dates?.entered) next.planned_start = dates.entered;
+    if (!cur.planned_end   && dates?.exited)  next.planned_end   = dates.exited;
+    if (next.planned_start || next.planned_end || cur.actual_start || cur.actual_end) {
       out[stage] = next;
     }
   }
