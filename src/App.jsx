@@ -1151,7 +1151,7 @@ function ProjectOverviewSection({ project, state, setState, user }) {
   const [botLoading, setBotLoading] = useState(false);
   // "idle" | "syncing" | "ok" | "error"
   const [writebackStatus, setWritebackStatus] = useState("idle");
-  useEffect(() => { setDraft(overview); }, [overview, pid]);
+  useEffect(() => { if (!editing) setDraft(overview); }, [editing, overview, pid]);
 
   const DATE_KEYS = ["cadCompleteDate", "cadActualFinishDate", "actualServiceStartDate", "targetBuildDate", "actualDeployDate"];
 
