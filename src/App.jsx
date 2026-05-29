@@ -7297,6 +7297,23 @@ const NEW_PROJECT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;  // 14 days
 
 function SIKanbanBoard({ hubspotProjects }) {
   const siS = useSIS();
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
+  const refreshFromHubspot = async () => {
+    setSyncing(true); setSyncMsg("");
+    try {
+      const fn = httpsCallable(functions, "manualHubspotSync");
+      const res = await fn();
+      const n = res?.data?.synced ?? res?.data?.count ?? null;
+      setSyncMsg(n != null ? `Synced ${n} project${n === 1 ? "" : "s"} from HubSpot` : "Sync complete");
+      setTimeout(() => setSyncMsg(""), 6000);
+    } catch (e) {
+      setSyncMsg(`Sync failed: ${e?.message || e}`);
+      setTimeout(() => setSyncMsg(""), 8000);
+    } finally {
+      setSyncing(false);
+    }
+  };
   // Filter to the SI Partner Deployment pipeline, active only.
   const list = (hubspotProjects || []).filter(p =>
     p.status === "active" && p.hubspotPipelineId === SI_PARTNER_PIPELINE_ID
@@ -7319,7 +7336,14 @@ function SIKanbanBoard({ hubspotProjects }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ ...siS.card, padding: "10px 14px", fontFamily: SI_F, fontSize: 12, color: siS.textMuted, display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#6366F1", flexShrink: 0 }} />
-        <span><strong style={{ color: siS.text }}>Read-only</strong> — pulled from HubSpot. {list.length} project{list.length === 1 ? "" : "s"} in the SI Partner Deployment pipeline.</span>
+        <span style={{ flex: 1 }}>
+          <strong style={{ color: siS.text }}>Read-only</strong> — pulled from HubSpot. {list.length} project{list.length === 1 ? "" : "s"} in the SI Partner Deployment pipeline.
+          {syncMsg && <span style={{ marginLeft: 8, color: syncMsg.startsWith("Sync failed") ? "#DC2626" : "#16A34A" }}>· {syncMsg}</span>}
+        </span>
+        <button onClick={refreshFromHubspot} disabled={syncing}
+          style={{ padding: "5px 12px", border: `1px solid ${siS.cardBorder}`, borderRadius: 6, background: siS.cardSoft, color: siS.text, fontFamily: SI_F, fontSize: 11.5, fontWeight: 600, cursor: syncing ? "wait" : "pointer" }}>
+          {syncing ? "Syncing…" : "↻ Refresh from HubSpot"}
+        </button>
       </div>
       {list.length === 0 ? (
         <div style={{ ...siS.empty, color: siS.textMuted }}>
