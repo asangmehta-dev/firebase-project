@@ -7352,10 +7352,10 @@ function SIKanbanBoard({ hubspotProjects }) {
           No active projects in the SI Partner Deployment pipeline yet. They'll appear here as soon as HubSpot syncs them in.
         </div>
       ) : (
-        <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${SI_STAGES.length}, minmax(0, 1fr))`, gap: 8, paddingBottom: 8 }}>
           {SI_STAGES.map(stage => (
             <div key={stage}
-              style={{ minWidth: 220, width: 220, flexShrink: 0, background: siS.cardBg, border: `1px solid ${siS.cardBorder}`, borderRadius: 8, display: "flex", flexDirection: "column", maxHeight: "75vh" }}>
+              style={{ minWidth: 0, background: siS.cardBg, border: `1px solid ${siS.cardBorder}`, borderRadius: 8, display: "flex", flexDirection: "column", maxHeight: "75vh" }}>
               <div style={{ padding: "10px 12px", borderBottom: `1px solid ${siS.cardBorder}`, display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ width: 9, height: 9, borderRadius: "50%", background: SI_STAGE_COLORS[stage], flexShrink: 0 }}></span>
                 <span style={{ fontFamily: SI_F, fontSize: 12, fontWeight: 700, color: siS.text, textTransform: "uppercase", letterSpacing: 0.5, flex: 1 }}>{stage}</span>
