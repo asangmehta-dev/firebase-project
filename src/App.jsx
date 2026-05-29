@@ -7303,8 +7303,10 @@ function SIKanbanBoard({ hubspotProjects }) {
     setSyncing(true); setSyncMsg("");
     try {
       const fn = httpsCallable(functions, "manualHubspotSync");
-      const res = await fn();
-      const n = res?.data?.synced ?? res?.data?.count ?? null;
+      // commit:true — without this flag the Cloud Function only previews
+      // changes and never writes them back to RTDB.
+      const res = await fn({ commit: true });
+      const n = res?.data?.synced ?? res?.data?.count ?? res?.data?.totalProjects ?? null;
       setSyncMsg(n != null ? `Synced ${n} project${n === 1 ? "" : "s"} from HubSpot` : "Sync complete");
       setTimeout(() => setSyncMsg(""), 6000);
     } catch (e) {
