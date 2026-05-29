@@ -24,6 +24,22 @@ const db = admin.database();
 const OBJECT_TYPE = "2-39524389";
 const SHIPMENT_OBJECT_TYPE = "2-39524475"; // Shipments custom object; primaryDisplayProperty = shipment_tracking_number (INxxx)
 const STATION_KIT_TYPE_ID = "2-39260531";  // Station Kits custom object — used to traverse Kit→Shipment associations
+// Per-SI-stage entered/exited date properties — populated by HubSpot
+// automatically as projects move through the SI Partner Deployment pipeline.
+// We request these so the timeline can pull actual stage dates without
+// requiring the user to type them in.
+const SI_STAGE_DATE_PROPS = [
+  // entered
+  "hs_v2_date_entered_3539976891", "hs_v2_date_entered_3539976892",
+  "hs_v2_date_entered_3545524981", "hs_v2_date_entered_3545524982",
+  "hs_v2_date_entered_3545524983", "hs_v2_date_entered_3545524984",
+  "hs_v2_date_entered_3545524985", "hs_v2_date_entered_3545525946",
+  // exited
+  "hs_v2_date_exited_3539976891", "hs_v2_date_exited_3539976892",
+  "hs_v2_date_exited_3545524981", "hs_v2_date_exited_3545524982",
+  "hs_v2_date_exited_3545524983", "hs_v2_date_exited_3545524984",
+  "hs_v2_date_exited_3545524985", "hs_v2_date_exited_3545525946",
+];
 const PROPERTIES = [
   "project_name", "hs_object_id", "app_project_id__c", "number_of_stations__c",
   "company_codename", "hs_pipeline", "hs_pipeline_stage",
@@ -33,6 +49,8 @@ const PROPERTIES = [
   "type_of_lenses", "led_light_controllers", "standard_station_frames",
   "large_station_frames", "computers", "monitor_screens", "barcode_scanners",
   "station_bom_details_hde", "hs_createdate", "hs_lastmodifieddate",
+  "actual_start_date", "actual_finish_date",
+  ...SI_STAGE_DATE_PROPS,
 ].join(",");
 
 const PIPELINES = {
@@ -191,12 +209,38 @@ function mapHubspotToProject(obj) {
   const siStage = isFromSiPartner ? (SI_PARTNER_STAGE_MAP[stageId] || "sird") : null;
   const isClosed = stage.closed === true;
 
+  // Per-stage entered/exited timestamps from HubSpot, keyed by the
+  // canonical SI stage label used in our timeline ("SIRD", "DFM", …).
+  // ISO-8601 date strings; null when the stage hasn't been entered/exited.
+  const SI_STAGE_KEY_TO_CANONICAL = {
+    sird: "SIRD", dfm: "DFM", quote: "Quote", po: "PO",
+    build: "Build", fat: "FAT", sat: "SAT", live: "Live",
+  };
+  const toISODate = (raw) => {
+    if (!raw) return null;
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+  };
+  const hubspotStageDates = {};
+  if (isFromSiPartner) {
+    for (const [hsStageId, key] of Object.entries(SI_PARTNER_STAGE_MAP)) {
+      const canonical = SI_STAGE_KEY_TO_CANONICAL[key];
+      if (!canonical) continue;
+      const entered = toISODate(p[`hs_v2_date_entered_${hsStageId}`]);
+      const exited  = toISODate(p[`hs_v2_date_exited_${hsStageId}`]);
+      if (entered || exited) hubspotStageDates[canonical] = { entered, exited };
+    }
+  }
+
   return {
     id: `hs_${obj.id}`,
     hubspotId: obj.id,
     name,
     customer,
     codename,
+    actualStartDate: toISODate(p.actual_start_date),
+    actualFinishDate: toISODate(p.actual_finish_date),
+    hubspotStageDates,
     appProjectId: p.app_project_id__c || null,
     stations,
     isSI,

@@ -4529,11 +4529,23 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
     (async () => {
       for (const hp of candidates) {
         const linked = findLinkedSiProject(hp, allProjects);
-        if (linked) continue;
+        const hsStageDates = hp.hubspotStageDates || {};
+        if (linked) {
+          // Existing manual project — non-destructively merge any HubSpot
+          // stage dates we have but the user hasn't filled in yet.
+          const merged = buildStageDatesFromHubspot(hsStageDates, linked.stage_dates || {});
+          const changed = JSON.stringify(merged) !== JSON.stringify(linked.stage_dates || {});
+          if (changed) {
+            await update(ref(db, `appState/siProjects/${linked.pid}`), { stage_dates: merged });
+            logSIActivity(linked.pid, "hubspot_dates_merge", `Imported HubSpot stage dates`, actor);
+          }
+          continue;
+        }
         const autoPid = `hs_${hp.hubspotId || hp.id}`;
         if (siProjects[autoPid]) continue;
         const hsStage = normalizeSiStage(hp.siStage);
         const stage = HUBSPOT_TO_SI_STAGE[hsStage] || "SIRD";
+        const stageDates = buildStageDatesFromHubspot(hsStageDates);
         await set(ref(db, `appState/siProjects/${autoPid}`), {
           name: hp.name || "(unnamed)",
           si_name: extractSiName(hp.name) || "",
@@ -4541,7 +4553,7 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
           cm_site: "",
           factory_location: hp.deployLocation || "",
           current_stage: stage,
-          stage_dates: {},
+          stage_dates: stageDates,
           stations: {},
           hubspot_id: hp.hubspotId || null,
           hubspot_pipeline_id: hp.hubspotPipelineId || null,
@@ -7338,6 +7350,25 @@ function extractSiName(rawName) {
   if (!rawName) return null;
   const m = String(rawName).match(/^\s*\[SI\]\s*\[([^\]]+)\]/i);
   return m ? m[1].trim() : null;
+}
+
+// Turn HubSpot's per-stage entered/exited dates into our timeline schema.
+// Each entry becomes { actual_start, actual_end } on the matching stage.
+// If `existing` is provided, we merge non-destructively — only fill keys
+// that are currently empty, so manual edits are preserved.
+function buildStageDatesFromHubspot(hubspotStageDates, existing = {}) {
+  const out = { ...(existing || {}) };
+  if (!hubspotStageDates || typeof hubspotStageDates !== "object") return out;
+  for (const [stage, dates] of Object.entries(hubspotStageDates)) {
+    const cur = out[stage] || {};
+    const next = { ...cur };
+    if (!cur.actual_start && dates?.entered) next.actual_start = dates.entered;
+    if (!cur.actual_end   && dates?.exited)  next.actual_end   = dates.exited;
+    if (next.actual_start || next.actual_end || cur.planned_start || cur.planned_end) {
+      out[stage] = next;
+    }
+  }
+  return out;
 }
 
 // Correlate a HubSpot project name to a manually-maintained siProject.
