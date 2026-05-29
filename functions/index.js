@@ -867,9 +867,9 @@ async function applyChecklistToProject(projectId, isSI) {
   return { success: true };
 }
 
-/* ═══ SCHEDULED SYNC — Tue & Fri 9am PDT (16:00 UTC) ═══ */
+/* ═══ SCHEDULED SYNC — Tue & Fri 9am PT ═══ */
 exports.scheduledHubspotSync = functions.runWith({ memory: "8GB", timeoutSeconds: 540 }).pubsub
-  .schedule("0 16 * * 2,5")
+  .schedule("0 9 * * 2,5")
   .timeZone("America/Los_Angeles")
   .onRun(async () => {
     const token = process.env.HUBSPOT_TOKEN;
