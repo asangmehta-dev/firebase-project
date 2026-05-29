@@ -4513,6 +4513,48 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
 
   useEffect(() => { setSiFullscreen?.(true); return () => setSiFullscreen?.(false); }, [setSiFullscreen]);
 
+  // Auto-create siProject stubs for HubSpot SI Partner Deployment projects
+  // that don't yet have a linked manual record. Uses a deterministic pid
+  // (`hs_<hubspotId>`) so re-runs don't duplicate. Only fires once the
+  // first siProjects + HubSpot snapshots have both loaded.
+  useEffect(() => {
+    if (!isSIAdminUser) return;
+    if (!state.siProjectsLoaded) return;
+    const hsProjects = state.projects || [];
+    if (!hsProjects.length) return;
+    const candidates = hsProjects.filter(p =>
+      p.status === "active" && p.hubspotPipelineId === SI_PARTNER_PIPELINE_ID
+    );
+    if (!candidates.length) return;
+    (async () => {
+      for (const hp of candidates) {
+        const linked = findLinkedSiProject(hp, allProjects);
+        if (linked) continue;
+        const autoPid = `hs_${hp.hubspotId || hp.id}`;
+        if (siProjects[autoPid]) continue;
+        const hsStage = normalizeSiStage(hp.siStage);
+        const stage = HUBSPOT_TO_SI_STAGE[hsStage] || "SIRD";
+        await set(ref(db, `appState/siProjects/${autoPid}`), {
+          name: hp.name || "(unnamed)",
+          si_name: extractSiName(hp.name) || "",
+          customer: hp.customer || "",
+          cm_site: "",
+          factory_location: hp.deployLocation || "",
+          current_stage: stage,
+          stage_dates: {},
+          stations: {},
+          hubspot_id: hp.hubspotId || null,
+          hubspot_pipeline_id: hp.hubspotPipelineId || null,
+          source: "hubspot_auto",
+          created_at: Date.now(),
+          created_by: actor,
+        });
+        logSIActivity(autoPid, "auto_create_from_hubspot", `Auto-created from HubSpot project "${hp.name}"`, actor);
+      }
+    })();
+    // Only re-run when the set of HubSpot project ids changes, not on every render
+  }, [state.projects?.length, state.siProjectsLoaded, isSIAdminUser]);  // eslint-disable-line
+
   // Generic patch-by-path helper used by the drill-in subviews + Gantt
   // inline edits. Optimistically updates local state so the UI is snappy.
   const writeAt = (path, value) => set(ref(db, path), value);
@@ -4826,7 +4868,7 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
         )}
 
         {tab === "timeline" && <SIGanttView projectList={projectList} onOpen={setSelectedPid} theme={theme} actor={actor} />}
-        {tab === "kanban"   && <SIKanbanBoard hubspotProjects={state.projects || []} />}
+        {tab === "kanban"   && <SIKanbanBoard hubspotProjects={state.projects || []} siProjects={siProjects} onOpenDrillIn={setSelectedPid} />}
         {tab === "si_fleet"        && <SIFleetScorecard projectList={projectList} />}
         {tab === "si_sird_gen"     && <SIRDGeneratorView    projectList={projectList} isSIAdminUser={isSIAdminUser} user={user}  initialPid={pendingPid} onConsumeInitialPid={() => setPendingPid(null)} />}
         {tab === "si_testplan_gen" && <TestPlanGeneratorView projectList={projectList} isSIAdminUser={isSIAdminUser} user={user}  initialPid={pendingPid} onConsumeInitialPid={() => setPendingPid(null)} />}
@@ -7289,13 +7331,52 @@ function SlideActivity({ pid, T }) {
 // SI Partner Deployment pipeline) and is read-only — stage changes happen
 // in HubSpot. Other SI tabs (Dashboard, Timeline, drill-in) keep using the
 // manually-maintained `siProjects` RTDB collection.
+// Pull the SI partner name out of a HubSpot project name. Naming
+// convention is "[SI] [<Partner>] <rest>" — return "<Partner>" (e.g.
+// "Anda", "NewPower"). Returns null if no second bracketed token found.
+function extractSiName(rawName) {
+  if (!rawName) return null;
+  const m = String(rawName).match(/^\s*\[SI\]\s*\[([^\]]+)\]/i);
+  return m ? m[1].trim() : null;
+}
+
+// Correlate a HubSpot project name to a manually-maintained siProject.
+// Rules (in order):
+//   1. P-number prefix (P1, P2, P3, …) in either name matches by integer
+//   2. "fundip" / "z-height" → siProject whose name contains either token
+//   3. "newpower" / "new power" → siProject whose name OR si_name matches
+// Returns the matching siProject record (with .pid) or null.
+function findLinkedSiProject(hubspotProject, siProjectsArr) {
+  if (!hubspotProject || !Array.isArray(siProjectsArr)) return null;
+  const name = (hubspotProject.name || "").toLowerCase();
+  if (!name) return null;
+  const pMatch = name.match(/\bp(\d+)\b/);
+  if (pMatch) {
+    const pNum = parseInt(pMatch[1], 10);
+    const hit = siProjectsArr.find(p => {
+      const pn = (p.name || "").toLowerCase().match(/\bp(\d+)\b/);
+      return pn && parseInt(pn[1], 10) === pNum;
+    });
+    if (hit) return hit;
+  }
+  if (/fundip|z-?height/i.test(name)) {
+    const hit = siProjectsArr.find(p => /fundip|z-?height/i.test(p.name || ""));
+    if (hit) return hit;
+  }
+  if (/new\s*power/i.test(name)) {
+    const hit = siProjectsArr.find(p => /new\s*power/i.test(p.name || "") || /new\s*power/i.test(p.si_name || ""));
+    if (hit) return hit;
+  }
+  return null;
+}
+
 const HUBSPOT_TO_SI_STAGE = {
   sird: "SIRD", dfm: "DFM", quote: "Quote", po: "PO",
   build: "Build", fat: "FAT", sat: "SAT", live: "Live",
 };
 const NEW_PROJECT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;  // 14 days
 
-function SIKanbanBoard({ hubspotProjects }) {
+function SIKanbanBoard({ hubspotProjects, siProjects, onOpenDrillIn }) {
   const siS = useSIS();
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
@@ -7316,6 +7397,10 @@ function SIKanbanBoard({ hubspotProjects }) {
       setSyncing(false);
     }
   };
+  // Materialize the manual siProjects collection as an array so we can
+  // correlate each HubSpot card to a manually-maintained project.
+  const siProjectsArr = useMemo(() => Object.entries(siProjects || {})
+    .map(([pid, p]) => ({ pid, ...(p || {}) })), [siProjects]);
   // Filter to the SI Partner Deployment pipeline, active only.
   const list = (hubspotProjects || []).filter(p =>
     p.status === "active" && p.hubspotPipelineId === SI_PARTNER_PIPELINE_ID
@@ -7365,26 +7450,41 @@ function SIKanbanBoard({ hubspotProjects }) {
                 {byStage[stage].map(p => {
                   const url = hubspotProjectUrl(p);
                   const fresh = isNew(p);
-                  const Card = (
-                    <div style={{ background: siS.cardSoft, border: `1px solid ${siS.cardBorder}`, borderRadius: 6, padding: "8px 10px", fontFamily: SI_F }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                  const linked = findLinkedSiProject(p, siProjectsArr);
+                  const openDrill = () => { if (linked && onOpenDrillIn) onOpenDrillIn(linked.pid); };
+                  return (
+                    <div key={p.id}
+                      style={{ background: siS.cardSoft, border: `1px solid ${siS.cardBorder}`, borderRadius: 6, padding: "8px 10px", fontFamily: SI_F, display: "flex", flexDirection: "column", gap: 4 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: siS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
                         {fresh && (
-                          <span style={{ background: "#16A34A", color: "#FFF", padding: "1px 6px", borderRadius: 999, fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4 }}>NEW</span>
+                          <span style={{ background: "#16A34A", color: "#FFF", padding: "1px 6px", borderRadius: 999, fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, flexShrink: 0 }}>NEW</span>
                         )}
                       </div>
                       <div style={{ fontSize: 11, color: siS.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {p.customer || "—"}{p.stations ? ` · ${p.stations} stn` : ""}
                       </div>
+                      <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+                        {linked ? (
+                          <button onClick={openDrill}
+                            title={`Open drill-in for ${linked.name}`}
+                            style={{ flex: 1, padding: "3px 6px", border: `1px solid ${siS.link}`, borderRadius: 4, background: "transparent", color: siS.link, fontFamily: SI_F, fontSize: 10.5, fontWeight: 600, cursor: "pointer" }}>
+                            → Open detail
+                          </button>
+                        ) : (
+                          <span title="No linked project in this app yet — it'll be created on the next sync"
+                            style={{ flex: 1, padding: "3px 6px", border: `1px dashed ${siS.cardBorder}`, borderRadius: 4, color: siS.textMuted, fontFamily: SI_F, fontSize: 10.5, fontWeight: 600, textAlign: "center" }}>
+                            Not linked
+                          </span>
+                        )}
+                        {url && (
+                          <a href={url} target="_blank" rel="noopener" title="Open in HubSpot"
+                            style={{ padding: "3px 8px", border: `1px solid ${siS.cardBorder}`, borderRadius: 4, color: siS.textMuted, fontFamily: SI_F, fontSize: 10.5, fontWeight: 600, textDecoration: "none" }}>
+                            ↗ HubSpot
+                          </a>
+                        )}
+                      </div>
                     </div>
-                  );
-                  return url ? (
-                    <a key={p.id} href={url} target="_blank" rel="noopener" title="Open in HubSpot"
-                      style={{ textDecoration: "none", display: "block" }}>
-                      {Card}
-                    </a>
-                  ) : (
-                    <div key={p.id}>{Card}</div>
                   );
                 })}
               </div>
