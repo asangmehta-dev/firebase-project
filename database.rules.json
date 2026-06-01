@@ -52,6 +52,34 @@
       "siTracker": {
         ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')",
         ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'si_admin')"
+      },
+      "siProjects": {
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'si_admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')"
+      },
+      "siProjectStations": {
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'si_admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')"
+      },
+      "siProjectFiles": {
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'si_admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')"
+      },
+      "siActivityLog": {
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'si_admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')"
+      },
+      "siScorecardNotes": {
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'si_admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')"
+      },
+      "testPlanLibrary": {
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'si_admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')"
+      },
+      "publicSird": {
+        ".read": true,
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'si_admin' || root.child('users').child(auth.uid).child('partyId').val() === 'instrumental')"
       }
     },
 

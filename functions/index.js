@@ -24,6 +24,22 @@ const db = admin.database();
 const OBJECT_TYPE = "2-39524389";
 const SHIPMENT_OBJECT_TYPE = "2-39524475"; // Shipments custom object; primaryDisplayProperty = shipment_tracking_number (INxxx)
 const STATION_KIT_TYPE_ID = "2-39260531";  // Station Kits custom object — used to traverse Kit→Shipment associations
+// Per-SI-stage entered/exited date properties — populated by HubSpot
+// automatically as projects move through the SI Partner Deployment pipeline.
+// We request these so the timeline can pull actual stage dates without
+// requiring the user to type them in.
+const SI_STAGE_DATE_PROPS = [
+  // entered
+  "hs_v2_date_entered_3539976891", "hs_v2_date_entered_3539976892",
+  "hs_v2_date_entered_3545524981", "hs_v2_date_entered_3545524982",
+  "hs_v2_date_entered_3545524983", "hs_v2_date_entered_3545524984",
+  "hs_v2_date_entered_3545524985", "hs_v2_date_entered_3545525946",
+  // exited
+  "hs_v2_date_exited_3539976891", "hs_v2_date_exited_3539976892",
+  "hs_v2_date_exited_3545524981", "hs_v2_date_exited_3545524982",
+  "hs_v2_date_exited_3545524983", "hs_v2_date_exited_3545524984",
+  "hs_v2_date_exited_3545524985", "hs_v2_date_exited_3545525946",
+];
 const PROPERTIES = [
   "project_name", "hs_object_id", "app_project_id__c", "number_of_stations__c",
   "company_codename", "hs_pipeline", "hs_pipeline_stage",
@@ -33,6 +49,8 @@ const PROPERTIES = [
   "type_of_lenses", "led_light_controllers", "standard_station_frames",
   "large_station_frames", "computers", "monitor_screens", "barcode_scanners",
   "station_bom_details_hde", "hs_createdate", "hs_lastmodifieddate",
+  "actual_start_date", "actual_finish_date",
+  ...SI_STAGE_DATE_PROPS,
 ].join(",");
 
 const PIPELINES = {
@@ -191,12 +209,38 @@ function mapHubspotToProject(obj) {
   const siStage = isFromSiPartner ? (SI_PARTNER_STAGE_MAP[stageId] || "sird") : null;
   const isClosed = stage.closed === true;
 
+  // Per-stage entered/exited timestamps from HubSpot, keyed by the
+  // canonical SI stage label used in our timeline ("SIRD", "DFM", …).
+  // ISO-8601 date strings; null when the stage hasn't been entered/exited.
+  const SI_STAGE_KEY_TO_CANONICAL = {
+    sird: "SIRD", dfm: "DFM", quote: "Quote", po: "PO",
+    build: "Build", fat: "FAT", sat: "SAT", live: "Live",
+  };
+  const toISODate = (raw) => {
+    if (!raw) return null;
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+  };
+  const hubspotStageDates = {};
+  if (isFromSiPartner) {
+    for (const [hsStageId, key] of Object.entries(SI_PARTNER_STAGE_MAP)) {
+      const canonical = SI_STAGE_KEY_TO_CANONICAL[key];
+      if (!canonical) continue;
+      const entered = toISODate(p[`hs_v2_date_entered_${hsStageId}`]);
+      const exited  = toISODate(p[`hs_v2_date_exited_${hsStageId}`]);
+      if (entered || exited) hubspotStageDates[canonical] = { entered, exited };
+    }
+  }
+
   return {
     id: `hs_${obj.id}`,
     hubspotId: obj.id,
     name,
     customer,
     codename,
+    actualStartDate: toISODate(p.actual_start_date),
+    actualFinishDate: toISODate(p.actual_finish_date),
+    hubspotStageDates,
     appProjectId: p.app_project_id__c || null,
     stations,
     isSI,
@@ -1655,4 +1699,135 @@ exports.runMaintenanceNow = functions.runWith({ memory: "256MB" }).https.onCall(
   await requireAdmin(context);
   return await runMaintenance();
 });
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SI Tracker — Anthropic-backed parsers
+   ═══════════════════════════════════════════════════════════════════════
+
+   Two callable Functions used by the All SI Projects view:
+
+   • aiSIParseTimelineImport — takes a vendor file (PDF / text base64),
+     calls Claude with the project's current stage dates as context, and
+     returns proposed date changes ready for the user to approve.
+
+   • aiSIParseCoverageDoc — takes a coverage doc (PDF / xlsx text export),
+     calls Claude with the 7-section SIRD questionnaire, and returns
+     suggested answers per question id.
+
+   Configuration:
+     firebase functions:config:set anthropic.key="sk-ant-..."
+     firebase deploy --only functions
+
+   Both endpoints require admin or instrumental-party auth. */
+
+async function requireSIWrite(context) {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  const snap = await db.ref(`users/${context.auth.uid}`).once("value");
+  const u = snap.val() || {};
+  if (u.role !== "admin" && u.role !== "si_admin" && u.partyId !== "instrumental") {
+    throw new functions.https.HttpsError("permission-denied", "Admin / SI admin / Instrumental party only.");
+  }
+  return u;
+}
+
+function getAnthropicClient() {
+  const cfg = (functions.config().anthropic || {});
+  const key = cfg.key || process.env.ANTHROPIC_API_KEY;
+  if (!key) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "ANTHROPIC_API_KEY not configured. Run: firebase functions:config:set anthropic.key=\"sk-ant-...\" then redeploy."
+    );
+  }
+  // Lazy require so cold-start of unrelated functions stays fast.
+  const Anthropic = require("@anthropic-ai/sdk");
+  return new Anthropic({ apiKey: key });
+}
+
+// Helper: build the Claude content block for a document. PDF goes as a
+// `document` content block; plain text goes as a text block.
+function buildDocBlock({ fileBase64, mimeType, fileName }) {
+  if (!fileBase64) throw new functions.https.HttpsError("invalid-argument", "fileBase64 is required.");
+  if (mimeType === "application/pdf") {
+    return { type: "document", source: { type: "base64", media_type: "application/pdf", data: fileBase64 }};
+  }
+  // For txt / csv / xlsx-text-export, decode base64 → utf-8 string and send as text.
+  try {
+    const text = Buffer.from(fileBase64, "base64").toString("utf-8");
+    return { type: "text", text: `[File: ${fileName || "unknown"}]\n\n${text}` };
+  } catch (e) {
+    throw new functions.https.HttpsError("invalid-argument", `Could not decode file: ${e.message}`);
+  }
+}
+
+exports.aiSIParseTimelineImport = functions.runWith({ memory: "512MB", timeoutSeconds: 60 })
+  .https.onCall(async (data, context) => {
+    await requireSIWrite(context);
+    const { fileBase64, mimeType, fileName, currentStageDates, stages } = data || {};
+    const client = getAnthropicClient();
+    const stageList = (stages && stages.length) ? stages : ["SIRD","DFM","Quote","PO","Build","FAT","In Transit","SAT","Live"];
+    const systemPrompt = (
+      "You're a project-timeline parser. Given a vendor's schedule file, extract proposed start/end dates per stage. " +
+      "Only emit a change if the file evidence clearly indicates a different date than what's currently stored. " +
+      "Stages are: " + stageList.join(", ") + ". " +
+      "Return STRICT JSON only — no commentary, no prose. Schema: " +
+      "{ \"changes\": [ { \"stage\": <stage>, \"field\": \"planned_start\"|\"planned_end\"|\"actual_start\"|\"actual_end\", \"new_value\": \"YYYY-MM-DD\", \"evidence\": <short quote from the file> } ] }"
+    );
+    const userBlocks = [
+      buildDocBlock({ fileBase64, mimeType, fileName }),
+      { type: "text", text: "Current stage dates on record (JSON):\n" + JSON.stringify(currentStageDates || {}, null, 2) +
+        "\n\nReturn proposed changes vs. what's on record. JSON only." },
+    ];
+    const resp = await client.messages.create({
+      model: "claude-3-5-sonnet-20241022",
+      max_tokens: 2000,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userBlocks }],
+    });
+    const raw = (resp.content || []).map(b => b.type === "text" ? b.text : "").join("\n").trim();
+    let parsed;
+    try { parsed = JSON.parse(raw); }
+    catch (_) {
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (!m) throw new functions.https.HttpsError("internal", "Claude returned non-JSON: " + raw.slice(0, 200));
+      parsed = JSON.parse(m[0]);
+    }
+    return { changes: Array.isArray(parsed?.changes) ? parsed.changes : [] };
+  });
+
+exports.aiSIParseCoverageDoc = functions.runWith({ memory: "512MB", timeoutSeconds: 60 })
+  .https.onCall(async (data, context) => {
+    await requireSIWrite(context);
+    const { fileBase64, mimeType, fileName, questionnaire } = data || {};
+    const client = getAnthropicClient();
+    if (!Array.isArray(questionnaire)) {
+      throw new functions.https.HttpsError("invalid-argument", "questionnaire (array of {id,label}) is required.");
+    }
+    const systemPrompt = (
+      "You're an inspection-project SIRD assistant. Given a coverage document, extract suggested answers " +
+      "for the SIRD questionnaire fields. Only suggest answers where the document provides clear evidence. " +
+      "Return STRICT JSON only — no commentary. Schema: " +
+      "{ \"suggestions\": { <questionId>: { \"value\": <suggested answer string>, \"evidence\": <short quote> } } }"
+    );
+    const qList = questionnaire.map(q => `- ${q.id}: ${q.label}`).join("\n");
+    const userBlocks = [
+      buildDocBlock({ fileBase64, mimeType, fileName }),
+      { type: "text", text: `SIRD questionnaire fields:\n${qList}\n\nReturn suggestions JSON only.` },
+    ];
+    const resp = await client.messages.create({
+      model: "claude-3-5-sonnet-20241022",
+      max_tokens: 3000,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userBlocks }],
+    });
+    const raw = (resp.content || []).map(b => b.type === "text" ? b.text : "").join("\n").trim();
+    let parsed;
+    try { parsed = JSON.parse(raw); }
+    catch (_) {
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (!m) throw new functions.https.HttpsError("internal", "Claude returned non-JSON: " + raw.slice(0, 200));
+      parsed = JSON.parse(m[0]);
+    }
+    return { suggestions: parsed?.suggestions || {} };
+  });
 
