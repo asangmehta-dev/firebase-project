@@ -899,7 +899,7 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
   const admin = isInst(user);
   const [subOpen, setSubOpen] = useState(true);
   const [overviewOpen, setOverviewOpen] = useState(true);
-  const dropdownProjects = admin ? projects.filter(p => p.status !== "inactive") : projects.filter(p => p.status === "active");
+  const dropdownProjects = admin ? projects.filter(p => p.status !== "inactive" && p.hubspotPipelineId !== SI_PARTNER_PIPELINE_ID) : projects.filter(p => p.status === "active");
   // v4.0.2 — single-control combobox replaces the old <input>+<select> pair (which was glitchy on macOS browsers).
   const [projSearch, setProjSearch] = useState("");
   const [projOpen, setProjOpen] = useState(false);
@@ -3371,6 +3371,10 @@ function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
   const [pipelineViewMode, setPipelineViewMode] = useState("list");
   const [demandExpanded, setDemandExpanded] = useState(null); // which hw row is expanded to show per-project
   const canEditDemand = isInst(user); // Any Instrumental user can add custom demand types
+  // v4.3.0 — Kanban drag-and-drop stage writeback
+  const [dragging, setDragging] = useState(null); // { projId, fromStageId, hubspotId }
+  const [stageWriting, setStageWriting] = useState({}); // { [projId]: true } while CF in-flight
+  const [stageError, setStageError] = useState(null);
 
   // ─── Demand Plan: aggregate hardware across all ACTIVE projects ───
   const customTypes = state.demandCustomTypes || {}; // { typeId: { label, counts: { projectId: n } } }
@@ -3436,6 +3440,13 @@ function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
     <div style={S.page}>
       <h2 style={S.h2}>All Projects Overview</h2>
       <p style={S.sub}>Summary of all HubSpot projects. <b>This page shows ACTIVE projects only</b> — closed/cancelled projects are excluded throughout.</p>
+
+      {stageError && (
+        <div style={{ background: "#FEE2E2", border: "1px solid #FECACA", borderRadius: 8, padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", fontFamily: F, fontSize: 13, color: "#B91C1C" }}>
+          <span>{stageError}</span>
+          <button onClick={() => setStageError(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#B91C1C", fontWeight: 700, fontSize: 16, lineHeight: 1 }}>✕</button>
+        </div>
+      )}
 
       {/* External links — prominent at top */}
       <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
@@ -3594,23 +3605,51 @@ function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
         ) : pipelineViewMode === "kanban" ? (
           (() => {
             const KANBAN_COLORS = ["#00C9A7", "#3B82F6", "#8B5CF6", "#F59E0B", "#10B981", "#EC4899", "#F97316", "#64748B"];
+            const instUser = isInst(user);
             return (
               <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 12 }}>
                 {activeStages.map(([stageId, stage], idx) => {
                   const projs = byStage[stageId] || [];
                   const color = KANBAN_COLORS[idx % KANBAN_COLORS.length];
+                  const isDropTarget = instUser && dragging && dragging.fromStageId !== stageId;
                   return (
-                    <div key={stageId} style={{ minWidth: 200, maxWidth: 240, flex: "0 0 auto", background: "#F8FAFC", borderRadius: 12, border: "2px solid #F1F5F9", padding: 12 }}>
+                    <div
+                      key={stageId}
+                      onDragOver={instUser ? (e) => e.preventDefault() : undefined}
+                      onDrop={instUser ? async (e) => {
+                        e.preventDefault();
+                        if (!dragging || dragging.fromStageId === stageId) { setDragging(null); return; }
+                        const { projId, hubspotId, fromStageId } = dragging;
+                        setDragging(null);
+                        setState(prev => ({ ...prev, projects: { ...prev.projects, [projId]: { ...(prev.projects[projId] || {}), hubspotStageId: stageId } } }));
+                        setStageWriting(w => ({ ...w, [projId]: true }));
+                        setStageError(null);
+                        try {
+                          await httpsCallable(functions, "writeStageToHubspot")({ hubspotId, stageId });
+                        } catch(err) {
+                          setState(prev => ({ ...prev, projects: { ...prev.projects, [projId]: { ...(prev.projects[projId] || {}), hubspotStageId: fromStageId } } }));
+                          setStageError(`Stage update failed: ${err.message}`);
+                        }
+                        setStageWriting(w => { const n = { ...w }; delete n[projId]; return n; });
+                      } : undefined}
+                      style={{ minWidth: 200, maxWidth: 240, flex: "0 0 auto", background: "#F8FAFC", borderRadius: 12, border: `2px solid ${isDropTarget ? "#00C9A7" : "#F1F5F9"}`, padding: 12, outline: isDropTarget ? "2px dashed #00C9A7" : "none", transition: "border-color .15s" }}
+                    >
                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
                         <div style={{ width: 8, height: 8, borderRadius: 4, background: color, flexShrink: 0 }} />
                         <div style={{ fontSize: 12, fontWeight: 700, color: "#0F172A", fontFamily: F, lineHeight: 1.3 }}>{stage.label}</div>
                         <Chip small color={`${color}22`} fg={color}>{projs.length}</Chip>
                       </div>
                       {projs.map(proj => (
-                        <div key={proj.id} style={{ background: "#FFF", borderRadius: 8, padding: "8px 10px", marginBottom: 6, border: "1px solid #E2E8F0", fontSize: 12, fontFamily: F }}>
+                        <div
+                          key={proj.id}
+                          draggable={instUser}
+                          onDragStart={instUser ? () => setDragging({ projId: proj.id, fromStageId: stageId, hubspotId: proj.hubspotId }) : undefined}
+                          onDragEnd={instUser ? () => setDragging(null) : undefined}
+                          style={{ background: stageWriting[proj.id] ? "#F0FDF4" : "#FFF", borderRadius: 8, padding: "8px 10px", marginBottom: 6, border: "1px solid #E2E8F0", fontSize: 12, fontFamily: F, cursor: instUser ? "grab" : "default", opacity: stageWriting[proj.id] ? 0.7 : 1, transition: "opacity .15s" }}
+                        >
                           <div style={{ fontWeight: 600, color: "#0F172A", marginBottom: 2 }}>{proj.customer || proj.name}<HubspotLinkIcon project={proj} /></div>
                           {proj.name !== proj.customer && <div style={{ color: "#94A3B8", fontSize: 11, marginBottom: 2 }}>{proj.name}</div>}
-                          <div style={{ color: "#94A3B8", fontSize: 11 }}>{proj.stations || 0} stn{proj.isSI ? " · SI" : ""}</div>
+                          <div style={{ color: "#94A3B8", fontSize: 11 }}>{proj.stations || 0} stn</div>
                         </div>
                       ))}
                       {projs.length === 0 && <div style={{ fontSize: 11, color: "#CBD5E1", fontStyle: "italic", fontFamily: F, padding: "8px 0" }}>No projects</div>}

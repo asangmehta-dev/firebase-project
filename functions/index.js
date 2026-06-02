@@ -1338,6 +1338,42 @@ exports.writeProjectDateToHubspot = functions.runWith({ memory: "256MB" }).https
   return { ok: true, properties };
 });
 
+/* ═══ HUBSPOT WRITEBACK — v4.3.0: write stage changes back to HubSpot ═══ */
+exports.writeStageToHubspot = functions.runWith({ memory: "256MB" }).https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  const uid = context.auth.uid;
+  const userSnap = await db.ref(`users/${uid}`).once("value");
+  const user = userSnap.val();
+  if (!user) throw new functions.https.HttpsError("permission-denied", "User not found.");
+  const isInst = user.role === "admin" || user.role === "si_admin" || user.partyId === "instrumental";
+  if (!isInst) throw new functions.https.HttpsError("permission-denied", "Instrumental users only.");
+
+  const { hubspotId, stageId } = data || {};
+  if (!hubspotId || !stageId)
+    throw new functions.https.HttpsError("invalid-argument", "hubspotId and stageId required.");
+
+  const token = process.env.HUBSPOT_TOKEN;
+  if (!token) throw new functions.https.HttpsError("internal", "HUBSPOT_TOKEN not configured.");
+
+  const url = `https://api.hubapi.com/crm/v3/objects/${OBJECT_TYPE}/${hubspotId}`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ properties: { hs_pipeline_stage: stageId } }),
+  });
+
+  const logEntry = { ts: new Date().toISOString(), uid, hubspotId, stageId, status: res.ok ? "ok" : "error", httpStatus: res.status };
+  if (!res.ok) {
+    logEntry.body = await res.text();
+    await db.ref("hubspotWriteback/log").push(logEntry);
+    throw new functions.https.HttpsError("internal", `HubSpot stage PATCH failed: ${res.status} ${logEntry.body}`);
+  }
+  const pid = `hs_${hubspotId}`;
+  await db.ref(`appState/projects/${pid}/hubspotStageId`).set(stageId);
+  await db.ref("hubspotWriteback/log").push(logEntry);
+  return { ok: true };
+});
+
 /* ═══ CHAT BOT — v4.0.0: conversational chat for all authed users, scoped to accessible projects ═══ */
 exports.chatBot = functions.runWith({ memory: "512MB" }).https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
