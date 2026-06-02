@@ -3361,7 +3361,7 @@ function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
   const allProjects = useMemo(() => projectsToArray(state.projects), [state.projects]);
   const activeProjects = useMemo(() => allProjects.filter(p => p.status === "active"), [allProjects]);
   const [selPipeline, setSelPipeline] = useState(PIPELINE_LIST[0]?.id || "");
-  const [pipelineViewMode, setPipelineViewMode] = useState("list");
+  const [pipelineViewMode, setPipelineViewMode] = useState("kanban");
   const [demandExpanded, setDemandExpanded] = useState(null); // which hw row is expanded to show per-project
   const canEditDemand = isInst(user); // Any Instrumental user can add custom demand types
   // v4.3.0 — Kanban drag-and-drop stage writeback
@@ -3446,10 +3446,6 @@ function ProjectsOverviewView({ state, setState, user, lang = "en" }) {
         <a href="https://script.google.com/a/macros/instrumental.com/s/AKfycbxVMKgsK6nacvY2zEl4bF9AsKEtN6BNKvd-EQ8LGtOyWw3w5sLfTMT-hXSz102PjbNaqQ/exec" target="_blank" rel="noopener noreferrer" style={{ ...S.card, flex: "1 1 280px", padding: "16px 20px", borderLeft: "4px solid #00C9A7", textDecoration: "none", cursor: "pointer", transition: "box-shadow .15s" }} onMouseEnter={e => e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,.10)"} onMouseLeave={e => e.currentTarget.style.boxShadow=""}>
           <div style={{ fontSize: 15, fontWeight: 700, color: "#00C9A7", fontFamily: F }}>Deployment Timeline</div>
           <div style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginTop: 4 }}>View the interactive deployment timeline for all projects</div>
-        </a>
-        <a href="https://script.google.com/a/macros/instrumental.com/s/AKfycbxOAtRNRm2_-XIPPK1fPKW-O55uVtMhMZSDcdZiR4xRqRBmtYgqURhAZ8MPg3RVsvNG/exec" target="_blank" rel="noopener noreferrer" style={{ ...S.card, flex: "1 1 280px", padding: "16px 20px", borderLeft: "4px solid #3B82F6", textDecoration: "none", cursor: "pointer", transition: "box-shadow .15s" }} onMouseEnter={e => e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,.10)"} onMouseLeave={e => e.currentTarget.style.boxShadow=""}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "#3B82F6", fontFamily: F }}>SI Process, RACI & Principles</div>
-          <div style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginTop: 4 }}>Deployment process flowchart, RACI matrix, and SI working principles</div>
         </a>
       </div>
       {/* ═══ STAGE BREAKDOWN — list or kanban view ═══ */}
@@ -4735,6 +4731,10 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
               </div>
             )}
           </div>
+          <a href="https://script.google.com/a/macros/instrumental.com/s/AKfycbxOAtRNRm2_-XIPPK1fPKW-O55uVtMhMZSDcdZiR4xRqRBmtYgqURhAZ8MPg3RVsvNG/exec" target="_blank" rel="noopener noreferrer"
+            style={{ padding: "6px 14px", border: "1px solid transparent", borderRadius: 6, background: "transparent", color: NAV_MUTED, fontFamily: SI_F, fontSize: 13, fontWeight: 600, cursor: "pointer", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>
+            SI Process, RACI & Principles ↗
+          </a>
         </div>
         <div style={{ flex: 1 }} />
       </div>
