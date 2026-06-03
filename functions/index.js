@@ -1245,12 +1245,14 @@ const HUBSPOT_DATE_PROPS = {
 };
 
 // Diagnostic: returns all property names + labels for the custom object type (admin-only).
-exports.getHubspotCustomObjectSchema = functions.https.onCall(async (_data, context) => {
+// v4.3.1: accepts objectTypeId param (defaults to OBJECT_TYPE for back-compat).
+exports.getHubspotCustomObjectSchema = functions.https.onCall(async (data, context) => {
   await requireAdmin(context);
+  const objectTypeId = (data && data.objectTypeId) || OBJECT_TYPE;
   const token = process.env.HUBSPOT_TOKEN;
   if (!token) throw new functions.https.HttpsError("internal", "HUBSPOT_TOKEN not configured.");
   const res = await fetch(
-    `https://api.hubapi.com/crm/v3/schemas/${OBJECT_TYPE}`,
+    `https://api.hubapi.com/crm/v3/schemas/${objectTypeId}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
   if (!res.ok) throw new functions.https.HttpsError("internal", `HubSpot schema error: ${res.status} ${await res.text()}`);
@@ -1261,7 +1263,7 @@ exports.getHubspotCustomObjectSchema = functions.https.onCall(async (_data, cont
     type: p.type,
     fieldType: p.fieldType,
   }));
-  return { objectType: OBJECT_TYPE, totalProperties: props.length, properties: props };
+  return { objectType: objectTypeId, totalProperties: props.length, properties: props };
 });
 
 // Diagnostic: lists all custom object schemas in the HubSpot portal (admin-only).
@@ -1371,6 +1373,48 @@ exports.writeStageToHubspot = functions.runWith({ memory: "256MB" }).https.onCal
   const pid = `hs_${hubspotId}`;
   await db.ref(`appState/projects/${pid}/hubspotStageId`).set(stageId);
   await db.ref("hubspotWriteback/log").push(logEntry);
+  return { ok: true };
+});
+
+/* ═══ SLACK FEEDBACK — v4.3.1: in-app feedback button posts to Slack ═══ */
+// Routes by category: si → Sneha; everything else → Asang. Webhooks live in env vars.
+exports.sendSlackFeedback = functions.runWith({ memory: "256MB" }).https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  const { message, category, projectName } = data || {};
+  if (!message || typeof message !== "string" || !message.trim())
+    throw new functions.https.HttpsError("invalid-argument", "Message required.");
+  const trimmed = message.trim().slice(0, 2000);
+
+  const uid = context.auth.uid;
+  const userSnap = await db.ref(`users/${uid}`).once("value");
+  const sender = userSnap.val();
+  const senderLabel = sender ? `${sender.name || "Unknown"} <${sender.email || uid}>` : uid;
+
+  const isSI = category === "si";
+  const webhook = isSI ? process.env.SLACK_WEBHOOK_SNEHA : process.env.SLACK_WEBHOOK_ASANG;
+  if (!webhook) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      `Slack webhook for ${isSI ? "SI" : "general"} feedback is not configured yet.`
+    );
+  }
+
+  const text = [
+    `*New Deployment Portal Feedback* ${isSI ? "🤝 SI-related" : "📋 General"}`,
+    `*From:* ${senderLabel}`,
+    projectName ? `*Project:* ${projectName}` : null,
+    `*Message:*\n${trimmed}`,
+  ].filter(Boolean).join("\n");
+
+  const res = await fetch(webhook, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new functions.https.HttpsError("internal", `Slack webhook failed: ${res.status} ${body}`);
+  }
   return { ok: true };
 });
 

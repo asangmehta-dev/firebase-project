@@ -898,6 +898,30 @@ function PendingApproval({ authUser, onLogout }) {
 function Sidebar({ view, setView, user, project, projects, setProject, onLogout, lang, setLang, hasCommercialAccess, cats, setDetailTab }) {
   const admin = isInst(user);
   const [subOpen, setSubOpen] = useState(true);
+  // v4.3.1 — feedback modal state
+  const [fbOpen, setFbOpen] = useState(false);
+  const [fbCategory, setFbCategory] = useState("general"); // "general" | "si"
+  const [fbMessage, setFbMessage] = useState("");
+  const [fbIncludeProject, setFbIncludeProject] = useState(true);
+  const [fbStatus, setFbStatus] = useState("idle"); // idle | sending | ok | error
+  const [fbError, setFbError] = useState("");
+  const submitFeedback = async () => {
+    if (!fbMessage.trim()) return;
+    setFbStatus("sending"); setFbError("");
+    try {
+      const fn = httpsCallable(functions, "sendSlackFeedback");
+      await fn({
+        message: fbMessage,
+        category: fbCategory,
+        projectName: fbIncludeProject && project ? project.name : null,
+      });
+      setFbStatus("ok");
+      setTimeout(() => { setFbOpen(false); setFbMessage(""); setFbStatus("idle"); }, 1500);
+    } catch (e) {
+      setFbStatus("error");
+      setFbError(e.message || String(e));
+    }
+  };
   const dropdownProjects = admin ? projects.filter(p => p.status !== "inactive" && p.hubspotPipelineId !== SI_PARTNER_PIPELINE_ID) : projects.filter(p => p.status === "active");
   // v4.0.2 — single-control combobox replaces the old <input>+<select> pair (which was glitchy on macOS browsers).
   const [projSearch, setProjSearch] = useState("");
@@ -1008,8 +1032,54 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
             {LANGUAGES.map(l => <option key={l.id} value={l.id}>{l.flag} {l.label}</option>)}
           </select>
         </div>
+        <button style={{ ...S.btnOut, marginTop: 10, background: "rgba(0,201,167,.12)", borderColor: "#00C9A7", color: "#00C9A7" }} onClick={() => { setFbStatus("idle"); setFbError(""); setFbOpen(true); }}>💬 Send Feedback</button>
         <button style={{ ...S.btnOut, marginTop: 10 }} onClick={onLogout}>{t("Sign Out", lang)}</button>
       </div>
+      {fbOpen && (
+        <div onClick={() => setFbOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#FFF", borderRadius: 14, padding: 24, width: "100%", maxWidth: 480, fontFamily: F, boxShadow: "0 20px 50px rgba(0,0,0,.30)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: "#0F172A" }}>💬 Send Feedback</div>
+              <button onClick={() => setFbOpen(false)} style={{ background: "none", border: "none", fontSize: 22, color: "#94A3B8", cursor: "pointer", lineHeight: 1 }}>✕</button>
+            </div>
+            <p style={{ fontSize: 13, color: "#64748B", marginBottom: 16 }}>Share a bug, idea, or comment. SI-related feedback routes to Sneha; everything else routes to Asang.</p>
+            <label style={{ fontSize: 11, color: "#64748B", fontWeight: 600, textTransform: "uppercase", letterSpacing: .5, marginBottom: 6, display: "block" }}>Category</label>
+            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+              {[{ id: "general", label: "📋 General" }, { id: "si", label: "🤝 SI Partner" }].map(c => (
+                <button key={c.id} onClick={() => setFbCategory(c.id)} style={{ flex: 1, padding: "10px 12px", borderRadius: 8, border: `2px solid ${fbCategory === c.id ? "#00C9A7" : "#E2E8F0"}`, background: fbCategory === c.id ? "#ECFDF5" : "#FFF", color: fbCategory === c.id ? "#059669" : "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: F }}>{c.label}</button>
+              ))}
+            </div>
+            {project && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "#F8FAFC", borderRadius: 6, marginBottom: 16, cursor: "pointer" }} onClick={() => setFbIncludeProject(v => !v)}>
+                <div style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${fbIncludeProject ? "#00C9A7" : "#CBD5E1"}`, background: fbIncludeProject ? "#00C9A7" : "#FFF", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#FFF", fontWeight: 800 }}>{fbIncludeProject ? "✓" : ""}</div>
+                <div style={{ fontSize: 13, color: "#475569" }}>Include project context: <strong>{project.name}</strong></div>
+              </div>
+            )}
+            <label style={{ fontSize: 11, color: "#64748B", fontWeight: 600, textTransform: "uppercase", letterSpacing: .5, marginBottom: 6, display: "block" }}>Message</label>
+            <textarea
+              value={fbMessage}
+              onChange={e => setFbMessage(e.target.value)}
+              placeholder="What's on your mind?"
+              maxLength={2000}
+              style={{ width: "100%", minHeight: 120, padding: "10px 12px", border: "1.5px solid #E2E8F0", borderRadius: 8, fontSize: 14, fontFamily: F, resize: "vertical", boxSizing: "border-box" }}
+            />
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4, marginBottom: 16 }}>
+              <span style={{ fontSize: 11, color: "#94A3B8" }}>{fbMessage.length}/2000</span>
+              {fbStatus === "error" && <span style={{ fontSize: 12, color: "#DC2626" }}>{fbError}</span>}
+              {fbStatus === "ok" && <span style={{ fontSize: 12, color: "#059669", fontWeight: 600 }}>✓ Sent! Thanks.</span>}
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setFbOpen(false)} style={{ padding: "10px 18px", borderRadius: 8, border: "1.5px solid #E2E8F0", background: "#FFF", color: "#64748B", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: F }}>Cancel</button>
+              <button
+                onClick={submitFeedback}
+                disabled={!fbMessage.trim() || fbStatus === "sending" || fbStatus === "ok"}
+                style={{ padding: "10px 22px", borderRadius: 8, border: "none", background: !fbMessage.trim() || fbStatus === "sending" ? "#CBD5E1" : "#00C9A7", color: "#FFF", fontSize: 13, fontWeight: 700, cursor: !fbMessage.trim() || fbStatus === "sending" ? "default" : "pointer", fontFamily: F }}>
+                {fbStatus === "sending" ? "Sending…" : fbStatus === "ok" ? "✓ Sent" : "Send"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }
@@ -3696,6 +3766,12 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
   const [maintAlerts, setMaintAlerts] = useState({});
   const [maintLoading, setMaintLoading] = useState(false);
   const [maintMsg, setMaintMsg] = useState("");
+  // v4.3.1 — Audit Log tab
+  const [auditEntries, setAuditEntries] = useState([]);
+  const [writebackEntries, setWritebackEntries] = useState([]);
+  const [actionFilter, setActionFilter] = useState("");
+  const [writebackFilter, setWritebackFilter] = useState("all"); // all | error | ok
+  const [expandedRow, setExpandedRow] = useState(null);
 
   useEffect(() => {
     const unsubStatus = onValue(ref(db, "hubspotSync/status"), s => setSyncStatus(s.val()), { onlyOnce: false });
@@ -3708,6 +3784,30 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
     const unsubAlerts = onValue(ref(db, "maintenance/alerts"), s => setMaintAlerts(s.val() || {}), { onlyOnce: false });
     return () => { unsubStatus(); unsubLog(); unsubMaint(); unsubAlerts(); };
   }, []);
+
+  // Audit log listeners — only active when the tab is open (cheap to re-bind, expensive to keep streaming everywhere)
+  useEffect(() => {
+    if (tab !== "audit_log") return;
+    const unsubAudit = onValue(ref(db, "auditLog"), s => {
+      const v = s.val() || {};
+      const arr = Object.entries(v).map(([key, e]) => ({ key, ...e }))
+        .sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
+      setAuditEntries(arr);
+    });
+    const unsubWB = onValue(ref(db, "hubspotWriteback/log"), s => {
+      const v = s.val() || {};
+      const arr = Object.entries(v).map(([key, e]) => ({ key, ...e }))
+        .sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
+      setWritebackEntries(arr);
+    });
+    return () => { unsubAudit(); unsubWB(); };
+  }, [tab]);
+
+  const userLabel = (uid) => {
+    if (!uid) return null;
+    const u = (users || []).find(u => u && u.id === uid);
+    return u ? (u.name || u.email || uid) : uid.slice(0, 8);
+  };
 
   const runPreview = async () => {
     setSyncLoading(true); setSyncMsg(""); setSyncPreview(null);
@@ -3798,7 +3898,7 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
     <div style={S.page}>
       <h2 style={S.h2}>Admin Panel</h2>
       <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
-        {[{ id: "pending", label: `Pending${pending.length > 0 ? ` (${pending.length})` : ""}` }, { id: "users", label: "User Access" }, { id: "commercial_access", label: "🔒 Commercial Access" }, { id: "hubspot", label: "🔄 HubSpot Sync" }, { id: "maintenance", label: "🔧 Maintenance" }].map(t => (
+        {[{ id: "pending", label: `Pending${pending.length > 0 ? ` (${pending.length})` : ""}` }, { id: "users", label: "User Access" }, { id: "commercial_access", label: "🔒 Commercial Access" }, { id: "hubspot", label: "🔄 HubSpot Sync" }, { id: "maintenance", label: "🔧 Maintenance" }, { id: "audit_log", label: "🔍 Audit Log" }].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{ ...S.tabBtn, ...(tab === t.id ? { background: "#00C9A7", color: "#FFF", borderColor: "#00C9A7" } : {}), ...(t.id === "pending" && pending.length > 0 ? { borderColor: "#F59E0B" } : {}) }}>{t.label}</button>
         ))}
       </div>
@@ -3938,32 +4038,39 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
             {backfillMsg && <p style={{ fontSize: 13, color: backfillMsg.startsWith("Error") ? "#DC2626" : "#059669", marginTop: 12, fontFamily: F }}>{backfillMsg}</p>}
           </div>
 
-          {/* v4.1.0 — HubSpot Property Schema Diagnostic */}
+          {/* v4.1.0 — HubSpot Property Schema Diagnostic (v4.3.1: multi-object support) */}
           <div style={{ ...S.card, marginBottom: 16, borderLeft: "3px solid #6366F1" }}>
             <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F, marginBottom: 6 }}>🔍 HubSpot Property Schema</div>
             <p style={{ fontSize: 13, color: "#64748B", fontFamily: F, marginBottom: 12 }}>
-              Fetches all property names and types for the custom Projects object. Use this to verify the internal names for date writeback (e.g. <code>cad_complete_date__c</code>).
+              Fetches all property names + types for a HubSpot custom object. Use this to verify the internal names before wiring up writeback (e.g. the actual property name behind "CAD Complete Date").
             </p>
-            <button
-              style={{ ...S.btnMain, width: "auto", padding: "8px 16px", marginTop: 0, opacity: schemaLoading ? .5 : 1, background: "#6366F1", fontSize: 13 }}
-              disabled={schemaLoading}
-              onClick={async () => {
-                setSchemaLoading(true); setSchemaResult(null);
-                try {
-                  const fn = httpsCallable(functions, "getHubspotCustomObjectSchema");
-                  const res = await fn({});
-                  setSchemaResult(res.data);
-                } catch(e) { setSchemaResult({ error: e.message || String(e) }); }
-                setSchemaLoading(false);
-              }}
-            >
-              {schemaLoading ? "Fetching…" : "Fetch Schema"}
-            </button>
-            {schemaResult?.error && <p style={{ fontSize: 13, color: "#DC2626", marginTop: 10, fontFamily: F }}>Error: {schemaResult.error}</p>}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {[
+                { id: "2-39524389", label: "Projects",      color: "#6366F1" },
+                { id: "2-39524475", label: "Shipments",     color: "#0EA5E9" },
+                { id: "2-39260531", label: "Station Kits",  color: "#10B981" },
+              ].map(t => (
+                <button key={t.id}
+                  style={{ ...S.btnMain, width: "auto", padding: "8px 14px", marginTop: 0, opacity: schemaLoading ? .5 : 1, background: t.color, fontSize: 13 }}
+                  disabled={schemaLoading}
+                  onClick={async () => {
+                    setSchemaLoading(true); setSchemaResult(null);
+                    try {
+                      const fn = httpsCallable(functions, "getHubspotCustomObjectSchema");
+                      const res = await fn({ objectTypeId: t.id });
+                      setSchemaResult({ ...res.data, _label: t.label });
+                    } catch(e) { setSchemaResult({ error: e.message || String(e), _label: t.label }); }
+                    setSchemaLoading(false);
+                  }}>
+                  {schemaLoading ? "Fetching…" : `Fetch ${t.label}`}
+                </button>
+              ))}
+            </div>
+            {schemaResult?.error && <p style={{ fontSize: 13, color: "#DC2626", marginTop: 10, fontFamily: F }}>Error fetching {schemaResult._label}: {schemaResult.error}</p>}
             {schemaResult?.properties && (
               <div style={{ marginTop: 12 }}>
-                <div style={{ fontSize: 12, color: "#64748B", fontFamily: F, marginBottom: 6 }}>{schemaResult.totalProperties} properties total. Showing all:</div>
-                <div style={{ maxHeight: 300, overflowY: "auto", fontSize: 12, fontFamily: "monospace", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 6, padding: 10 }}>
+                <div style={{ fontSize: 12, color: "#64748B", fontFamily: F, marginBottom: 6 }}>{schemaResult._label || "Schema"}: {schemaResult.totalProperties} properties total. Showing all:</div>
+                <div style={{ maxHeight: 400, overflowY: "auto", fontSize: 12, fontFamily: "monospace", background: "#F8FAFC", border: "1px solid #E2E8F0", borderRadius: 6, padding: 10 }}>
                   {schemaResult.properties.map(p => (
                     <div key={p.name} style={{ display: "flex", gap: 12, padding: "2px 0", borderBottom: "1px solid #F1F5F9" }}>
                       <span style={{ color: "#6366F1", minWidth: 280 }}>{p.name}</span>
@@ -4187,6 +4294,135 @@ function AdminView({ state, setState, allProjects, pendingUsers, currentUser }) 
           </div>
         </div>
       )}
+
+      {/* v4.3.1 — AUDIT LOG TAB */}
+      {tab === "audit_log" && (() => {
+        const actionTypes = [...new Set(auditEntries.map(e => e.action).filter(Boolean))].sort();
+        const filteredAudit = actionFilter ? auditEntries.filter(e => e.action === actionFilter) : auditEntries;
+        const filteredWB = writebackFilter === "all" ? writebackEntries : writebackEntries.filter(e => e.status === writebackFilter);
+        const errCount = writebackEntries.filter(e => e.status === "error").length;
+        return (
+          <div>
+            {/* HubSpot Writeback Log — first because it's the diagnosis surface */}
+            <div style={{ ...S.card, marginBottom: 20, borderLeft: `3px solid ${errCount > 0 ? "#DC2626" : "#00C9A7"}` }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F }}>🔄 HubSpot Writeback Log</div>
+                  <div style={{ fontSize: 12, color: "#64748B", fontFamily: F, marginTop: 2 }}>
+                    Every date and stage writeback attempt. Errors include the raw HubSpot response — click a row to see the body.
+                    {errCount > 0 && <span style={{ color: "#DC2626", fontWeight: 700 }}> · {errCount} error{errCount === 1 ? "" : "s"}</span>}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {["all", "error", "ok"].map(f => (
+                    <button key={f} onClick={() => setWritebackFilter(f)} style={{ padding: "5px 12px", borderRadius: 6, border: `1.5px solid ${writebackFilter === f ? "#00C9A7" : "#E2E8F0"}`, background: writebackFilter === f ? "#ECFDF5" : "#FFF", color: writebackFilter === f ? "#059669" : "#64748B", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: F }}>
+                      {f === "all" ? "All" : f === "error" ? "✗ Errors" : "✓ OK"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {filteredWB.length === 0 ? (
+                <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F, padding: 12 }}>No writeback entries yet.</div>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: F }}>
+                    <thead>
+                      <tr>
+                        <th style={{ ...S.th, fontSize: 11 }}>When</th>
+                        <th style={{ ...S.th, fontSize: 11 }}>User</th>
+                        <th style={{ ...S.th, fontSize: 11 }}>HubSpot ID</th>
+                        <th style={{ ...S.th, fontSize: 11 }}>Type</th>
+                        <th style={{ ...S.th, fontSize: 11 }}>Status</th>
+                        <th style={{ ...S.th, fontSize: 11 }}>Detail</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredWB.slice(0, 100).map(e => {
+                        const isErr = e.status === "error";
+                        const isExpanded = expandedRow === e.key;
+                        const detail = e.stageId
+                          ? `→ stage ${e.stageId}`
+                          : e.fields ? `fields: ${Object.keys(e.fields).join(", ")}` : "";
+                        return (
+                          <React.Fragment key={e.key}>
+                            <tr onClick={() => setExpandedRow(isExpanded ? null : e.key)} style={{ background: isErr ? "#FEF2F2" : "transparent", cursor: e.body ? "pointer" : "default" }}>
+                              <td style={{ ...S.td, fontSize: 11 }}>{fmtDate(e.ts)}</td>
+                              <td style={{ ...S.td, fontSize: 11 }}>{userLabel(e.uid) || "—"}</td>
+                              <td style={{ ...S.td, fontSize: 11, fontFamily: "monospace" }}>{e.hubspotId || "—"}</td>
+                              <td style={{ ...S.td, fontSize: 11 }}>{e.stageId ? "stage" : "fields"}</td>
+                              <td style={{ ...S.td, fontSize: 11, fontWeight: 700, color: isErr ? "#DC2626" : "#059669" }}>
+                                {isErr ? `✗ ${e.httpStatus || "err"}` : `✓ ${e.httpStatus || "ok"}`}
+                              </td>
+                              <td style={{ ...S.td, fontSize: 11, color: "#475569" }}>
+                                {detail} {e.body && <span style={{ color: "#94A3B8" }}>{isExpanded ? "▾" : "▸"}</span>}
+                              </td>
+                            </tr>
+                            {isExpanded && e.body && (
+                              <tr style={{ background: "#FFF7ED" }}>
+                                <td colSpan={6} style={{ ...S.td, fontSize: 11, fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-word", color: "#9A3412", padding: "10px 14px" }}>
+                                  {e.body}
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {filteredWB.length > 100 && <p style={{ fontSize: 12, color: "#94A3B8", marginTop: 8, fontFamily: F }}>Showing newest 100 of {filteredWB.length}.</p>}
+                </div>
+              )}
+            </div>
+
+            {/* User Action Log */}
+            <div style={{ ...S.card, borderLeft: "3px solid #6366F1" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: F }}>👤 User Action Log</div>
+                  <div style={{ fontSize: 12, color: "#64748B", fontFamily: F, marginTop: 2 }}>
+                    Sensitive admin actions: user approvals, role changes, project grants, deletions. Newest first.
+                  </div>
+                </div>
+                <select value={actionFilter} onChange={e => setActionFilter(e.target.value)} style={{ ...S.inp, width: "auto", marginTop: 0, padding: "5px 10px", fontSize: 12 }}>
+                  <option value="">All actions ({auditEntries.length})</option>
+                  {actionTypes.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+              {filteredAudit.length === 0 ? (
+                <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F, padding: 12 }}>No audit entries yet.</div>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: F }}>
+                    <thead>
+                      <tr>
+                        <th style={{ ...S.th, fontSize: 11 }}>When</th>
+                        <th style={{ ...S.th, fontSize: 11 }}>Actor</th>
+                        <th style={{ ...S.th, fontSize: 11 }}>Action</th>
+                        <th style={{ ...S.th, fontSize: 11 }}>Target</th>
+                        <th style={{ ...S.th, fontSize: 11 }}>Details</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredAudit.slice(0, 200).map(e => (
+                        <tr key={e.key}>
+                          <td style={{ ...S.td, fontSize: 11 }}>{fmtDate(e.ts)}</td>
+                          <td style={{ ...S.td, fontSize: 11 }}>{userLabel(e.actor) || "—"}</td>
+                          <td style={{ ...S.td, fontSize: 11 }}><Chip small color="#EEF2FF" fg="#6366F1">{e.action}</Chip></td>
+                          <td style={{ ...S.td, fontSize: 11 }}>{userLabel(e.target) || (e.target ? e.target.slice(0, 8) : "—")}</td>
+                          <td style={{ ...S.td, fontSize: 11, color: "#475569", fontFamily: "monospace", maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={e.meta ? JSON.stringify(e.meta) : ""}>
+                            {e.meta ? JSON.stringify(e.meta) : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {filteredAudit.length > 200 && <p style={{ fontSize: 12, color: "#94A3B8", marginTop: 8, fontFamily: F }}>Showing newest 200 of {filteredAudit.length}.</p>}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* COMMERCIAL ACCESS TAB */}
       {tab === "commercial_access" && (
