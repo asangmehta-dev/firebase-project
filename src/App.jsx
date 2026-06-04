@@ -5149,7 +5149,7 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
         )}
 
         {tab === "timeline" && <SIGanttView projectList={projectList} onOpen={setSelectedPid} theme={theme} actor={actor} />}
-        {tab === "kanban"   && <SIKanbanBoard hubspotProjects={state.projects || []} siProjects={siProjects} onOpenDrillIn={setSelectedPid} />}
+        {tab === "kanban"   && <SIKanbanBoard hubspotProjects={state.projects || []} siProjects={siProjects} onOpenDrillIn={setSelectedPid} setState={setState} user={user} />}
         {tab === "si_fleet"        && <SIFleetScorecard projectList={projectList} />}
         {tab === "si_sird_gen"     && <SIRDGeneratorView    projectList={projectList} isSIAdminUser={isSIAdminUser} user={user}  initialPid={pendingPid} onConsumeInitialPid={() => setPendingPid(null)} />}
         {tab === "si_testplan_gen" && <TestPlanGeneratorView projectList={projectList} isSIAdminUser={isSIAdminUser} user={user}  initialPid={pendingPid} onConsumeInitialPid={() => setPendingPid(null)} />}
@@ -7678,12 +7678,31 @@ const HUBSPOT_TO_SI_STAGE = {
   sird: "SIRD", dfm: "DFM", quote: "Quote", po: "PO",
   build: "Build", fat: "FAT", sat: "SAT", live: "Live",
 };
+// Reverse map: canonical SI stage label → HubSpot stage ID.
+// "In Transit" has no HubSpot equivalent — it's an app-only intermediate stage,
+// so dragging there skips the HubSpot writeback (local-only).
+const SI_STAGE_TO_HUBSPOT_ID = {
+  SIRD:  "3539976891",
+  DFM:   "3539976892",
+  Quote: "3545524981",
+  PO:    "3545524982",
+  Build: "3545524983",
+  FAT:   "3545524984",
+  SAT:   "3545524985",
+  Live:  "3545525946",
+};
 const NEW_PROJECT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;  // 14 days
 
-function SIKanbanBoard({ hubspotProjects, siProjects, onOpenDrillIn }) {
+function SIKanbanBoard({ hubspotProjects, siProjects, onOpenDrillIn, setState, user }) {
   const siS = useSIS();
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
+  // v4.3.x — drag-drop HubSpot stage writeback (mirrors non-SI Kanban in ProjectsOverviewView)
+  const canDrag = isInst(user);
+  const [dragging, setDragging] = useState(null); // { projId, fromStage, hubspotId }
+  const [dropTarget, setDropTarget] = useState(null); // canonical SI_STAGES key
+  const [stageWriting, setStageWriting] = useState({}); // { [projId]: true }
+  const [stageError, setStageError] = useState(null);
   const refreshFromHubspot = async () => {
     setSyncing(true); setSyncMsg("");
     try {
@@ -7726,9 +7745,13 @@ function SIKanbanBoard({ hubspotProjects, siProjects, onOpenDrillIn }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ ...siS.card, padding: "10px 14px", fontFamily: SI_F, fontSize: 12, color: siS.textMuted, display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#6366F1", flexShrink: 0 }} />
+        <span style={{ width: 8, height: 8, borderRadius: "50%", background: canDrag ? "#16A34A" : "#6366F1", flexShrink: 0 }} />
         <span style={{ flex: 1 }}>
-          <strong style={{ color: siS.text }}>Read-only</strong> — pulled from HubSpot. {list.length} project{list.length === 1 ? "" : "s"} in the SI Partner Deployment pipeline.
+          {canDrag ? (
+            <><strong style={{ color: siS.text }}>Drag cards to update HubSpot stage.</strong> {list.length} project{list.length === 1 ? "" : "s"} in the SI Partner Deployment pipeline.</>
+          ) : (
+            <><strong style={{ color: siS.text }}>Read-only</strong> — pulled from HubSpot. {list.length} project{list.length === 1 ? "" : "s"} in the SI Partner Deployment pipeline.</>
+          )}
           {syncMsg && <span style={{ marginLeft: 8, color: syncMsg.startsWith("Sync failed") ? "#DC2626" : "#16A34A" }}>· {syncMsg}</span>}
         </span>
         <button onClick={refreshFromHubspot} disabled={syncing}
@@ -7736,6 +7759,12 @@ function SIKanbanBoard({ hubspotProjects, siProjects, onOpenDrillIn }) {
           {syncing ? "Syncing…" : "↻ Refresh from HubSpot"}
         </button>
       </div>
+      {stageError && (
+        <div style={{ ...siS.card, padding: "10px 14px", borderColor: "#DC2626", background: "#FEF2F2", color: "#B91C1C", fontFamily: SI_F, fontSize: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <span>{stageError}</span>
+          <button onClick={() => setStageError(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#B91C1C", fontWeight: 700, fontSize: 16, lineHeight: 1 }}>✕</button>
+        </div>
+      )}
       {list.length === 0 ? (
         <div style={{ ...siS.empty, color: siS.textMuted }}>
           No active projects in the SI Partner Deployment pipeline yet. They'll appear here as soon as HubSpot syncs them in.
@@ -7744,7 +7773,48 @@ function SIKanbanBoard({ hubspotProjects, siProjects, onOpenDrillIn }) {
         <div style={{ display: "grid", gridTemplateColumns: `repeat(${SI_STAGES.length}, minmax(0, 1fr))`, gap: 8, paddingBottom: 8 }}>
           {SI_STAGES.map(stage => (
             <div key={stage}
-              style={{ minWidth: 0, background: siS.cardBg, border: `1px solid ${siS.cardBorder}`, borderRadius: 8, display: "flex", flexDirection: "column", maxHeight: "75vh" }}>
+              onDragOver={canDrag ? (e) => { e.preventDefault(); if (dragging && dragging.fromStage !== stage) setDropTarget(stage); } : undefined}
+              onDragLeave={canDrag ? () => setDropTarget(t => t === stage ? null : t) : undefined}
+              onDrop={canDrag ? async (e) => {
+                e.preventDefault();
+                setDropTarget(null);
+                if (!dragging || dragging.fromStage === stage) { setDragging(null); return; }
+                const { projId, hubspotId, fromStage } = dragging;
+                setDragging(null);
+                const newHubspotStageId = SI_STAGE_TO_HUBSPOT_ID[stage]; // undefined for "In Transit"
+                const newSiStageKey = stage.toLowerCase().replace(/\s+/g, ""); // "In Transit" → "intransit"
+                // Optimistic local update: write the canonical siStage so the card moves immediately.
+                setState(prev => ({
+                  ...prev,
+                  projects: (prev.projects || []).map(p => p.id === projId
+                    ? { ...p, siStage: newSiStageKey, ...(newHubspotStageId ? { hubspotStageId: newHubspotStageId } : {}) }
+                    : p),
+                }));
+                if (!newHubspotStageId) {
+                  // "In Transit" — app-only stage, no HubSpot writeback
+                  return;
+                }
+                if (!hubspotId) {
+                  setStageError("This project has no HubSpot ID — saved locally only.");
+                  return;
+                }
+                setStageWriting(w => ({ ...w, [projId]: true }));
+                setStageError(null);
+                try {
+                  await httpsCallable(functions, "writeStageToHubspot")({ hubspotId, stageId: newHubspotStageId });
+                } catch(err) {
+                  // Revert
+                  setState(prev => ({
+                    ...prev,
+                    projects: (prev.projects || []).map(p => p.id === projId
+                      ? { ...p, siStage: fromStage.toLowerCase().replace(/\s+/g, "") }
+                      : p),
+                  }));
+                  setStageError(`Stage update failed: ${err.message || String(err)}`);
+                }
+                setStageWriting(w => { const n = { ...w }; delete n[projId]; return n; });
+              } : undefined}
+              style={{ minWidth: 0, background: siS.cardBg, border: `1px solid ${dropTarget === stage ? "#16A34A" : siS.cardBorder}`, borderRadius: 8, display: "flex", flexDirection: "column", maxHeight: "75vh", outline: dropTarget === stage ? "2px dashed #16A34A" : "none", transition: "border-color .12s" }}>
               <div style={{ padding: "10px 12px", borderBottom: `1px solid ${siS.cardBorder}`, display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ width: 9, height: 9, borderRadius: "50%", background: SI_STAGE_COLORS[stage], flexShrink: 0 }}></span>
                 <span style={{ fontFamily: SI_F, fontSize: 12, fontWeight: 700, color: siS.text, textTransform: "uppercase", letterSpacing: 0.5, flex: 1 }}>{stage}</span>
@@ -7756,9 +7826,13 @@ function SIKanbanBoard({ hubspotProjects, siProjects, onOpenDrillIn }) {
                   const fresh = isNew(p);
                   const linked = findLinkedSiProject(p, siProjectsArr);
                   const openDrill = () => { if (linked && onOpenDrillIn) onOpenDrillIn(linked.pid); };
+                  const isWriting = !!stageWriting[p.id];
                   return (
                     <div key={p.id}
-                      style={{ background: siS.cardSoft, border: `1px solid ${siS.cardBorder}`, borderRadius: 6, padding: "8px 10px", fontFamily: SI_F, display: "flex", flexDirection: "column", gap: 4 }}>
+                      draggable={canDrag}
+                      onDragStart={canDrag ? () => setDragging({ projId: p.id, fromStage: stage, hubspotId: p.hubspotId }) : undefined}
+                      onDragEnd={canDrag ? () => { setDragging(null); setDropTarget(null); } : undefined}
+                      style={{ background: isWriting ? "#F0FDF4" : siS.cardSoft, border: `1px solid ${dragging?.projId === p.id ? "#16A34A" : siS.cardBorder}`, borderRadius: 6, padding: "8px 10px", fontFamily: SI_F, display: "flex", flexDirection: "column", gap: 4, cursor: canDrag ? "grab" : "default", opacity: isWriting ? 0.65 : 1, transition: "opacity .12s" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: siS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
                         {fresh && (
