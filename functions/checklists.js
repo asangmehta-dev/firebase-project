@@ -75,8 +75,8 @@ const EXTERNAL_CHECKLIST = {
   type: "checklist",
   items: [],
   milestones: [
-    { id: "ext_ms_0", name: "0. Internal KO (from Internal Checklist)", description: "Obtain Order Fan and align scope with customer.", color: "#64748B", gating: true, checklist: [
-      g("ext_0_1", "Obtain and distribute OF (Order Fan)", "AE, SA"),
+    { id: "ext_ms_0", name: "0. Internal KO (from Internal Checklist)", description: "Obtain Order Form and align scope with customer.", color: "#64748B", gating: true, checklist: [
+      g("ext_0_1", "Obtain and distribute OF (Order Form) to TPM, CSE, HDE, SA", "AE, SA"),
       g("ext_0_2", "Internal KO with scope, coverage, and success criteria aligned with customer", "AE, SA"),
     ], links: [], signatures: [] },
     { id: "ext_ms_1", name: "1. External KO", description: "External kickoff with customer, CM, and stakeholders.", color: "#00C9A7", gating: true, gatedBy: "Internal KO", checklist: [
@@ -500,6 +500,7 @@ const DEPLOYMENT_REQUIREMENTS_FOLDER = {
     { id: "doc_internet_req",      name: "Instrumental Internet Requirements",              storagePath: storageDocPath("Instrumental Internet Requirements.pdf"),                         source: "system", type: "pdf" },
     { id: "doc_space_req",         name: "Instrumental Station Space Requirements",         storagePath: storageDocPath("Instrumental Station Space Requirements.pdf"),                    source: "system", type: "pdf" },
     { id: "doc_mes_questionnaire", name: "MES Questionnaire v4",                            storagePath: storageDocPath("MES Questionnaire v4.pdf"),                                       source: "system", type: "pdf" },
+    { id: "doc_mes_setup_checklist", name: "MES Integration Setup Checklist",                storagePath: storageDocPath("MES Integration Setup Checklist.pdf"),                            source: "system", type: "pdf" },
     { id: "doc_network_req",       name: "OPS-00003 — Instrumental Network Requirements",   storagePath: storageDocPath("OPS-00003_Rev 00_Instrumental Network Requirements.pdf"),         source: "system", type: "pdf" },
     { id: "doc_facility_req",      name: "OPS-00004 — Facility Requirements Intro Slides",  storagePath: storageDocPath("OPS-00004_Rev01_INST - Facility Requirements Intro Slides.pptx"),  source: "system", type: "pptx" },
     { id: "doc_pwr_apac",          name: "Site Readiness Spec — APAC 2026.1",               storagePath: storageDocPath("PWR-APAC-2026.1_SiteReadinessSpec.pdf"),                          source: "system", type: "pdf" },

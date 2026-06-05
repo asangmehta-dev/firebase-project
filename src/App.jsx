@@ -447,6 +447,16 @@ const CHECKLIST_PATCHES = [
       mk("ext_6_8", "Any additional on-site testing for motion sensing, pneumatic control / movement, custom nest / station press fit design or others (add details in notes)", "FDE, TPM"),
     ],
   },
+  // v4.3.3 — Fix "Order Fan" → "Order Form" on existing projects.
+  // labelRewrites + oldLabel guard: only swaps if the label still matches the buggy template; user-edited labels preserved.
+  {
+    catId: "inst_external_checklist", msId: "ext_ms_0",
+    newDescription: "Obtain Order Form and align scope with customer.",
+    oldDescription: "Obtain Order Fan and align scope with customer.",
+    labelRewrites: [
+      { id: "ext_0_1", oldLabel: "Obtain and distribute OF (Order Fan)", newLabel: "Obtain and distribute OF (Order Form) to TPM, CSE, HDE, SA" },
+    ],
+  },
   // v4.3.2 — Internal Checklist updates from Deployment Checklist Consolidated v1.2 (2026-06-05)
   // Additive only: new items by ID. Existing item labels in user-edited projects are NOT modified.
   {
@@ -751,17 +761,41 @@ const getProjectDetails = (dd, pid) => {
   const missingTmplCats = APP_TABLE_TEMPLATES.filter(t => !existingIds.has(t.id));
   const missingFolderCats = STANDARD_FOLDER_TEMPLATES.filter(t => !existingIds.has(t.id));
   const missingChecklistCats = [APP_MES_CHECKLIST_TEMPLATE].filter(t => !existingIds.has(t.id));
-  // Apply additive patches: rename milestones + inject new checklist items for existing projects
+  // Apply additive patches: rename milestones + inject new checklist items for existing projects.
+  // v4.3.3: also supports conditional label rewrites — only swap an item's label if it still matches
+  // the buggy/old version, preserving any user-customized labels.
   const patched = [...merged, ...missingTmplCats, ...missingFolderCats, ...missingChecklistCats].map(cat => {
-    const patch = CHECKLIST_PATCHES.find(p => p.catId === cat.id);
-    if (!patch || cat.type !== "checklist") return cat;
+    const patches = CHECKLIST_PATCHES.filter(p => p.catId === cat.id);
+    if (patches.length === 0 || cat.type !== "checklist") return cat;
     return {
       ...cat,
       milestones: (cat.milestones || []).map(ms => {
-        if (ms.id !== patch.msId) return ms;
-        const existingItemIds = new Set((ms.checklist || []).map(ck => ck.id));
-        const newItems = patch.newItems.filter(ni => !existingItemIds.has(ni.id));
-        return { ...ms, name: patch.newName || ms.name, checklist: [...(ms.checklist || []), ...newItems] };
+        const matching = patches.filter(p => p.msId === ms.id);
+        if (matching.length === 0) return ms;
+        let newChecklist = ms.checklist || [];
+        let newName = ms.name;
+        let newDescription = ms.description;
+        for (const patch of matching) {
+          if (patch.newName) newName = patch.newName;
+          if (patch.newDescription) {
+            if (!patch.oldDescription || ms.description === patch.oldDescription) newDescription = patch.newDescription;
+          }
+          if (patch.labelRewrites) {
+            newChecklist = newChecklist.map(ck => {
+              const rw = patch.labelRewrites.find(r => r.id === ck.id);
+              if (!rw) return ck;
+              // Only rewrite if label still matches the old buggy value; preserve user edits otherwise.
+              if (rw.oldLabel && ck.label !== rw.oldLabel) return ck;
+              return { ...ck, label: rw.newLabel };
+            });
+          }
+          if (patch.newItems) {
+            const existingItemIds = new Set(newChecklist.map(ck => ck.id));
+            const toAdd = patch.newItems.filter(ni => !existingItemIds.has(ni.id));
+            newChecklist = [...newChecklist, ...toAdd];
+          }
+        }
+        return { ...ms, name: newName, description: newDescription, checklist: newChecklist };
       }),
     };
   });
