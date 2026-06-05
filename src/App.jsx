@@ -447,6 +447,28 @@ const CHECKLIST_PATCHES = [
       mk("ext_6_8", "Any additional on-site testing for motion sensing, pneumatic control / movement, custom nest / station press fit design or others (add details in notes)", "FDE, TPM"),
     ],
   },
+  // v4.3.2 — Internal Checklist updates from Deployment Checklist Consolidated v1.2 (2026-06-05)
+  // Additive only: new items by ID. Existing item labels in user-edited projects are NOT modified.
+  {
+    catId: "inst_internal_checklist", msId: "int_ms_1",
+    newItems: [
+      mk("int_1_5_a","Confirm final configuration including optics (WD, FOV), line name, image name/types clearly outlined in scoping document", "SA"),
+      mk("int_1_6",   "Confirm optics and hardware compatible with factory station design and process flow (ergonomics, mounting, material & process flow, product imaging intent)", "SA, HDE"),
+    ],
+  },
+  {
+    catId: "inst_internal_checklist", msId: "int_ms_3",
+    newItems: [
+      mk("int_3_1", "Mounting design finalized by TPM / SA and order parts that meet FOV and working distance requirements, adding reasonable buffer for changes", "TPM, SA"),
+    ],
+  },
+  {
+    catId: "inst_internal_checklist", msId: "int_ms_4",
+    newItems: [
+      mk("int_4_2_a","Provision and deploy computers", "TPM, FDE"),
+      mk("int_4_6",   "Create new or use existing Lastpass, configure Station SOP on station hardware before shipment / deployment", "TPM, FDE"),
+    ],
+  },
 ];
 // Standard folder templates auto-injected for any project missing them (e.g. older projects pre-dating the folder)
 const STANDARD_FOLDER_TEMPLATES = [
@@ -2431,6 +2453,8 @@ function ChecklistSection({ cat, cats, updateCats, user, canEdit, pid, lang }) {
   const [editLabel, setEditLabel] = useState("");
   const [editingNotes, setEditingNotes] = useState(null); // { msId, ckId }
   const [notesValue, setNotesValue] = useState("");
+  const [editingOwnership, setEditingOwnership] = useState(null); // { msId, ckId }
+  const [ownershipValue, setOwnershipValue] = useState("");
   const toggleExpand = (msId) => setExpanded(prev => ({ ...prev, [msId]: !prev[msId] }));
 
   const updateMilestone = (msId, updater) => {
@@ -2477,6 +2501,16 @@ function ChecklistSection({ cat, cats, updateCats, user, canEdit, pid, lang }) {
       checklist: (ms.checklist || []).map(ck => ck.id !== editingNotes.ckId ? ck : { ...ck, notes: notesValue.trim() || null }),
     }));
     setEditingNotes(null); setNotesValue("");
+  };
+  // v4.3.2 — Ownership inline edit (Instrumental users only). Same functional-updater pattern as notes/label.
+  const startEditOwnership = (msId, ckId, current) => { setEditingOwnership({ msId, ckId }); setOwnershipValue(current || ""); };
+  const saveOwnership = () => {
+    if (!editingOwnership) return;
+    updateMilestone(editingOwnership.msId, ms => ({
+      ...ms,
+      checklist: (ms.checklist || []).map(ck => ck.id !== editingOwnership.ckId ? ck : { ...ck, ownership: ownershipValue.trim() }),
+    }));
+    setEditingOwnership(null); setOwnershipValue("");
   };
 
   const canCheck = canEdit || isInst(user); // Instrumental users can tick + add/delete tasks
@@ -2603,7 +2637,35 @@ function ChecklistSection({ cat, cats, updateCats, user, canEdit, pid, lang }) {
                             ) : null}
                           </div>
                         )}
-                        {ck.ownership && !isEditing && <span style={{ fontSize: 11, color: "#94A3B8", flexShrink: 0 }}>· {ck.ownership}</span>}
+                        {!isEditing && (
+                          editingOwnership?.msId === ms.id && editingOwnership?.ckId === ck.id ? (
+                            <input
+                              autoFocus
+                              type="text"
+                              value={ownershipValue}
+                              onChange={e => setOwnershipValue(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === "Enter") { e.preventDefault(); saveOwnership(); }
+                                if (e.key === "Escape") { setEditingOwnership(null); setOwnershipValue(""); }
+                              }}
+                              onBlur={saveOwnership}
+                              placeholder="e.g. SA, HDE, TPM"
+                              style={{ flexShrink: 0, padding: "2px 6px", fontSize: 11, fontFamily: F, border: "1px solid #C7D2FE", borderRadius: 4, outline: "none", width: 140 }}
+                            />
+                          ) : ck.ownership ? (
+                            <span
+                              onClick={() => { if (canCheck) startEditOwnership(ms.id, ck.id, ck.ownership); }}
+                              title={canCheck ? "Click to edit owner" : undefined}
+                              style={{ fontSize: 11, color: "#94A3B8", flexShrink: 0, cursor: canCheck ? "pointer" : "default" }}
+                            >· {ck.ownership}</span>
+                          ) : canCheck ? (
+                            <span
+                              onClick={() => startEditOwnership(ms.id, ck.id, "")}
+                              title="Click to add owner"
+                              style={{ fontSize: 11, color: "#CBD5E1", fontStyle: "italic", flexShrink: 0, cursor: "pointer" }}
+                            >· + owner</span>
+                          ) : null
+                        )}
                         {canCheck && (
                           <button
                             type="button"
