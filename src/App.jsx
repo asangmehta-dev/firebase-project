@@ -1616,6 +1616,47 @@ function TableSection({ cat, updateCats, canEdit, allCats = [] }) {
   const rows = cat.rows || [];
   const cols = cat.columns || [];
 
+  // v4.4.0 — Shipment Details HubSpot writeback (per-row status indicator)
+  // Only active when cat.id === "pd_shipment_details". Other tables are unaffected.
+  const isShipmentTable = cat.id === "pd_shipment_details";
+  const SHIP_WRITEBACK_KEYS = new Set(["contents", "carrier", "tracking_num", "ship_date", "notes"]);
+  const [shipWritebackStatus, setShipWritebackStatus] = useState({}); // { [rowId]: "syncing" | "ok" | "error" }
+  const [shipWritebackErr, setShipWritebackErr] = useState({}); // { [rowId]: errMessage }
+
+  const writebackShipmentRow = async (rowId, updatedRow) => {
+    if (!updatedRow.item_num || !String(updatedRow.item_num).trim()) {
+      setShipWritebackStatus(s => ({ ...s, [rowId]: "error" }));
+      setShipWritebackErr(s => ({ ...s, [rowId]: "Missing INxxx (item_num) — fill that in first" }));
+      return;
+    }
+    const fields = {};
+    for (const k of SHIP_WRITEBACK_KEYS) {
+      if (updatedRow[k] !== undefined) fields[k] = updatedRow[k];
+    }
+    setShipWritebackStatus(s => ({ ...s, [rowId]: "syncing" }));
+    setShipWritebackErr(s => { const n = { ...s }; delete n[rowId]; return n; });
+    try {
+      const fn = httpsCallable(functions, "writeShipmentToHubspot");
+      const res = await fn({
+        hubspotShipmentId: updatedRow.hubspotShipmentId || null,
+        item_num: String(updatedRow.item_num).trim(),
+        fields,
+      });
+      setShipWritebackStatus(s => ({ ...s, [rowId]: "ok" }));
+      // Newly created → persist returned HubSpot ID back to the row
+      const newId = res?.data?.hubspotShipmentId;
+      if (newId && !updatedRow.hubspotShipmentId) {
+        updateCats(cur => cur.map(c => c.id !== cat.id ? c : {
+          ...c, rows: (c.rows || []).map(r => r.id !== rowId ? r : { ...r, hubspotShipmentId: newId })
+        }));
+      }
+      setTimeout(() => setShipWritebackStatus(s => { const n = { ...s }; delete n[rowId]; return n; }), 3500);
+    } catch (e) {
+      setShipWritebackStatus(s => ({ ...s, [rowId]: "error" }));
+      setShipWritebackErr(s => ({ ...s, [rowId]: e.message || String(e) }));
+    }
+  };
+
   const updateRow = (rowId, key, value) =>
     updateCats(cur => cur.map(c => c.id !== cat.id ? c : {
       ...c, rows: (c.rows || []).map(r => r.id !== rowId ? r : { ...r, [key]: value })
@@ -1633,8 +1674,15 @@ function TableSection({ cat, updateCats, canEdit, allCats = [] }) {
   const startEdit = (rowId, key, val) => { setEditCell({ rowId, key }); setEditVal(val || ""); };
   const commitEdit = () => {
     if (!editCell) return;
-    updateRow(editCell.rowId, editCell.key, editVal);
+    const { rowId, key } = editCell;
+    const newVal = editVal;
+    updateRow(rowId, key, newVal);
     setEditCell(null); setEditVal("");
+    // Fire HubSpot writeback for Shipment Details rows
+    if (isShipmentTable && (SHIP_WRITEBACK_KEYS.has(key) || key === "item_num")) {
+      const row = (cat.rows || []).find(r => r.id === rowId);
+      if (row) writebackShipmentRow(rowId, { ...row, [key]: newVal });
+    }
   };
 
   const handleImport = (e) => {
@@ -1792,7 +1840,10 @@ function TableSection({ cat, updateCats, canEdit, allCats = [] }) {
                     </td>
                   );
                 })}
-                {canEdit && <td style={{ padding: "4px 6px", textAlign: "center" }}>
+                {canEdit && <td style={{ padding: "4px 6px", textAlign: "center", whiteSpace: "nowrap" }}>
+                  {isShipmentTable && shipWritebackStatus[row.id] === "syncing" && <span title="Syncing to HubSpot…" style={{ fontSize: 11, color: "#3B82F6", marginRight: 6 }}>↑</span>}
+                  {isShipmentTable && shipWritebackStatus[row.id] === "ok" && <span title="HubSpot updated" style={{ fontSize: 11, color: "#059669", marginRight: 6 }}>✓</span>}
+                  {isShipmentTable && shipWritebackStatus[row.id] === "error" && <span title={shipWritebackErr[row.id] || "HubSpot writeback failed — saved locally"} style={{ fontSize: 11, color: "#DC2626", marginRight: 6, cursor: "help" }}>⚠</span>}
                   <button onClick={() => delRow(row.id)} style={{ ...S.btnDel, padding: "2px 6px", fontSize: 11 }} title="Delete row">✕</button>
                 </td>}
               </tr>

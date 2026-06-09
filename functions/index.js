@@ -519,7 +519,8 @@ function buildHardwareFromKits(projectKitIds, kitProps, componentsByKit, existin
 // Traverse Kit→Shipment associations to find INxxx numbers per project.
 // HubSpot has no direct Project→Shipment association; shipments are linked to Station Kits.
 // kitsByProject: { projectHsId: [kitId, ...] } — from fetchKitsForProjects, already available.
-// Returns { projectHsId: ["INxxx", ...] } for projects that have shipments.
+// Returns { projectHsId: [{ id: "<hubspotShipmentObjectId>", num: "INxxx" }, ...] } for projects that have shipments.
+// v4.4.0: now returns id+num pairs (was: just nums) so writeback can patch by ID without re-searching.
 // All fetch calls use a 15s AbortController timeout to prevent silent hangs from blocking the sync.
 async function fetchShipmentsViaKits(token, kitsByProject) {
   const allKitIds = [...new Set(Object.values(kitsByProject).flat())];
@@ -577,13 +578,21 @@ async function fetchShipmentsViaKits(token, kitsByProject) {
     }
   }));
 
-  // Step 3: Map project → unique INxxx numbers via kit intermediaries
+  // Step 3: Map project → unique { id, num } pairs via kit intermediaries
+  // (v4.4.0: keep both the HubSpot object ID and the INxxx — needed for writeback patches by ID)
   const byProject = {};
   for (const [projectHsId, kitIds] of Object.entries(kitsByProject)) {
-    const nums = [...new Set(
-      kitIds.flatMap(kid => (kitToShipmentIds[kid] || []).map(sid => shipmentNums[sid])).filter(Boolean)
-    )];
-    if (nums.length) byProject[projectHsId] = nums;
+    const seen = new Set();
+    const pairs = [];
+    for (const kid of kitIds) {
+      for (const sid of (kitToShipmentIds[kid] || [])) {
+        const num = shipmentNums[sid];
+        if (!num || seen.has(num)) continue;
+        seen.add(num);
+        pairs.push({ id: String(sid), num });
+      }
+    }
+    if (pairs.length) byProject[projectHsId] = pairs;
   }
   return byProject;
 }
@@ -758,19 +767,31 @@ async function runSync(token, commit, syncCtx) {
 
         for (const projectHsId of projectsWithShipments) {
           const pid = `hs_${projectHsId}`;
-          const incomingNums = shipmentsByProject[projectHsId]; // ["IN00785", "IN00790", ...]
+          const incomingPairs = shipmentsByProject[projectHsId]; // [{ id, num }, ...]
+          const idByNum = new Map(incomingPairs.map(p => [p.num, p.id])); // INxxx → hubspotShipmentId
           const existingPD = pdByPid[projectHsId] || [];
           const existingArr = Array.isArray(existingPD) ? existingPD : Object.values(existingPD);
           const shipmentCat = existingArr.find(c => c && c.id === "pd_shipment_details");
           const existingRows = shipmentCat?.rows || [];
           const existingNums = new Set(existingRows.map(r => r.item_num).filter(Boolean));
 
-          const newRows = incomingNums
-            .filter(num => !existingNums.has(num))
-            .map(num => ({ item_num: num }));
+          // v4.4.0: backfill hubspotShipmentId on EXISTING rows that don't have one yet (match by INxxx)
+          let backfillCount = 0;
+          const backfilledRows = existingRows.map(r => {
+            if (r && r.item_num && !r.hubspotShipmentId && idByNum.has(r.item_num)) {
+              backfillCount++;
+              return { ...r, hubspotShipmentId: idByNum.get(r.item_num) };
+            }
+            return r;
+          });
 
-          if (newRows.length > 0) {
-            const mergedRows = [...existingRows, ...newRows];
+          // Brand-new rows for incoming INxxx that don't exist locally yet — include hubspotShipmentId from the start
+          const newRows = incomingPairs
+            .filter(p => !existingNums.has(p.num))
+            .map(p => ({ item_num: p.num, hubspotShipmentId: p.id }));
+
+          if (newRows.length > 0 || backfillCount > 0) {
+            const mergedRows = [...backfilledRows, ...newRows];
             if (shipmentCat) {
               // pd_shipment_details cat exists — update its rows
               const updatedPD = existingArr.map(c => c.id === "pd_shipment_details" ? { ...c, rows: mergedRows } : c);
@@ -780,7 +801,10 @@ async function runSync(token, commit, syncCtx) {
               const updatedPD = [...existingArr, { id: "pd_shipment_details", name: "Shipment Details", type: "table", accessLevel: "open", columns: [], rows: mergedRows }];
               shipmentUpdates[`appState/docData/${pid}/projectDetails`] = sanitizeForFirebase(updatedPD);
             }
-            console.log(`[shipments] ${pid}: added ${newRows.length} new shipment row(s): ${newRows.map(r => r.item_num).join(", ")}`);
+            const msgParts = [];
+            if (newRows.length) msgParts.push(`added ${newRows.length} new shipment row(s): ${newRows.map(r => r.item_num).join(", ")}`);
+            if (backfillCount) msgParts.push(`backfilled hubspotShipmentId on ${backfillCount} existing row(s)`);
+            console.log(`[shipments] ${pid}: ${msgParts.join(" + ")}`);
           }
         }
 
@@ -1377,6 +1401,127 @@ exports.writeStageToHubspot = functions.runWith({ memory: "256MB" }).https.onCal
   await db.ref(`appState/projects/${pid}/hubspotStageId`).set(stageId);
   await db.ref("hubspotWriteback/log").push(logEntry);
   return { ok: true };
+});
+
+/* ═══ HUBSPOT SHIPMENT WRITEBACK — v4.4.0: create-or-update Shipments custom object ═══ */
+// App's pd_shipment_details row → HubSpot Shipments custom object (2-39524475).
+// Properties confirmed via schema diagnostic on 2026-06-09.
+// Note: label and name are swapped on two fields in HubSpot's schema (confusing but verified via real data):
+//   - shipment_tracking_number = the INxxx (despite its label saying "Internal Shipment ID")
+//   - internal_shipment_id     = the carrier's tracking number (despite its label saying "Shipment Tracking Number")
+const HUBSPOT_SHIPMENT_PROPS = {
+  contents:     "shipment_contents__c",   // app textarea → HubSpot textarea
+  carrier:      "logistics_company__c",   // app text → HubSpot text (e.g., "Fedex", "SF Express")
+  tracking_num: "internal_shipment_id",   // app text → HubSpot text (carrier's tracking #)
+  ship_date:    "date_shipped__c",        // app date (YYYY-MM-DD) → HubSpot datepicker (midnight UTC ms)
+  notes:        "notes",                  // app textarea → HubSpot textarea
+};
+// App columns with no HubSpot equivalent — saved locally only, never written back:
+//   box_size_in, box_size_mm, weight_lbs, weight_kg
+
+// Writeback: PATCH existing Shipment if hubspotShipmentId is known or INxxx matches a HubSpot record;
+//            otherwise CREATE a new Shipment with the given INxxx + properties.
+// data: { hubspotShipmentId?, item_num (INxxx), fields: { contents?, carrier?, tracking_num?, ship_date?, notes? } }
+// Gate: Instrumental users only.
+exports.writeShipmentToHubspot = functions.runWith({ memory: "256MB" }).https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  const uid = context.auth.uid;
+  const userSnap = await db.ref(`users/${uid}`).once("value");
+  const user = userSnap.val();
+  if (!user) throw new functions.https.HttpsError("permission-denied", "User not found.");
+  const isInst = user.role === "admin" || user.role === "si_admin" || user.partyId === "instrumental";
+  if (!isInst) throw new functions.https.HttpsError("permission-denied", "Instrumental users only.");
+
+  const { hubspotShipmentId, item_num, fields } = data || {};
+  if (!item_num || typeof item_num !== "string" || !item_num.trim())
+    throw new functions.https.HttpsError("invalid-argument", "item_num (INxxx) required.");
+  if (!fields || typeof fields !== "object")
+    throw new functions.https.HttpsError("invalid-argument", "fields required.");
+
+  const token = process.env.HUBSPOT_TOKEN;
+  if (!token) throw new functions.https.HttpsError("internal", "HUBSPOT_TOKEN not configured.");
+
+  // Build HubSpot properties object from the app-key → HubSpot-prop map.
+  const properties = {};
+  for (const [appKey, val] of Object.entries(fields)) {
+    const propName = HUBSPOT_SHIPMENT_PROPS[appKey];
+    if (!propName) continue; // ignore local-only fields (box_size, weight, etc.)
+    if (val === null || val === undefined || val === "") {
+      properties[propName] = ""; // clear the field
+    } else if (appKey === "ship_date") {
+      // Date format: HubSpot datepickers require midnight UTC ms (same fix as writeProjectDateToHubspot).
+      properties[propName] = new Date(String(val) + "T00:00:00Z").getTime();
+    } else {
+      properties[propName] = String(val);
+    }
+  }
+  if (Object.keys(properties).length === 0 && hubspotShipmentId) {
+    return { ok: true, skipped: true, reason: "no mapped fields changed" };
+  }
+
+  // Step 1: resolve target HubSpot record — by ID if known, else search by INxxx, else create.
+  let targetId = hubspotShipmentId || null;
+
+  if (!targetId) {
+    // Search for an existing Shipment with this INxxx (shipment_tracking_number)
+    try {
+      const searchRes = await fetch(`https://api.hubapi.com/crm/v3/objects/${SHIPMENT_OBJECT_TYPE}/search`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filterGroups: [{ filters: [{ propertyName: "shipment_tracking_number", operator: "EQ", value: item_num.trim() }] }],
+          properties: ["shipment_tracking_number"],
+          limit: 1,
+        }),
+      });
+      if (searchRes.ok) {
+        const body = await searchRes.json();
+        const hit = (body.results || [])[0];
+        if (hit && hit.id) targetId = String(hit.id);
+      }
+    } catch (e) {
+      // Fall through to create
+    }
+  }
+
+  // Step 2: PATCH (existing) or POST (new)
+  const isCreate = !targetId;
+  const url = isCreate
+    ? `https://api.hubapi.com/crm/v3/objects/${SHIPMENT_OBJECT_TYPE}`
+    : `https://api.hubapi.com/crm/v3/objects/${SHIPMENT_OBJECT_TYPE}/${targetId}`;
+  const method = isCreate ? "POST" : "PATCH";
+  const reqBody = isCreate
+    ? { properties: { shipment_tracking_number: item_num.trim(), ...properties } }
+    : { properties };
+
+  const res = await fetch(url, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(reqBody),
+  });
+
+  const logEntry = {
+    ts: new Date().toISOString(), uid, item_num: item_num.trim(),
+    hubspotId: targetId || null,
+    action: isCreate ? "create_shipment" : "patch_shipment",
+    fields: Object.keys(properties),
+    status: res.ok ? "ok" : "error",
+    httpStatus: res.status,
+  };
+
+  if (!res.ok) {
+    logEntry.body = await res.text();
+    await db.ref("hubspotWriteback/log").push(logEntry);
+    throw new functions.https.HttpsError("internal", `HubSpot ${method} failed: ${res.status} ${logEntry.body}`);
+  }
+
+  const responseBody = await res.json();
+  if (isCreate && responseBody.id) {
+    targetId = String(responseBody.id);
+    logEntry.hubspotId = targetId;
+  }
+  await db.ref("hubspotWriteback/log").push(logEntry);
+  return { ok: true, hubspotShipmentId: targetId, created: isCreate };
 });
 
 /* ═══ SLACK FEEDBACK — v4.3.1: in-app feedback button posts to Slack ═══ */
