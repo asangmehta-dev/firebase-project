@@ -1305,13 +1305,16 @@ exports.writeProjectDateToHubspot = functions.runWith({ memory: "256MB" }).https
   const token = process.env.HUBSPOT_TOKEN;
   if (!token) throw new functions.https.HttpsError("internal", "HUBSPOT_TOKEN not configured.");
 
-  // Build HubSpot properties object — convert "YYYY-MM-DD" → ms since epoch (noon UTC to avoid TZ shifts)
+  // Build HubSpot properties object — convert "YYYY-MM-DD" → ms since epoch (MIDNIGHT UTC, strictly).
+  // HubSpot rejects datepicker values that aren't exactly midnight UTC with error:
+  //   "X ms is at HH:MM:SS.0 UTC, not midnight!" (INVALID_DATE).
+  // The v4.1.0 code used noon UTC "to avoid TZ shifts" but that was wrong — HubSpot enforces midnight.
   const properties = {};
   for (const [appKey, val] of Object.entries(fields)) {
     const propName = HUBSPOT_DATE_PROPS[appKey];
     if (!propName) continue;
     if (val) {
-      const ms = new Date(val + "T12:00:00Z").getTime();
+      const ms = new Date(val + "T00:00:00Z").getTime();
       properties[propName] = ms;
     } else {
       properties[propName] = "";  // clear the field
