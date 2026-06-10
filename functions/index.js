@@ -597,6 +597,74 @@ async function fetchShipmentsViaKits(token, kitsByProject) {
   return byProject;
 }
 
+// v4.4.1: some shipments are associated directly to a Project (typeId 129), not via a Station Kit.
+// Mirrors fetchShipmentsViaKits's return shape so the sync can union both paths.
+async function fetchShipmentsDirect(token, projectHsIds) {
+  if (!projectHsIds.length) return {};
+  const BATCH = 100;
+
+  const projectToShipmentIds = {};
+  const assocBatches = [];
+  for (let i = 0; i < projectHsIds.length; i += BATCH) assocBatches.push(projectHsIds.slice(i, i + BATCH));
+  await Promise.all(assocBatches.map(async (batch) => {
+    try {
+      const res = await fetchWithTimeout(
+        `https://api.hubapi.com/crm/v4/associations/${OBJECT_TYPE}/${SHIPMENT_OBJECT_TYPE}/batch/read`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ inputs: batch.map(id => ({ id: String(id) })) }),
+        }
+      );
+      if (!res.ok) { console.warn("[shipments-direct] assoc batch error:", res.status); return; }
+      const data = await res.json();
+      for (const result of (data.results || [])) {
+        const ids = (result.to || []).map(t => String(t.toObjectId));
+        if (ids.length) projectToShipmentIds[String(result.from.id)] = ids;
+      }
+    } catch (e) {
+      console.warn("[shipments-direct] assoc batch failed:", e.name === "AbortError" ? "timeout (15s)" : e.message);
+    }
+  }));
+
+  const allShipmentIds = [...new Set(Object.values(projectToShipmentIds).flat())];
+  if (!allShipmentIds.length) return {};
+  console.log(`[shipments-direct] found ${allShipmentIds.length} directly-associated shipment(s) across ${Object.keys(projectToShipmentIds).length} project(s)`);
+
+  const shipmentNums = {};
+  const propBatches = [];
+  for (let i = 0; i < allShipmentIds.length; i += BATCH) propBatches.push(allShipmentIds.slice(i, i + BATCH));
+  await Promise.all(propBatches.map(async (batch) => {
+    try {
+      const res = await fetchWithTimeout(`https://api.hubapi.com/crm/v3/objects/${SHIPMENT_OBJECT_TYPE}/batch/read`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ inputs: batch.map(id => ({ id })), properties: ["shipment_tracking_number"] }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      for (const obj of (data.results || [])) {
+        const num = obj.properties?.shipment_tracking_number;
+        if (num) shipmentNums[obj.id] = num;
+      }
+    } catch (e) {
+      console.warn("[shipments-direct] props batch failed:", e.name === "AbortError" ? "timeout (15s)" : e.message);
+    }
+  }));
+
+  const byProject = {};
+  for (const [projectHsId, shipmentIds] of Object.entries(projectToShipmentIds)) {
+    const pairs = [];
+    for (const sid of shipmentIds) {
+      const num = shipmentNums[sid];
+      if (!num) continue;
+      pairs.push({ id: String(sid), num });
+    }
+    if (pairs.length) byProject[projectHsId] = pairs;
+  }
+  return byProject;
+}
+
 /* v4.0.3: Firebase Realtime DB rejects `undefined` in .set() values — recursively swap to null. */
 function sanitizeForFirebase(value) {
   if (value === undefined) return null;
@@ -751,7 +819,24 @@ async function runSync(token, commit, syncCtx) {
     // Shipments are linked to Station Kits, not directly to Projects — so we reuse kitsByProject from above.
     // Only adds item_num; never overwrites existing rows; leaves all other columns blank for manual fill-in.
     try {
-      const shipmentsByProject = await fetchShipmentsViaKits(token, kitsByProject);
+      // v4.4.1: shipments live on two association paths — via Station Kit, AND directly on the Project.
+      // We traverse both in parallel and union per project (dedup by INxxx).
+      const projectHsIdsForShipments = incoming.map(p => p.hubspotId).filter(Boolean);
+      const [viaKits, direct] = await Promise.all([
+        fetchShipmentsViaKits(token, kitsByProject),
+        fetchShipmentsDirect(token, projectHsIdsForShipments),
+      ]);
+      const shipmentsByProject = {};
+      for (const pid of new Set([...Object.keys(viaKits), ...Object.keys(direct)])) {
+        const seen = new Set();
+        const merged = [];
+        for (const pair of [...(viaKits[pid] || []), ...(direct[pid] || [])]) {
+          if (seen.has(pair.num)) continue;
+          seen.add(pair.num);
+          merged.push(pair);
+        }
+        shipmentsByProject[pid] = merged;
+      }
       const projectsWithShipments = Object.keys(shipmentsByProject);
       console.log(`[shipments] projects with shipments: ${projectsWithShipments.length}`);
 
@@ -1455,9 +1540,10 @@ exports.writeShipmentToHubspot = functions.runWith({ memory: "256MB" }).https.on
       properties[propName] = String(val);
     }
   }
-  if (Object.keys(properties).length === 0 && hubspotShipmentId) {
-    return { ok: true, skipped: true, reason: "no mapped fields changed" };
-  }
+  // v4.4.1: always include shipment_tracking_number in the PATCH body so item_num renames propagate.
+  // Idempotent: if the value matches, HubSpot no-ops; if it changed, the INxxx updates on HubSpot.
+  // (Pre-v4.4.1 the PATCH body only carried mapped fields, so item_num-only edits were silently dropped.)
+  properties["shipment_tracking_number"] = item_num.trim();
 
   // Step 1: resolve target HubSpot record — by ID if known, else search by INxxx, else create.
   let targetId = hubspotShipmentId || null;
@@ -1490,9 +1576,8 @@ exports.writeShipmentToHubspot = functions.runWith({ memory: "256MB" }).https.on
     ? `https://api.hubapi.com/crm/v3/objects/${SHIPMENT_OBJECT_TYPE}`
     : `https://api.hubapi.com/crm/v3/objects/${SHIPMENT_OBJECT_TYPE}/${targetId}`;
   const method = isCreate ? "POST" : "PATCH";
-  const reqBody = isCreate
-    ? { properties: { shipment_tracking_number: item_num.trim(), ...properties } }
-    : { properties };
+  // properties already carries shipment_tracking_number (set above) so both paths use the same body shape.
+  const reqBody = { properties };
 
   const res = await fetch(url, {
     method,
