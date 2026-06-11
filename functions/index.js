@@ -358,9 +358,15 @@ async function discoverStationObjectTypes(token) {
     for (const schema of (data.results || [])) {
       const singular = (schema.labels?.singular || schema.name || "").toLowerCase();
       const plural   = (schema.labels?.plural   || "").toLowerCase();
+      const name     = (schema.name || "").toLowerCase();
       const typeId   = schema.objectTypeId || schema.id;
       allLabels.push(`${singular}/${plural}(${typeId})`);
       if (singular.includes("station kit") || plural.includes("station kit")) kitTypeId = typeId;
+      // v4.5.2 fix: explicitly match "fleet asset" — there's no "station component" object in HubSpot.
+      // Previously this fell through to "first non-kit non-project association" which depended on
+      // schema association order; a recent reorder put cs_programs_to_station_kits first, so the
+      // discovery picked the CS Programs type as components, producing empty fleet-asset data.
+      if (singular.includes("fleet asset") || plural.includes("fleet asset") || name === "fleet_assets") componentTypeId = typeId;
       if (singular.includes("station component") || plural.includes("station component")) componentTypeId = typeId;
     }
     console.log("[stationKits] schema:", allLabels.join(", "));
@@ -375,13 +381,20 @@ async function discoverStationObjectTypes(token) {
           const kitSchema = await schemaRes.json();
           const assocs = kitSchema.associations || [];
           console.log("[stationKits] kit schema assocs:", JSON.stringify(assocs.map(a => ({ to: a.toObjectTypeId, name: a.name, label: a.label }))));
-          // If componentTypeId not yet found, infer from first non-kit, non-project association
+          // If componentTypeId not yet found from labels, look for the fleet asset association by typeId match.
+          // Prefer FLEET_ASSET_TYPE_ID const (known stable) over arbitrary first-non-kit assoc.
           if (!componentTypeId) {
-            for (const a of assocs) {
-              if (a.toObjectTypeId && a.toObjectTypeId !== kitTypeId && a.toObjectTypeId !== OBJECT_TYPE) {
-                componentTypeId = a.toObjectTypeId;
-                console.log("[stationKits] inferred componentTypeId from kit schema:", componentTypeId);
-                break;
+            if (assocs.some(a => a.toObjectTypeId === FLEET_ASSET_TYPE_ID)) {
+              componentTypeId = FLEET_ASSET_TYPE_ID;
+              console.log("[stationKits] componentTypeId set from FLEET_ASSET_TYPE_ID const:", componentTypeId);
+            } else {
+              // Last-resort: first non-kit, non-project assoc (legacy behavior, fragile)
+              for (const a of assocs) {
+                if (a.toObjectTypeId && a.toObjectTypeId !== kitTypeId && a.toObjectTypeId !== OBJECT_TYPE) {
+                  componentTypeId = a.toObjectTypeId;
+                  console.warn("[stationKits] fallback inferred componentTypeId from kit schema (fragile):", componentTypeId);
+                  break;
+                }
               }
             }
           }
@@ -511,7 +524,7 @@ async function fetchComponentsForKits(token, kitTypeId, componentTypeId, kitIds)
       const res = await fetchWithTimeout(`https://api.hubapi.com/crm/v3/objects/${componentTypeId}/batch/read`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ inputs: batch.map(id => ({ id })), properties: ["asset_sn", "name", "category_master", "category", "model_number", "model"] }),
+        body: JSON.stringify({ inputs: batch.map(id => ({ id })), properties: ["asset_sn", "name", "category_master", "category", "model_number", "model", "product_sn_service_tag", "mac_address__c"] }),
       });
       if (!res.ok) return;
       const data = await res.json();
@@ -533,6 +546,9 @@ async function fetchComponentsForKits(token, kitTypeId, componentTypeId, kitIds)
         serial: p.asset_sn || p.name || assetId,
         category: p.category_master || p.category || "",
         model: p.model_number || p.model || "",
+        // v4.5.2: extra computer-specific props used by pd_station_kits row builder
+        productServiceTag: p.product_sn_service_tag || "",
+        macAddress: p.mac_address__c || "",
       };
     }).filter(c => c.serial);
   }
@@ -571,6 +587,45 @@ function buildHardwareFromKits(projectKitIds, kitProps, componentsByKit, existin
     }
   }
   return [...hsItems, ...manualItems];
+}
+
+// v4.5.2: Build pd_station_kits rows (row-per-kit) from HubSpot kit + fleet asset data.
+// Returns { kitHubspotId: rowFields } so the merge in runSync can match by _kitHubspotId
+// and preserve user-typed manual fields on existing rows. Only writes the HubSpot-derived
+// keys — the merge step in runSync is what guarantees other fields stay intact.
+function buildStationKitsRowsFromKits(projectKitIds, kitProps, componentsByKit) {
+  const rows = {};
+  for (const kitId of projectKitIds || []) {
+    const props = kitProps[kitId] || {};
+    const components = componentsByKit[kitId] || [];
+    const byLabel = {};
+    for (const c of components) {
+      if (c.associationLabel) byLabel[c.associationLabel] = c;
+    }
+    const cameraLabels = ["Camera 1", "camera 2", "camera 3", "camera 4", "Camera 5"];
+    const lensLabels   = ["Lens 1", "Lens 2", "Lens 3", "Lens 4", "Lens 5"];
+    const cameraCount = cameraLabels.filter(l => byLabel[l]).length;
+    rows[String(kitId)] = {
+      _kitHubspotId:        String(kitId),
+      fixture_name:         props.station_kit_sn || "",
+      station_name:         props.name           || "",
+      computer_sn:          byLabel["Computer"]?.serial            || "",
+      computer_service_tag: byLabel["Computer"]?.productServiceTag || "",
+      mac_address:          byLabel["Computer"]?.macAddress        || "",
+      camera_1_sn:          byLabel["Camera 1"]?.serial            || "",
+      lens_1_sn:            byLabel["Lens 1"]?.serial              || "",
+      barcode_scanner_sn:   byLabel["Barcode Scanner"]?.serial     || "",
+      monitor_sn:           byLabel["Monitor"]?.serial             || "",
+      led_controller_sn:    byLabel["LED Light Controller"]?.serial|| "",
+      cameras_present:      cameraCount > 0,
+      no_cameras:           cameraCount || "",
+      lenses_present:       lensLabels.some(l => byLabel[l]),
+      barcode_scanner:      !!byLabel["Barcode Scanner"],
+      monitor:              !!byLabel["Monitor"],
+      leds:                 !!byLabel["LED Light Controller"],
+    };
+  }
+  return rows;
 }
 
 // Traverse Kit→Shipment associations to find INxxx numbers per project.
@@ -864,6 +919,57 @@ async function runSync(token, commit, syncCtx) {
         if (Object.keys(hwUpdates).length > 0) {
           await db.ref().update(hwUpdates);
           console.log(`[stationKits] synced hardware for ${Object.keys(hwUpdates).length} projects`);
+        }
+
+        // v4.5.2: also populate pd_station_kits rows inside projectDetails for each project with kits.
+        // Match rows by _kitHubspotId; merge only HubSpot-derived columns; preserve all manual fields.
+        // Inbound-only — writeback from pd_station_kits cells is deferred (HardwareTrackingSection handles writeback).
+        const HUBSPOT_DRIVEN_SK_KEYS = [
+          "fixture_name", "station_name", "computer_sn", "computer_service_tag", "mac_address",
+          "camera_1_sn", "lens_1_sn", "barcode_scanner_sn", "monitor_sn", "led_controller_sn",
+          "cameras_present", "no_cameras", "lenses_present", "barcode_scanner", "monitor", "leds",
+        ];
+        const newRowId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        const stationKitsUpdates = {};
+        for (const [projectHsId, kitIds] of Object.entries(byProject)) {
+          const pid = `hs_${projectHsId}`;
+          const newRowsByKitId = buildStationKitsRowsFromKits(kitIds, kitProps, componentsByKit);
+          if (Object.keys(newRowsByKitId).length === 0) continue;
+
+          const pdSnap = await db.ref(`appState/docData/${pid}/projectDetails`).once("value");
+          const pdRaw = pdSnap.val();
+          const pdArr = Array.isArray(pdRaw) ? pdRaw : (pdRaw && typeof pdRaw === "object" ? Object.values(pdRaw) : []);
+          const skCatIdx = pdArr.findIndex(c => c?.id === "pd_station_kits");
+          if (skCatIdx === -1) continue; // skip projects whose schema doesn't have the table yet
+
+          const skCat = pdArr[skCatIdx];
+          const existingRows = Array.isArray(skCat.rows) ? skCat.rows : [];
+          const matchedKitIds = new Set();
+          const updatedRows = existingRows.map(r => {
+            if (!r?._kitHubspotId) return r;
+            const nr = newRowsByKitId[r._kitHubspotId];
+            if (!nr) return r;
+            matchedKitIds.add(r._kitHubspotId);
+            const merged = { ...r };
+            for (const k of HUBSPOT_DRIVEN_SK_KEYS) merged[k] = nr[k];
+            return merged;
+          });
+          // Append rows for kits that don't have a corresponding row yet
+          let added = 0;
+          for (const [kitHsId, nr] of Object.entries(newRowsByKitId)) {
+            if (matchedKitIds.has(kitHsId)) continue;
+            updatedRows.push({ id: newRowId(), ...nr });
+            added++;
+          }
+          if (added > 0 || matchedKitIds.size > 0) {
+            const newPd = pdArr.map((c, i) => i === skCatIdx ? { ...c, rows: updatedRows } : c);
+            stationKitsUpdates[`appState/docData/${pid}/projectDetails`] = sanitizeForFirebase(newPd);
+            console.log(`[stationKits] ${pid}: pd_station_kits — updated ${matchedKitIds.size} existing row(s), added ${added} new`);
+          }
+        }
+        if (Object.keys(stationKitsUpdates).length > 0) {
+          await db.ref().update(stationKitsUpdates);
+          console.log(`[stationKits] synced pd_station_kits for ${Object.keys(stationKitsUpdates).length} projects`);
         }
       } else {
         console.log("[stationKits] object types not found in schema — skipping hardware sync");
