@@ -74,7 +74,10 @@ const PROPERTIES = [
   "project_name", "hs_object_id", "app_project_id__c", "number_of_stations__c",
   "company_codename", "hs_pipeline", "hs_pipeline_stage",
   "associated_cs_program_id_last", "deploy_location_from_opportunity__c",
-  "deploy_region__c", "deployzen_datazen_tpm", "hde__hardware_design_engineer_",
+  "deploy_region__c", "deployzen_datazen_tpm",
+  // v4.5.3: 4 DRI Owner IDs for pd_team sync
+  "hde__hardware_design_engineer_", "sie__software_integration_engineer_",
+  "sa_solutions_architect", "cs_customer_success",
   "standard_cameras", "number_of_cameras__c", "regular_lenses", "tc_lense",
   "type_of_lenses", "led_light_controllers", "standard_station_frames",
   "large_station_frames", "computers", "monitor_screens", "barcode_scanners",
@@ -286,6 +289,13 @@ function mapHubspotToProject(obj) {
     deployRegion: p.deploy_region__c || null,
     tpm: p.deployzen_datazen_tpm || null,
     hde: p.hde__hardware_design_engineer_ || null,
+    // v4.5.3: all 4 DRI Owner IDs (numeric strings) for pd_team sync. Resolution to person details happens in runSync.
+    dri: {
+      hde: p.hde__hardware_design_engineer_     || null,
+      sie: p.sie__software_integration_engineer_|| null,
+      sa:  p.sa_solutions_architect             || null,
+      cs:  p.cs_customer_success                || null,
+    },
     hardware: {
       cameras: p.standard_cameras || p.number_of_cameras__c || null,
       lenses: p.regular_lenses || null,
@@ -626,6 +636,60 @@ function buildStationKitsRowsFromKits(projectKitIds, kitProps, componentsByKit) 
     };
   }
   return rows;
+}
+
+// v4.5.3: Fetch ALL HubSpot Owners once per sync (paginated, ~100/page). Owners are users in HubSpot —
+// returned as { id → { name, email } }. Used to resolve DRI Owner IDs on each Project record to person
+// details for pd_team rows. Limit 50 pages safety; orgs typically have <5000 owners.
+async function fetchAllOwners(token) {
+  const owners = {};
+  let after = null;
+  for (let i = 0; i < 50; i++) {
+    const url = `https://api.hubapi.com/crm/v3/owners?limit=100${after ? `&after=${encodeURIComponent(after)}` : ""}`;
+    try {
+      const res = await fetchWithTimeout(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) { console.warn("[owners] fetch page failed:", res.status); break; }
+      const data = await res.json();
+      for (const o of (data.results || [])) {
+        const fn = o.firstName || "";
+        const ln = o.lastName  || "";
+        const full = `${fn} ${ln}`.trim();
+        owners[String(o.id)] = {
+          name:  full || o.email || String(o.id),
+          email: o.email || "",
+        };
+      }
+      after = data.paging?.next?.after;
+      if (!after) break;
+    } catch (e) {
+      console.warn("[owners] fetch failed:", e.message);
+      break;
+    }
+  }
+  console.log(`[owners] fetched ${Object.keys(owners).length} HubSpot Owners`);
+  return owners;
+}
+
+// v4.5.3: Build the 4 DRI rows for pd_team from a project's DRI Owner IDs + the global owners map.
+// Always emits exactly 4 rows in fixed order. Empty role rows still appear with name/email blank
+// so users see "HDE: <empty>" when a DRI isn't assigned in HubSpot.
+const DRI_ROLES = [
+  { key: "hde", role: "HDE (Hardware Design Engineer)" },
+  { key: "sie", role: "SIE (Software Integration Engineer)" },
+  { key: "sa",  role: "SA (Solutions Architect)" },
+  { key: "cs",  role: "CS (Customer Success)" },
+];
+function buildTeamRowsFromDRIs(dri, ownersById) {
+  return DRI_ROLES.map(({ key, role }) => {
+    const ownerId = dri?.[key] ? String(dri[key]) : null;
+    const owner   = ownerId ? ownersById[ownerId] : null;
+    return {
+      _driRole: key,            // hidden match key
+      role,                     // visible: "HDE (Hardware Design Engineer)"
+      name:  owner?.name  || "",
+      email: owner?.email || "",
+    };
+  });
 }
 
 // Traverse Kit→Shipment associations to find INxxx numbers per project.
@@ -976,6 +1040,64 @@ async function runSync(token, commit, syncCtx) {
       }
     } catch (stErr) {
       console.warn("[stationKits] station kit sync failed (non-fatal):", stErr.message);
+    }
+
+    // v4.5.3: DRI sync — populate the 4 fixed pd_team rows (HDE, SIE, SA, CS) from HubSpot Owners.
+    // Each DRI Owner ID on a Project record resolves to a HubSpot Owner (firstName, lastName, email).
+    // Match existing rows by hidden _driRole; preserve manual rows (no _driRole) untouched.
+    try {
+      const dris = incoming
+        .filter(p => p.hubspotId && p.dri && (p.dri.hde || p.dri.sie || p.dri.sa || p.dri.cs))
+        .map(p => ({ projectHsId: p.hubspotId, dri: p.dri }));
+      if (dris.length > 0) {
+        const ownersById = await fetchAllOwners(token);
+        const HUBSPOT_DRIVEN_TEAM_KEYS = ["role", "name", "email"];
+        const teamUpdates = {};
+        for (const { projectHsId, dri } of dris) {
+          const pid = `hs_${projectHsId}`;
+          const newDriRows = buildTeamRowsFromDRIs(dri, ownersById);
+
+          const pdSnap = await db.ref(`appState/docData/${pid}/projectDetails`).once("value");
+          const pdRaw = pdSnap.val();
+          const pdArr = Array.isArray(pdRaw) ? pdRaw : (pdRaw && typeof pdRaw === "object" ? Object.values(pdRaw) : []);
+          const teamCatIdx = pdArr.findIndex(c => c?.id === "pd_team");
+          if (teamCatIdx === -1) continue;
+
+          const teamCat = pdArr[teamCatIdx];
+          const existingRows = Array.isArray(teamCat.rows) ? teamCat.rows : [];
+          const matchedRoles = new Set();
+          const updatedRows = existingRows.map(r => {
+            if (!r?._driRole) return r; // preserve manual rows
+            const nr = newDriRows.find(x => x._driRole === r._driRole);
+            if (!nr) return r;
+            matchedRoles.add(r._driRole);
+            const merged = { ...r };
+            for (const k of HUBSPOT_DRIVEN_TEAM_KEYS) merged[k] = nr[k];
+            return merged;
+          });
+          // Append any DRI rows that don't exist yet
+          const newRowId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+          let added = 0;
+          for (const nr of newDriRows) {
+            if (matchedRoles.has(nr._driRole)) continue;
+            updatedRows.push({ id: newRowId(), ...nr });
+            added++;
+          }
+          if (added > 0 || matchedRoles.size > 0) {
+            const newPd = pdArr.map((c, i) => i === teamCatIdx ? { ...c, rows: updatedRows } : c);
+            teamUpdates[`appState/docData/${pid}/projectDetails`] = sanitizeForFirebase(newPd);
+            console.log(`[dri] ${pid}: pd_team — updated ${matchedRoles.size} DRI row(s), added ${added} new`);
+          }
+        }
+        if (Object.keys(teamUpdates).length > 0) {
+          await db.ref().update(teamUpdates);
+          console.log(`[dri] synced pd_team rows for ${Object.keys(teamUpdates).length} projects`);
+        }
+      } else {
+        console.log("[dri] no projects have DRI fields set — skipping pd_team sync");
+      }
+    } catch (driErr) {
+      console.warn("[dri] DRI sync failed (non-fatal):", driErr.message);
     }
 
     // Shipment Details sync — traverse Kit→Shipment associations (the actual HubSpot link) to find INxxx numbers.
