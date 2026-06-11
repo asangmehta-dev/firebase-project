@@ -2850,61 +2850,237 @@ function ProgramDetailsSection({ cat, pid, state, setState, user, canEdit, lang 
   );
 }
 
-/* Hardware Tracking subsection (moved from old SI-specific, now visible to all) */
+/* Hardware Tracking subsection — v4.5.0 Stage 6B: editable + HubSpot writeback.
+   HubSpot-sourced rows are grouped by Station Kit. Within a kit:
+     - kit-level fields (name, kit SN, computer SN, status, station type) are editable inline → writeStationKitToHubspot
+     - fleet asset SN cells are editable for the 4 supported types → writeFleetAssetAssociation (swap-by-SN)
+   Manual rows remain in their own group, app-only (no writeback). */
 function HardwareTrackingSection({ project, state, setState, user, canEdit }) {
   const pid = project?.id;
   const hwData = state.docData?.[pid]?._hardwareTracking || [];
-  const [addForm, setAddForm] = useState(null); // null | { type, serial, model, assetTag }
-  const updateHW = (newData) => setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), _hardwareTracking: newData } } }));
-  const delHW = (id) => { if (confirm("Remove this item?")) updateHW(hwData.filter(h => h.id !== id)); };
+  const [addForm, setAddForm] = useState(null);
+  const updateHW = (mut) => setState(prev => {
+    const cur = prev.docData?.[pid]?._hardwareTracking || [];
+    const next = typeof mut === "function" ? mut(cur) : mut;
+    return { ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), _hardwareTracking: next } } };
+  });
+  const delHW = (id) => { if (confirm("Remove this item?")) updateHW(arr => arr.filter(h => h.id !== id)); };
   const submitAdd = () => {
     if (!addForm?.serial?.trim()) return;
-    updateHW([...hwData, { id: genId(), type: addForm.type, serial: addForm.serial.trim(), model: addForm.model?.trim() || "", assetTag: addForm.assetTag?.trim() || "", source: "manual" }]);
+    updateHW(arr => [...arr, { id: genId(), type: addForm.type, serial: addForm.serial.trim(), model: addForm.model?.trim() || "", assetTag: addForm.assetTag?.trim() || "", source: "manual" }]);
     setAddForm(null);
   };
 
-  const hsCount = hwData.filter(h => h.source === "hubspot").length;
-  const manualCount = hwData.filter(h => h.source !== "hubspot").length;
+  // Writeback state — keyed by row ID for asset SN edits, by kit HsId for kit-field edits.
+  const [wbStatus, setWbStatus] = useState({}); // { key: "syncing" | "ok" | "error" }
+  const [wbErr, setWbErr] = useState({});       // { key: errorMessage }
+  const setStatus = (k, v) => setWbStatus(s => ({ ...s, [k]: v }));
+  const setErr = (k, v) => setWbErr(s => ({ ...s, [k]: v }));
+  const clearStatusLater = (k) => setTimeout(() => setWbStatus(s => { const n = { ...s }; delete n[k]; return n; }), 3500);
+
+  // Writeback-eligible association labels (the 4 the user confirmed for v4.5.0)
+  const SUPPORTED_LABELS = new Set(["Camera 1", "camera 2", "camera 3", "camera 4", "Camera 5", "Lens 1", "Lens 2", "Lens 3", "Lens 4", "Lens 5", "Computer", "LED Light Controller"]);
+
+  // First-edit confirm guardrail for kit-field writebacks (per-session)
+  const kitEditConfirm = () => {
+    if (sessionStorage.getItem("v450_kit_writeback_confirmed") === "1") return true;
+    const ok = confirm("You're about to write back to HubSpot's Kit record. This change is immediate and affects the source of truth. Confirm?");
+    if (ok) sessionStorage.setItem("v450_kit_writeback_confirmed", "1");
+    return ok;
+  };
+
+  const writebackFleetAsset = async (row, newSerial) => {
+    const key = row.id;
+    if (!row._kitHubspotId || !row._associationLabel) {
+      setStatus(key, "error"); setErr(key, "Missing kit/association IDs — sync this project first.");
+      return;
+    }
+    setStatus(key, "syncing"); setErr(key, null);
+    try {
+      const fn = httpsCallable(functions, "writeFleetAssetAssociation");
+      const res = await fn({
+        kitHubspotId: row._kitHubspotId,
+        currentFleetAssetHubspotId: row._fleetAssetHubspotId || null,
+        label: row._associationLabel,
+        newSerial: String(newSerial).trim(),
+      });
+      const newFleetAssetId = res?.data?.newFleetAssetHubspotId;
+      if (newFleetAssetId) {
+        updateHW(arr => arr.map(h => h.id !== row.id ? h : { ...h, _fleetAssetHubspotId: newFleetAssetId, serial: String(newSerial).trim(), id: `hs_comp_${newFleetAssetId}` }));
+      }
+      setStatus(key, "ok"); clearStatusLater(key);
+    } catch (e) {
+      setStatus(key, "error"); setErr(key, e.message || "HubSpot writeback failed");
+      // Revert local serial change
+      updateHW(arr => arr.map(h => h.id !== row.id ? h : { ...h, serial: row.serial }));
+    }
+  };
+
+  const writebackKitField = async (kitHubspotId, fieldName, newValue, prevValue) => {
+    if (!kitEditConfirm()) {
+      // Revert
+      updateHW(arr => arr.map(h => h._kitHubspotId !== kitHubspotId ? h : { ...h, [fieldName]: prevValue }));
+      return;
+    }
+    const key = `kit_${kitHubspotId}`;
+    setStatus(key, "syncing"); setErr(key, null);
+    try {
+      const fn = httpsCallable(functions, "writeStationKitToHubspot");
+      await fn({ kitHubspotId, fields: { [fieldName]: newValue } });
+      setStatus(key, "ok"); clearStatusLater(key);
+    } catch (e) {
+      setStatus(key, "error"); setErr(key, e.message || "HubSpot kit writeback failed");
+      updateHW(arr => arr.map(h => h._kitHubspotId !== kitHubspotId ? h : { ...h, [fieldName]: prevValue }));
+    }
+  };
+
+  // Group HubSpot rows by kit HsId, preserving insertion order
+  const hsRows = hwData.filter(h => h.source === "hubspot");
+  const manualRows = hwData.filter(h => h.source !== "hubspot");
+  const kitGroups = [];
+  const kitIndex = new Map();
+  for (const h of hsRows) {
+    const k = h._kitHubspotId || "__unknown__";
+    if (!kitIndex.has(k)) {
+      kitIndex.set(k, kitGroups.length);
+      kitGroups.push({ kitHubspotId: h._kitHubspotId || null, kitName: h.kitName || "", kitSN: h.kitSN || "", computerSN: h.computerSN || "", kitStatus: h.kitStatus || "", stationType: h.stationType || "", rows: [] });
+    }
+    kitGroups[kitIndex.get(k)].rows.push(h);
+  }
+
+  // v4.5.0 fix: track edit state at parent level (NOT in nested components, which would remount on every parent render).
+  // editCell: { kind: "asset"|"kit", id: string (rowId or kitId), field?: string (kit field name), draft: string }
+  const [editCell, setEditCell] = useState(null);
+
+  const renderIndicator = (k) => {
+    const s = wbStatus[k];
+    if (s === "syncing") return <span title="Syncing to HubSpot…" style={{ fontSize: 11, color: "#3B82F6", marginLeft: 6 }}>↑</span>;
+    if (s === "ok") return <span title="HubSpot updated" style={{ fontSize: 11, color: "#059669", marginLeft: 6 }}>✓</span>;
+    if (s === "error") return <span title={wbErr[k] || "HubSpot writeback failed"} style={{ fontSize: 11, color: "#DC2626", marginLeft: 6, cursor: "help" }}>⚠</span>;
+    return null;
+  };
+
+  const commitKitEdit = (kitHubspotId, fieldName, prevValue) => {
+    const draft = editCell?.draft ?? prevValue;
+    setEditCell(null);
+    if (draft !== prevValue) writebackKitField(kitHubspotId, fieldName, draft, prevValue);
+  };
+
+  const commitAssetEdit = (row) => {
+    const trimmed = (editCell?.draft || "").trim();
+    setEditCell(null);
+    if (trimmed && trimmed !== row.serial) writebackFleetAsset(row, trimmed);
+  };
+
+  const renderKitField = (kit, fieldName, label, width = 150) => {
+    const value = kit[fieldName] || "";
+    const cellId = `${kit.kitHubspotId}_${fieldName}`;
+    const isEditing = editCell?.kind === "kit" && editCell?.id === cellId;
+    if (!canEdit || !kit.kitHubspotId) {
+      return <div style={{ fontSize: 12, color: "#64748B", fontFamily: F }}><span style={{ color: "#94A3B8", marginRight: 4 }}>{label}:</span>{value || "—"}</div>;
+    }
+    return (
+      <div style={{ fontSize: 12, color: "#0F172A", fontFamily: F, display: "flex", alignItems: "center", gap: 4 }}>
+        <span style={{ color: "#94A3B8" }}>{label}:</span>
+        {isEditing ? (
+          <input autoFocus value={editCell.draft}
+            onChange={e => setEditCell(c => ({ ...c, draft: e.target.value }))}
+            onBlur={() => commitKitEdit(kit.kitHubspotId, fieldName, value)}
+            onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setEditCell(null); }}
+            style={{ ...S.inp, width, padding: "2px 6px", fontSize: 12 }} />
+        ) : (
+          <span onClick={() => setEditCell({ kind: "kit", id: cellId, draft: value })}
+            style={{ cursor: "pointer", padding: "2px 4px", borderRadius: 4, background: value ? "transparent" : "#F1F5F9", minWidth: 40 }}>{value || "—"}</span>
+        )}
+      </div>
+    );
+  };
+
+  const renderSerialCell = (row) => {
+    const isWritable = row.source === "hubspot" && row._associationLabel && SUPPORTED_LABELS.has(row._associationLabel);
+    const isEditing = editCell?.kind === "asset" && editCell?.id === row.id;
+    if (!canEdit || !isWritable) {
+      return <span style={{ fontWeight: 600 }}>{row.serial || "—"}</span>;
+    }
+    if (isEditing) {
+      return (
+        <input autoFocus value={editCell.draft}
+          onChange={e => setEditCell(c => ({ ...c, draft: e.target.value }))}
+          onBlur={() => commitAssetEdit(row)}
+          onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setEditCell(null); }}
+          style={{ ...S.inp, width: 140, padding: "2px 6px", fontSize: 12 }} />
+      );
+    }
+    return <span onClick={() => setEditCell({ kind: "asset", id: row.id, draft: row.serial || "" })}
+      style={{ cursor: "pointer", fontWeight: 600, padding: "2px 4px", borderRadius: 4 }}>{row.serial || "—"}</span>;
+  };
 
   return (
     <div style={{ ...S.card, marginBottom: 12, marginTop: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: "#0F172A", fontFamily: F }}>Hardware Tracking</div>
         <div style={{ display: "flex", gap: 6 }}>
-          {hsCount > 0 && <span style={{ fontSize: 11, fontWeight: 600, background: "#EFF6FF", color: "#2563EB", borderRadius: 6, padding: "2px 8px", fontFamily: F }}>🔗 {hsCount} from HubSpot</span>}
-          {manualCount > 0 && <span style={{ fontSize: 11, fontWeight: 600, background: "#F0FDF4", color: "#16A34A", borderRadius: 6, padding: "2px 8px", fontFamily: F }}>✎ {manualCount} manual</span>}
+          {hsRows.length > 0 && <span style={{ fontSize: 11, fontWeight: 600, background: "#EFF6FF", color: "#2563EB", borderRadius: 6, padding: "2px 8px", fontFamily: F }}>🔗 {hsRows.length} from HubSpot</span>}
+          {manualRows.length > 0 && <span style={{ fontSize: 11, fontWeight: 600, background: "#F0FDF4", color: "#16A34A", borderRadius: 6, padding: "2px 8px", fontFamily: F }}>✎ {manualRows.length} manual</span>}
         </div>
       </div>
 
-      {hwData.length === 0 ? (
+      {hwData.length === 0 && (
         <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>No hardware tracked yet. Run a HubSpot sync to auto-populate from Station Kits.</div>
-      ) : (
-        <table style={{ ...S.table, fontSize: 13 }}>
-          <thead><tr>
-            <th style={S.th}>Source</th>
-            <th style={S.th}>Type</th>
-            <th style={S.th}>Serial / Asset SN</th>
-            <th style={S.th}>Model</th>
-            <th style={S.th}>Asset Tag</th>
-            <th style={S.th}>Kit SN</th>
-            {canEdit && <th style={S.th}></th>}
-          </tr></thead>
-          <tbody>{hwData.map(h => (
-            <tr key={h.id}>
-              <td style={S.td}>
-                {h.source === "hubspot"
-                  ? <span style={{ fontSize: 10, fontWeight: 700, background: "#EFF6FF", color: "#2563EB", borderRadius: 4, padding: "1px 5px", fontFamily: F }}>HubSpot</span>
-                  : <span style={{ fontSize: 10, fontWeight: 700, background: "#F0FDF4", color: "#16A34A", borderRadius: 4, padding: "1px 5px", fontFamily: F }}>Manual</span>}
-              </td>
-              <td style={S.td}>{h.type || "—"}</td>
-              <td style={{ ...S.td, fontWeight: 600 }}>{h.serial || "—"}</td>
-              <td style={S.td}>{h.model || "—"}</td>
-              <td style={S.td}>{h.assetTag || "—"}</td>
-              <td style={{ ...S.td, fontSize: 11, color: "#94A3B8" }}>{h.kitSN || "—"}</td>
-              {canEdit && <td style={S.td}><button style={{ ...S.btnDel, fontSize: 11, padding: "2px 8px" }} onClick={() => delHW(h.id)}>✕</button></td>}
-            </tr>
-          ))}</tbody>
-        </table>
+      )}
+
+      {kitGroups.map((kit, kIdx) => (
+        <div key={kit.kitHubspotId || `unk_${kIdx}`} style={{ border: "1px solid #E2E8F0", borderRadius: 8, padding: 10, marginBottom: 12, background: "#FAFBFC" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, fontWeight: 700, background: "#EFF6FF", color: "#2563EB", borderRadius: 4, padding: "2px 8px", fontFamily: F }}>Kit</span>
+            {renderKitField(kit, "kitName", "Name", 180)}
+            {renderKitField(kit, "kitSN", "Kit SN", 220)}
+            {renderKitField(kit, "computerSN", "Computer SN", 130)}
+            {renderKitField(kit, "kitStatus", "Status", 110)}
+            {renderKitField(kit, "stationType", "Type", 130)}
+            {renderIndicator(`kit_${kit.kitHubspotId}`)}
+          </div>
+          <table style={{ ...S.table, fontSize: 13 }}>
+            <thead><tr>
+              <th style={S.th}>Slot</th>
+              <th style={S.th}>Category</th>
+              <th style={S.th}>Serial / Asset SN</th>
+              <th style={S.th}>Model</th>
+            </tr></thead>
+            <tbody>{kit.rows.map(h => (
+              <tr key={h.id}>
+                <td style={S.td}>{h._associationLabel || "—"}</td>
+                <td style={S.td}>{h.type || "—"}</td>
+                <td style={S.td}>{renderSerialCell(h)}{renderIndicator(h.id)}</td>
+                <td style={S.td}>{h.model || "—"}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      ))}
+
+      {manualRows.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#16A34A", marginBottom: 6, fontFamily: F }}>Manual items (app-only, not synced to HubSpot)</div>
+          <table style={{ ...S.table, fontSize: 13 }}>
+            <thead><tr>
+              <th style={S.th}>Type</th>
+              <th style={S.th}>Serial / Asset SN</th>
+              <th style={S.th}>Model</th>
+              <th style={S.th}>Asset Tag</th>
+              {canEdit && <th style={S.th}></th>}
+            </tr></thead>
+            <tbody>{manualRows.map(h => (
+              <tr key={h.id}>
+                <td style={S.td}>{h.type || "—"}</td>
+                <td style={{ ...S.td, fontWeight: 600 }}>{h.serial || "—"}</td>
+                <td style={S.td}>{h.model || "—"}</td>
+                <td style={S.td}>{h.assetTag || "—"}</td>
+                {canEdit && <td style={S.td}><button style={{ ...S.btnDel, fontSize: 11, padding: "2px 8px" }} onClick={() => delHW(h.id)}>✕</button></td>}
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
       )}
 
       {canEdit && (
@@ -11230,11 +11406,28 @@ export default function App() {
         arr.forEach(p => { if (p && p.id) obj[p.id] = p; });
         dbWrite("appState/projects", obj).catch(console.error);
       }
+      // v4.5.1 data-safety fix: do field-level diff writes within docData/${pid} instead of whole-pid set().
+      // Pre-v4.5.1 wrote the entire pid node on any state change — if state.docData[pid] was momentarily partial
+      // (sync mid-update, or a buggy UI's rapid re-render), the write replaced the full RTDB node with partial
+      // data, wiping fields like pd_team rows. Incident: Sunnyhills GB300 lost team data 2026-06-11.
+      // Now only sub-keys whose reference actually changed get written; untouched fields stay in RTDB.
       if (next.docData !== prev.docData) {
         const prevDoc = prev.docData || {};
         Object.keys(next.docData).forEach(pid => {
-          if (next.docData[pid] !== prevDoc[pid]) {
-            dbWrite(`appState/docData/${pid}`, next.docData[pid]).catch(console.error);
+          const prevPid = prevDoc[pid];
+          const nextPid = next.docData[pid];
+          if (nextPid === prevPid) return;
+          // Whole-pid swap (new project or deletion) — preserve original behavior
+          if (!prevPid || !nextPid) {
+            dbWrite(`appState/docData/${pid}`, nextPid || null).catch(console.error);
+            return;
+          }
+          // Field-level diff: only keys whose reference changed
+          const allKeys = new Set([...Object.keys(prevPid), ...Object.keys(nextPid)]);
+          for (const key of allKeys) {
+            if (prevPid[key] !== nextPid[key]) {
+              dbWrite(`appState/docData/${pid}/${key}`, nextPid[key] ?? null).catch(console.error);
+            }
           }
         });
       }

@@ -24,6 +24,36 @@ const db = admin.database();
 const OBJECT_TYPE = "2-39524389";
 const SHIPMENT_OBJECT_TYPE = "2-39524475"; // Shipments custom object; primaryDisplayProperty = shipment_tracking_number (INxxx)
 const STATION_KIT_TYPE_ID = "2-39260531";  // Station Kits custom object — used to traverse Kit→Shipment associations
+// v4.5.0: Fleet Asset object type + association labels (Kit↔FleetAsset).
+// Each fleet asset is linked to a kit with TWO associations: a labeled one (e.g. "Camera 1" / typeId 240)
+// AND a generic unlabeled one (typeId 35). Writeback must handle both.
+const FLEET_ASSET_TYPE_ID = "2-39261140";
+const FLEET_ASSET_UNLABELED_TYPE_ID = 35;
+// Map HubSpot association labels → typeId. Discovered via
+// GET /crm/v4/associations/{STATION_KIT_TYPE_ID}/{FLEET_ASSET_TYPE_ID}/labels.
+// Note: HubSpot's label casing is inconsistent ("camera 2" vs "Camera 1"); we preserve the exact strings
+// HubSpot returns so the round trip stays accurate.
+const FLEET_ASSET_LABEL_TO_TYPE_ID = {
+  "Camera 1":             240,
+  "camera 2":             236,
+  "camera 3":             346,
+  "camera 4":             348,
+  "Camera 5":             402,
+  "Lens 1":               238,
+  "Lens 2":               226,
+  "Lens 3":               350,
+  "Lens 4":               352,
+  "Lens 5":               404,
+  "Computer":             234,
+  "LED Light Controller": 228,
+  "Monitor":              232,
+  "Frame":                242,
+  "Barcode Scanner":      230,
+  "Sensor":               406,
+  "Motorised Stage":      408,
+  "Ram Upgrade 1":        332,
+  "RAM Upgrade 2":        244,
+};
 // Per-SI-stage entered/exited date properties — populated by HubSpot
 // automatically as projects move through the SI Partner Deployment pipeline.
 // We request these so the timeline can pull actual stage dates without
@@ -424,14 +454,18 @@ async function fetchKitsForProjects(token, projectHsIds, kitTypeId) {
   return { byProject, kitProps };
 }
 
-// Batch-fetch Station Components for a list of kit IDs.
-// Returns map: kitId → [{ id, serial, category, model }]
+// Batch-fetch Station Components (Fleet Assets) for a list of kit IDs.
+// v4.5.0: now also captures the per-association label (e.g. "Camera 1", "Lens 3") + the fleet asset's HubSpot ID
+// so the UI can render slot-aware rows and writeback knows which association typeId to re-point.
+// Returns map: kitId → [{ id, fleetAssetHsId, serial, category, model, associationLabel }]
 async function fetchComponentsForKits(token, kitTypeId, componentTypeId, kitIds) {
   if (!kitIds.length || !componentTypeId) return {};
-  const componentsByKit = {};
+  // kitId → [{ assetId, label }] — preserves the labeled association (the unlabeled typeId 35 is ignored here)
+  const assocsByKit = {};
   const BATCH = 100;
 
-  // Step 1: batch-read kit→component associations (parallel)
+  // Step 1: batch-read kit→component associations (parallel). Each result entry carries the asset id plus
+  // associationTypes — an array of typeId+label pairs. We pick the labeled one (skip typeId 35 / null label).
   const assocBatches = [];
   for (let i = 0; i < kitIds.length; i += BATCH) assocBatches.push(kitIds.slice(i, i + BATCH));
   let firstBatchLogged = false;
@@ -450,7 +484,17 @@ async function fetchComponentsForKits(token, kitTypeId, componentTypeId, kitIds)
       if (!res.ok) return;
       const data = JSON.parse(rawText);
       for (const result of (data.results || [])) {
-        componentsByKit[result.from.id] = (result.to || []).map(t => t.toObjectId);
+        const kitId = String(result.from.id);
+        const list = [];
+        for (const t of (result.to || [])) {
+          // Find the labeled association (HubSpot can include the unlabeled default typeId 35 alongside).
+          const labeled = (t.associationTypes || []).find(at => at && at.label);
+          list.push({
+            assetId: String(t.toObjectId),
+            label: labeled ? labeled.label : null,
+          });
+        }
+        if (list.length) assocsByKit[kitId] = list;
       }
     } catch (e) {
       console.warn("[stationKits] assoc batch failed:", e.message);
@@ -458,7 +502,7 @@ async function fetchComponentsForKits(token, kitTypeId, componentTypeId, kitIds)
   }));
 
   // Step 2: batch-read component properties (parallel)
-  const allCompIds = [...new Set(Object.values(componentsByKit).flat())];
+  const allCompIds = [...new Set(Object.values(assocsByKit).flatMap(arr => arr.map(a => a.assetId)))];
   const compProps = {};
   const compBatches = [];
   for (let i = 0; i < allCompIds.length; i += BATCH) compBatches.push(allCompIds.slice(i, i + BATCH));
@@ -479,12 +523,14 @@ async function fetchComponentsForKits(token, kitTypeId, componentTypeId, kitIds)
 
   // Step 3: build final map kitId → components array
   const result = {};
-  for (const [kitId, compIds] of Object.entries(componentsByKit)) {
-    result[kitId] = compIds.map(cid => {
-      const p = compProps[cid] || {};
+  for (const [kitId, assocs] of Object.entries(assocsByKit)) {
+    result[kitId] = assocs.map(({ assetId, label }) => {
+      const p = compProps[assetId] || {};
       return {
-        id: `hs_comp_${cid}`,
-        serial: p.asset_sn || p.name || cid,
+        id: `hs_comp_${assetId}`,
+        fleetAssetHsId: assetId,
+        associationLabel: label, // exact HubSpot label string, e.g. "Camera 1" — null if unlabeled
+        serial: p.asset_sn || p.name || assetId,
         category: p.category_master || p.category || "",
         model: p.model_number || p.model || "",
       };
@@ -495,6 +541,8 @@ async function fetchComponentsForKits(token, kitTypeId, componentTypeId, kitIds)
 
 // Build _hardwareTracking array for a project from its Station Kits.
 // Preserves existing manually-added items (source !== "hubspot").
+// v4.5.0: now carries kit HsId, fleet asset HsId, association label, and full kit-level fields per row
+// so the UI can render slot-aware labels and writeback CFs have the IDs they need.
 function buildHardwareFromKits(projectKitIds, kitProps, componentsByKit, existingHW) {
   const manualItems = (existingHW || []).filter(h => h.source !== "hubspot");
   const hsItems = [];
@@ -510,6 +558,15 @@ function buildHardwareFromKits(projectKitIds, kitProps, componentsByKit, existin
         model: comp.model || "",
         kitSN,
         source: "hubspot",
+        // v4.5.0 writeback enablers
+        _kitHubspotId: String(kitId),
+        _fleetAssetHubspotId: comp.fleetAssetHsId || null,
+        _associationLabel: comp.associationLabel || null, // e.g. "Camera 1", "Lens 2"
+        // Kit-level fields (duplicated across rows of the same kit so each row carries enough to writeback)
+        kitName: props.name || "",
+        computerSN: props.computer_sn || "",
+        kitStatus: props.status || "",
+        stationType: props.station_type || "",
       });
     }
   }
@@ -1607,6 +1664,173 @@ exports.writeShipmentToHubspot = functions.runWith({ memory: "256MB" }).https.on
   }
   await db.ref("hubspotWriteback/log").push(logEntry);
   return { ok: true, hubspotShipmentId: targetId, created: isCreate };
+});
+
+/* ═══ v4.5.0 STAGE 6B — STATION KIT + FLEET ASSET WRITEBACK ═══ */
+
+// App→HubSpot kit-level field PATCH. Mirrors writeProjectDateToHubspot.
+// Only the 5 fields below are writable — everything else local-only.
+const HUBSPOT_KIT_PROPS = {
+  kitName:     "name",
+  kitSN:       "station_kit_sn",
+  computerSN:  "computer_sn",
+  kitStatus:   "status",
+  stationType: "station_type",
+};
+
+exports.writeStationKitToHubspot = functions.runWith({ memory: "256MB" }).https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  const uid = context.auth.uid;
+  const userSnap = await db.ref(`users/${uid}`).once("value");
+  const user = userSnap.val();
+  if (!user) throw new functions.https.HttpsError("permission-denied", "User not found.");
+  const isInst = user.role === "admin" || user.role === "si_admin" || user.partyId === "instrumental";
+  if (!isInst) throw new functions.https.HttpsError("permission-denied", "Instrumental users only.");
+
+  const { kitHubspotId, fields } = data || {};
+  if (!kitHubspotId || typeof kitHubspotId !== "string")
+    throw new functions.https.HttpsError("invalid-argument", "kitHubspotId required.");
+  if (!fields || typeof fields !== "object")
+    throw new functions.https.HttpsError("invalid-argument", "fields required.");
+
+  const token = process.env.HUBSPOT_TOKEN;
+  if (!token) throw new functions.https.HttpsError("internal", "HUBSPOT_TOKEN not configured.");
+
+  const properties = {};
+  for (const [appKey, val] of Object.entries(fields)) {
+    const propName = HUBSPOT_KIT_PROPS[appKey];
+    if (!propName) continue;
+    properties[propName] = (val === null || val === undefined) ? "" : String(val);
+  }
+  if (Object.keys(properties).length === 0) {
+    return { ok: true, skipped: true, reason: "no mapped fields" };
+  }
+
+  const res = await fetch(`https://api.hubapi.com/crm/v3/objects/${STATION_KIT_TYPE_ID}/${kitHubspotId}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ properties }),
+  });
+
+  const logEntry = {
+    ts: new Date().toISOString(), uid, kitHubspotId,
+    action: "patch_station_kit",
+    fields: Object.keys(properties),
+    status: res.ok ? "ok" : "error",
+    httpStatus: res.status,
+  };
+  if (!res.ok) {
+    logEntry.body = await res.text();
+    await db.ref("hubspotWriteback/log").push(logEntry);
+    throw new functions.https.HttpsError("internal", `HubSpot PATCH failed: ${res.status} ${logEntry.body}`);
+  }
+  await db.ref("hubspotWriteback/log").push(logEntry);
+  return { ok: true };
+});
+
+// App→HubSpot fleet asset SN edit. Treated as a "swap" — find a Fleet Asset by the new SN, then
+// re-point the Kit↔FleetAsset associations (both labeled and the typeId 35 default) to it.
+// PUT-then-DELETE order: only remove the old association after the new one is in place, so a partial
+// failure never leaves a kit with no association under that label.
+exports.writeFleetAssetAssociation = functions.runWith({ memory: "256MB" }).https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  const uid = context.auth.uid;
+  const userSnap = await db.ref(`users/${uid}`).once("value");
+  const user = userSnap.val();
+  if (!user) throw new functions.https.HttpsError("permission-denied", "User not found.");
+  const isInst = user.role === "admin" || user.role === "si_admin" || user.partyId === "instrumental";
+  if (!isInst) throw new functions.https.HttpsError("permission-denied", "Instrumental users only.");
+
+  const { kitHubspotId, currentFleetAssetHubspotId, label, newSerial } = data || {};
+  if (!kitHubspotId || !label || !newSerial)
+    throw new functions.https.HttpsError("invalid-argument", "kitHubspotId, label, and newSerial required.");
+
+  const labelTypeId = FLEET_ASSET_LABEL_TO_TYPE_ID[label];
+  if (!labelTypeId)
+    throw new functions.https.HttpsError("invalid-argument", `Unknown association label "${label}". Expected one of: ${Object.keys(FLEET_ASSET_LABEL_TO_TYPE_ID).join(", ")}.`);
+
+  const token = process.env.HUBSPOT_TOKEN;
+  if (!token) throw new functions.https.HttpsError("internal", "HUBSPOT_TOKEN not configured.");
+
+  const baseLog = { ts: new Date().toISOString(), uid, kitHubspotId, label, newSerial: String(newSerial).trim(), action: "writeFleetAssetAssociation" };
+
+  // Step 1: search HubSpot for a Fleet Asset with asset_sn === newSerial
+  const searchRes = await fetch(`https://api.hubapi.com/crm/v3/objects/${FLEET_ASSET_TYPE_ID}/search`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      filterGroups: [{ filters: [{ propertyName: "asset_sn", operator: "EQ", value: String(newSerial).trim() }] }],
+      properties: ["asset_sn"],
+      limit: 2,
+    }),
+  });
+  if (!searchRes.ok) {
+    const body = await searchRes.text();
+    await db.ref("hubspotWriteback/log").push({ ...baseLog, status: "error", httpStatus: searchRes.status, step: "search", body });
+    throw new functions.https.HttpsError("internal", `Fleet Asset search failed: ${searchRes.status} ${body}`);
+  }
+  const searchBody = await searchRes.json();
+  const hits = searchBody.results || [];
+  if (hits.length === 0) {
+    await db.ref("hubspotWriteback/log").push({ ...baseLog, status: "error", step: "search", reason: "not_found" });
+    throw new functions.https.HttpsError("not-found", `No Fleet Asset with SN "${String(newSerial).trim()}" exists in HubSpot. Create it first, then sync this project.`);
+  }
+  const newFleetAssetId = String(hits[0].id);
+
+  // Step 2: idempotent no-op when the target asset is already the one linked
+  if (currentFleetAssetHubspotId && newFleetAssetId === String(currentFleetAssetHubspotId)) {
+    await db.ref("hubspotWriteback/log").push({ ...baseLog, status: "ok", noop: true, newFleetAssetHubspotId: newFleetAssetId });
+    return { ok: true, noop: true, newFleetAssetHubspotId: newFleetAssetId };
+  }
+
+  // Step 3: PUT new Kit↔NewFleetAsset associations (labeled + unlabeled default). Batch create both at once.
+  const createUrl = `https://api.hubapi.com/crm/v4/associations/${STATION_KIT_TYPE_ID}/${FLEET_ASSET_TYPE_ID}/batch/create`;
+  const createBody = {
+    inputs: [{
+      from: { id: String(kitHubspotId) },
+      to:   { id: newFleetAssetId },
+      types: [
+        { associationCategory: "USER_DEFINED", associationTypeId: labelTypeId },
+        { associationCategory: "USER_DEFINED", associationTypeId: FLEET_ASSET_UNLABELED_TYPE_ID },
+      ],
+    }],
+  };
+  const createRes = await fetch(createUrl, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(createBody),
+  });
+  if (!createRes.ok) {
+    const body = await createRes.text();
+    await db.ref("hubspotWriteback/log").push({ ...baseLog, status: "error", httpStatus: createRes.status, step: "create_assoc", body, newFleetAssetHubspotId: newFleetAssetId });
+    throw new functions.https.HttpsError("internal", `Create association failed: ${createRes.status} ${body}`);
+  }
+
+  // Step 4: DELETE all old Kit↔OldFleetAsset associations (best-effort).
+  // Use the single-object DELETE endpoint (verified HTTP 204) — it removes ALL labels/typeIds
+  // between the two objects in one call. batch/archive's body shape rejected our minimal inputs.
+  let deleteWarning = null;
+  if (currentFleetAssetHubspotId) {
+    const deleteUrl = `https://api.hubapi.com/crm/v4/objects/${STATION_KIT_TYPE_ID}/${kitHubspotId}/associations/${FLEET_ASSET_TYPE_ID}/${currentFleetAssetHubspotId}`;
+    const deleteRes = await fetch(deleteUrl, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!deleteRes.ok) {
+      deleteWarning = `Old association DELETE returned ${deleteRes.status}: ${(await deleteRes.text()).slice(0, 200)}`;
+      console.warn("[writeFleetAssetAssociation]", deleteWarning);
+    }
+  }
+
+  await db.ref("hubspotWriteback/log").push({
+    ...baseLog,
+    status: "ok",
+    httpStatus: createRes.status,
+    newFleetAssetHubspotId: newFleetAssetId,
+    oldFleetAssetHubspotId: currentFleetAssetHubspotId || null,
+    ...(deleteWarning ? { deleteWarning } : {}),
+  });
+  return { ok: true, newFleetAssetHubspotId: newFleetAssetId, deleteWarning };
 });
 
 /* ═══ SLACK FEEDBACK — v4.3.1: in-app feedback button posts to Slack ═══ */
