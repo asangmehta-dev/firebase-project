@@ -1438,7 +1438,7 @@ exports.askProjectBot = functions.runWith({ memory: "512MB" }).https.onCall(asyn
     const client = new Anthropic({ apiKey });
 
     const response = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       max_tokens: 1024,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
@@ -1578,8 +1578,25 @@ exports.adminDeleteUser = functions.https.onCall(async (data, context) => {
 
   const updates = { ...accessUpdates, ...commUpdates, [`users/${uid}`]: null };
   await db.ref().update(updates);
-  await writeAuditEntry(caller.id, "delete_user", uid, { email: target.email, role: target.role });
-  return { ok: true };
+
+  // v4.5.4 security fix: also delete the Firebase Auth user so they can't re-sign-in and
+  // get re-provisioned. Wrapped in try/catch — Auth user may not exist for legacy
+  // RTDB-only records, and we still want the RTDB cleanup + audit entry to land.
+  let authDeleted = false;
+  let authError = null;
+  try {
+    await admin.auth().deleteUser(uid);
+    authDeleted = true;
+  } catch (e) {
+    authError = e.code === "auth/user-not-found" ? "auth_user_not_found" : (e.message || String(e));
+    console.warn(`adminDeleteUser: Firebase Auth delete failed for ${uid}:`, authError);
+  }
+
+  await writeAuditEntry(caller.id, "delete_user", uid, {
+    email: target.email, role: target.role,
+    authDeleted, ...(authError ? { authError } : {}),
+  });
+  return { ok: true, authDeleted, authError };
 });
 
 exports.adminSetRole = functions.https.onCall(async (data, context) => {
@@ -1834,7 +1851,12 @@ exports.writeShipmentToHubspot = functions.runWith({ memory: "256MB" }).https.on
   let targetId = hubspotShipmentId || null;
 
   if (!targetId) {
-    // Search for an existing Shipment with this INxxx (shipment_tracking_number)
+    // Search for an existing Shipment with this INxxx (shipment_tracking_number).
+    // v4.5.4: do NOT silently fall through to CREATE on search failure — HubSpot
+    // doesn't enforce uniqueness on shipment_tracking_number, so a flaky search
+    // (5xx, timeout, malformed JSON) would silently create a duplicate Shipment
+    // record. Instead: log to hubspotWriteback/log and propagate the error to
+    // the client so the user can retry.
     try {
       const searchRes = await fetch(`https://api.hubapi.com/crm/v3/objects/${SHIPMENT_OBJECT_TYPE}/search`, {
         method: "POST",
@@ -1845,13 +1867,30 @@ exports.writeShipmentToHubspot = functions.runWith({ memory: "256MB" }).https.on
           limit: 1,
         }),
       });
-      if (searchRes.ok) {
-        const body = await searchRes.json();
-        const hit = (body.results || [])[0];
-        if (hit && hit.id) targetId = String(hit.id);
+      if (!searchRes.ok) {
+        const body = await searchRes.text();
+        await db.ref("hubspotWriteback/log").push({
+          ts: new Date().toISOString(), uid, item_num: item_num.trim(),
+          action: "search_shipment_failed", status: "error",
+          httpStatus: searchRes.status, body: body.slice(0, 500),
+        });
+        throw new functions.https.HttpsError("unavailable",
+          `HubSpot search failed (${searchRes.status}). To avoid creating a duplicate, the request was aborted. Try again in a moment.`);
       }
+      const body = await searchRes.json();
+      const hit = (body.results || [])[0];
+      if (hit && hit.id) targetId = String(hit.id);
     } catch (e) {
-      // Fall through to create
+      // Re-throw HttpsErrors as-is; wrap other errors (network / JSON parse) so
+      // they don't silently fall through to CREATE.
+      if (e instanceof functions.https.HttpsError) throw e;
+      await db.ref("hubspotWriteback/log").push({
+        ts: new Date().toISOString(), uid, item_num: item_num.trim(),
+        action: "search_shipment_failed", status: "error",
+        error: e.message || String(e),
+      });
+      throw new functions.https.HttpsError("unavailable",
+        `HubSpot search request failed. To avoid creating a duplicate, the request was aborted. Try again. (${e.message || e})`);
     }
   }
 
@@ -2154,7 +2193,7 @@ Be conversational, concise, and helpful. Use the user's name (${user.name.split(
     const Anthropic = require("@anthropic-ai/sdk");
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       max_tokens: 1024,
       system: systemPrompt,
       messages,
@@ -2234,7 +2273,7 @@ Keep answers concise and actionable. Use bullet points or short tables when list
     const Anthropic = require("@anthropic-ai/sdk");
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       max_tokens: 1024,
       system: systemPrompt,
       messages,
@@ -2544,7 +2583,7 @@ exports.aiSIParseTimelineImport = functions.runWith({ memory: "512MB", timeoutSe
         "\n\nReturn proposed changes vs. what's on record. JSON only." },
     ];
     const resp = await client.messages.create({
-      model: "claude-3-5-sonnet-20241022",
+      model: "claude-sonnet-4-6",
       max_tokens: 2000,
       system: systemPrompt,
       messages: [{ role: "user", content: userBlocks }],
@@ -2580,7 +2619,7 @@ exports.aiSIParseCoverageDoc = functions.runWith({ memory: "512MB", timeoutSecon
       { type: "text", text: `SIRD questionnaire fields:\n${qList}\n\nReturn suggestions JSON only.` },
     ];
     const resp = await client.messages.create({
-      model: "claude-3-5-sonnet-20241022",
+      model: "claude-sonnet-4-6",
       max_tokens: 3000,
       system: systemPrompt,
       messages: [{ role: "user", content: userBlocks }],

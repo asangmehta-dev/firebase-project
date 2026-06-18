@@ -978,7 +978,15 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
       setFbError(e.message || String(e));
     }
   };
-  const dropdownProjects = admin ? projects.filter(p => p.status !== "inactive" && p.hubspotPipelineId !== SI_PARTNER_PIPELINE_ID) : projects.filter(p => p.status === "active");
+  // v4.5.4: opt-in toggle to include inactive/completed projects in the dropdown.
+  // Data is never deleted on completion — sync just flips status to "inactive". Toggle exposes them for read access.
+  // Persisted in sessionStorage so it survives a refresh but resets per session (avoids surprise on next login).
+  const [showInactive, setShowInactive] = useState(() => sessionStorage.getItem("v454_show_inactive") === "1");
+  useEffect(() => { sessionStorage.setItem("v454_show_inactive", showInactive ? "1" : "0"); }, [showInactive]);
+  const dropdownProjects = admin
+    ? projects.filter(p => p.hubspotPipelineId !== SI_PARTNER_PIPELINE_ID && (showInactive || p.status !== "inactive"))
+    : projects.filter(p => p.status === "active");
+  const inactiveCount = admin ? projects.filter(p => p.hubspotPipelineId !== SI_PARTNER_PIPELINE_ID && p.status === "inactive").length : 0;
   // v4.0.2 — single-control combobox replaces the old <input>+<select> pair (which was glitchy on macOS browsers).
   const [projSearch, setProjSearch] = useState("");
   const [projOpen, setProjOpen] = useState(false);
@@ -1005,6 +1013,17 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
           onFocus={() => { setProjSearch(""); setProjOpen(true); }}
           onBlur={() => setTimeout(() => setProjOpen(false), 180)}
         />
+        {admin && inactiveCount > 0 && (
+          <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 11, color: "#94A3B8", fontFamily: F, cursor: "pointer", userSelect: "none" }}>
+            <input
+              type="checkbox"
+              checked={showInactive}
+              onChange={e => setShowInactive(e.target.checked)}
+              style={{ accentColor: "#00C9A7", cursor: "pointer" }}
+            />
+            Include completed ({inactiveCount})
+          </label>
+        )}
         {projOpen && (
           <div style={{ position: "absolute", top: "100%", left: 18, right: 18, marginTop: 4, maxHeight: 280, overflowY: "auto", background: "#1E293B", border: "1px solid #334155", borderRadius: 6, zIndex: 100, boxShadow: "0 4px 12px rgba(0,0,0,.35)" }}>
             {filteredProjects.length === 0 ? (
@@ -1017,7 +1036,9 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
                 onMouseOver={e => { if (project?.id !== p.id) e.currentTarget.style.background = "rgba(255,255,255,.06)"; }}
                 onMouseOut={e => { if (project?.id !== p.id) e.currentTarget.style.background = "transparent"; }}
               >
-                {p.name}{p.status === "deprecated" ? " (Past)" : p.status === "inactive" ? " (Inactive)" : ""}
+                <span style={p.status === "inactive" ? { opacity: 0.65 } : {}}>{p.name}</span>
+                {p.status === "deprecated" && <span style={{ marginLeft: 6, fontSize: 11, color: "#94A3B8", fontStyle: "italic" }}>(past)</span>}
+                {p.status === "inactive" && <span style={{ marginLeft: 6, fontSize: 11, color: "#FBBF24", fontStyle: "italic" }}>📦 completed</span>}
               </button>
             ))}
             {filteredProjects.length > 50 && <div style={{ padding: "6px 12px", fontSize: 11, color: "#94A3B8", fontStyle: "italic" }}>{filteredProjects.length - 50} more — refine your search</div>}
@@ -1200,6 +1221,19 @@ function DashboardView({ user, project, state, setState, lang = "en", setView })
         </div>
       )}
 
+      {project.status === "inactive" && (
+        <div style={{
+          background: "#FEF3C7", border: "1px solid #FBBF24", borderRadius: 8,
+          padding: "10px 14px", marginBottom: 14, display: "flex", alignItems: "center", gap: 10,
+          fontSize: 13, color: "#78350F", fontFamily: F,
+        }}>
+          <span style={{ fontSize: 18 }}>📦</span>
+          <div>
+            <strong>Completed project</strong> — read-only reference. The HubSpot stage is closed.
+            {project.hubspotStageId && <span style={{ color: "#92400E", marginLeft: 6 }}>Edits still write back to HubSpot if needed.</span>}
+          </div>
+        </div>
+      )}
       <h2 style={S.h2}>{project.name}<HubspotLinkIcon project={project} /></h2>
       <p style={S.sub}>Deployment overview</p>
 
@@ -5101,6 +5135,11 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
 
   useEffect(() => { setSiFullscreen?.(true); return () => setSiFullscreen?.(false); }, [setSiFullscreen]);
 
+  // v4.5.4: declare `actor` BEFORE the useEffect that references it via closure.
+  // Pre-v4.5.4 it was declared after — worked due to closure-binding timing but was
+  // fragile to future refactors and missing from the deps array.
+  const actor = user?.email || user?.name || "unknown";
+
   // Auto-create siProject stubs for HubSpot SI Partner Deployment projects
   // that don't yet have a linked manual record. Uses a deterministic pid
   // (`hs_<hubspotId>`) so re-runs don't duplicate. Only fires once the
@@ -5153,7 +5192,7 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
       }
     })();
     // Only re-run when the set of HubSpot project ids changes, not on every render
-  }, [state.projects?.length, state.siProjectsLoaded, isSIAdminUser]);  // eslint-disable-line
+  }, [state.projects?.length, state.siProjectsLoaded, isSIAdminUser, actor]);  // eslint-disable-line
 
   // Generic patch-by-path helper used by the drill-in subviews + Gantt
   // inline edits. Optimistically updates local state so the UI is snappy.
@@ -5161,7 +5200,7 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
   const updateAt = (path, patch) => update(ref(db, path), patch);
   const removeAt = (path) => remove(ref(db, path));
 
-  const actor = user?.email || user?.name || "unknown";
+  // (`actor` is declared above, before the auto-create useEffect)
   const saveField = (pid, field, value) => {
     update(ref(db, `appState/siProjects/${pid}`), { [field]: value, updated_at: Date.now() });
     setState(prev => ({
