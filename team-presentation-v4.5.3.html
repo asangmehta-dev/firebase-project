@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Deployment Portal — Team Presentation v4.5.3</title>
+<style>
+  :root {
+    --inst-green: #19A974;
+    --inst-dark: #0F172A;
+    --inst-muted: #64748B;
+    --inst-light: #94A3B8;
+    --inst-accent: #00C9A7;
+    --inst-box-bg: #F8FAFC;
+    --inst-box-border: #E2E8F0;
+  }
+  @page { size: 13.333in 7.5in; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; color: var(--inst-dark); background: #E2E8F0; }
+  .deck { display: flex; flex-direction: column; align-items: center; gap: 24px; padding: 24px 0; }
+  .slide {
+    width: 13.333in;
+    height: 7.5in;
+    background: white;
+    position: relative;
+    padding: 0.6in 0.7in 0.55in 0.85in;
+    box-shadow: 0 2px 12px rgba(15,23,42,.08);
+    overflow: hidden;
+    page-break-after: always;
+    break-after: page;
+  }
+  @media print {
+    body { background: white; }
+    .deck { gap: 0; padding: 0; }
+    .slide { box-shadow: none; margin: 0; }
+  }
+  .slide::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 14px;
+    background: var(--inst-green);
+  }
+  .slide h1 {
+    font-size: 38px;
+    font-weight: 400;
+    margin: 0 0 8px 0;
+    color: var(--inst-dark);
+    letter-spacing: -0.5px;
+  }
+  .slide h2 {
+    font-size: 20px;
+    font-weight: 400;
+    margin: 0 0 24px 0;
+    color: var(--inst-muted);
+  }
+  .slide h3 {
+    font-size: 16px;
+    font-weight: 700;
+    margin: 18px 0 8px 0;
+    color: var(--inst-dark);
+  }
+  .slide ul {
+    margin: 6px 0 12px 0;
+    padding-left: 20px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--inst-dark);
+  }
+  .slide ul li { margin-bottom: 5px; }
+  .slide ol {
+    margin: 6px 0 12px 0;
+    padding-left: 22px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--inst-dark);
+  }
+  .slide ol li { margin-bottom: 5px; }
+  .slide p { font-size: 14px; line-height: 1.5; margin: 6px 0; }
+  .slide table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    margin: 6px 0 10px 0;
+  }
+  .slide th, .slide td {
+    text-align: left;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--inst-box-border);
+    vertical-align: top;
+  }
+  .slide th {
+    background: var(--inst-box-bg);
+    font-weight: 600;
+    color: var(--inst-dark);
+  }
+  .slide code {
+    background: var(--inst-box-bg);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+  }
+  .footer {
+    position: absolute;
+    left: 0.85in;
+    right: 0.7in;
+    bottom: 0.32in;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--inst-light);
+    border-top: 1px solid var(--inst-box-border);
+    padding-top: 8px;
+  }
+  .footer-center {
+    flex: 1;
+    text-align: center;
+  }
+  .logo {
+    font-weight: 800;
+    font-size: 12px;
+    letter-spacing: 1px;
+    color: var(--inst-dark);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .logo-mark {
+    display: inline-block;
+    width: 16px; height: 16px;
+    background: var(--inst-dark);
+    color: white;
+    border-radius: 50%;
+    font-size: 9px;
+    text-align: center;
+    line-height: 16px;
+    font-weight: 800;
+  }
+  .page-num {
+    font-weight: 600;
+    color: var(--inst-muted);
+    min-width: 24px;
+    text-align: right;
+  }
+  .blank {
+    background: #FEF3C7;
+    color: #92400E;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-style: italic;
+  }
+  .two-col {
+    display: flex;
+    gap: 32px;
+    height: calc(100% - 100px);
+  }
+  .two-col > div { flex: 1; }
+  .toc {
+    font-size: 18px;
+    line-height: 2.2;
+    margin-top: 40px;
+  }
+  .toc ol { font-size: 18px; padding-left: 36px; }
+  .toc ol li { margin-bottom: 12px; }
+
+  /* OPS workflow diagram for slide 7 */
+  .ops-diagram {
+    position: relative;
+    width: 100%;
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+<div class="deck">
+
+<!-- ============== SLIDE 1 ============== -->
+<div class="slide">
+  <h1>Deployment Portal</h1>
+  <h2>A React webapp that turns HubSpot into a deployment-management tool for the CX team</h2>
+
+  <div class="two-col">
+    <div>
+      <h3>What it is</h3>
+      <ul>
+        <li>React 18 web app at <code>deployment-portal-instrumental.web.app</code></li>
+        <li>Consolidated PMO-style UI: projects, station kits, shipments, deployment milestones</li>
+        <li>Bidirectional with HubSpot — pulls on a schedule, writes back edits instantly</li>
+      </ul>
+
+      <h3>APIs it connects to</h3>
+      <ul>
+        <li>HubSpot Custom Objects (Projects, Shipments, Station Kits, Fleet Assets, CS Programs)</li>
+        <li>HubSpot v4 Associations (kit ↔ fleet asset labeled associations)</li>
+        <li>HubSpot Owners (DRI sync)</li>
+        <li>HubSpot Pipelines (stage Kanban)</li>
+        <li>Firebase Realtime Database + Firebase Auth (Google OAuth)</li>
+        <li>Anthropic Claude API (in-app Project Bot)</li>
+        <li>Slack incoming webhooks (feedback routing)</li>
+      </ul>
+    </div>
+
+    <div>
+      <h3>Why I built it — friction with HubSpot alone</h3>
+      <ul>
+        <li>Hard to share project documents with external stakeholders (CMs, SIs) without HubSpot licenses</li>
+        <li>Not AI-native — no inline Claude-assisted project status drafts or chat</li>
+        <li>Challenging UI — HubSpot is CRM-first; project tracking views clunky to assemble</li>
+        <li>No place for non-CRM data (checklists, training materials, internal hardware overrides)</li>
+      </ul>
+
+      <h3>Two workflows in one UI today</h3>
+      <ul>
+        <li><strong>Instrumental Hardware Deployment</strong> — primary workflow (v4.x)</li>
+        <li><strong>SI Partner Deployment</strong> — built by Sneha; uses the HubSpot "SI Partner Deployment" pipeline (SIRD → DFM → Quote → PO → Build → FAT → SAT → Live), <code>si_admin</code> role, All SI Projects view + Kanban</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span></span>
+    <span class="footer-center">Confidential — Instrumental</span>
+    <span class="logo"><span class="logo-mark">IN</span>STRUMENTAL</span>
+    <span class="page-num">1</span>
+  </div>
+</div>
+
+<!-- ============== SLIDE 2 — TOC ============== -->
+<div class="slide">
+  <h1>What we'll cover</h1>
+
+  <div class="toc">
+    <ol>
+      <li>What is the Deployment Portal &amp; why I built it</li>
+      <li>Long-term vision (PLM + AI OS + workflow split)</li>
+      <li>Hosting, auth, free vs paid</li>
+      <li>Frontend + backend under the hood</li>
+      <li>Built with Claude Code: workflow, learnings, security, version history</li>
+      <li>Where it fits in the OPS workflow + what to connect next</li>
+    </ol>
+  </div>
+
+  <div class="footer">
+    <span></span>
+    <span class="footer-center">Confidential — Instrumental</span>
+    <span class="logo"><span class="logo-mark">IN</span>STRUMENTAL</span>
+    <span class="page-num">2</span>
+  </div>
+</div>
+
+<!-- ============== SLIDE 3 — Long-term vision ============== -->
+<div class="slide">
+  <h1>Where this goes next</h1>
+
+  <div class="two-col">
+    <div>
+      <h3>Vision</h3>
+      <ul>
+        <li>Build into a <strong>Product Lifecycle Management (PLM) tool</strong> — replace Odoo / Arena for inventory, BOM, and ECO workflows. Parked v5/v6 backlog.</li>
+        <li>Integrate with <strong>Instrumental AI OS</strong> — <span class="blank">[BLANK — specific integration vision / endpoints once OS scope defined]</span></li>
+        <li><strong>Need more people to use it</strong> — broader rollout across Instrumental + customers + SIs</li>
+      </ul>
+
+      <h3>Immediate next steps</h3>
+      <ul>
+        <li>Adoption push across CX team</li>
+        <li>Connect adjacent workstreams (Slide 7)</li>
+        <li><span class="blank">[BLANK — any other near-term goals]</span></li>
+      </ul>
+    </div>
+
+    <div>
+      <h3>Splitting the Instrumental + SI workflows</h3>
+      <ul>
+        <li>Today both workflows live in the same app (toggled by role / sidebar tab)</li>
+        <li><strong>Plan:</strong> separate UI experiences — same backend / same data store, distinct routes and navigation per workflow</li>
+        <li><strong>Why:</strong> the workflows are different enough (different stages, different milestone definitions, different stakeholders) that one merged UI adds confusion. Separating lets each team optimize their view without stepping on the other.</li>
+        <li>Sneha owns the SI side; Asang owns the Instrumental side; backend stays shared</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span></span>
+    <span class="footer-center">Confidential — Instrumental</span>
+    <span class="logo"><span class="logo-mark">IN</span>STRUMENTAL</span>
+    <span class="page-num">3</span>
+  </div>
+</div>
+
+<!-- ============== SLIDE 4 — Hosting + auth ============== -->
+<div class="slide">
+  <h1>Hosting, auth, and what's free vs paid</h1>
+
+  <div class="two-col">
+    <div>
+      <h3>Hosting stack</h3>
+      <table>
+        <thead><tr><th>Layer</th><th>Tech</th><th>Cost tier</th></tr></thead>
+        <tbody>
+          <tr><td>Frontend</td><td>Firebase Hosting (Vite-built React)</td><td>Spark (free)</td></tr>
+          <tr><td>Database</td><td>Firebase Realtime Database</td><td>Spark (free)</td></tr>
+          <tr><td>Cloud Functions</td><td>Firebase Functions (Node 20)</td><td>Spark (free)</td></tr>
+          <tr><td>Auth</td><td>Firebase Auth (Google OAuth)</td><td>Spark (free)</td></tr>
+          <tr><td>AI Bot</td><td>Anthropic Claude API</td><td>Pay per token</td></tr>
+          <tr><td>HubSpot</td><td>Private App token</td><td>Existing HubSpot license</td></tr>
+        </tbody>
+      </table>
+
+      <h3>When we'd move to paid Firebase (Blaze)</h3>
+      <ul>
+        <li>Cloud Function invocations &gt; Spark's 2M/month free quota</li>
+        <li>RTDB storage &gt; 1 GB or simultaneous connections &gt; 100</li>
+        <li>Need outbound network from Functions at scale (HubSpot/Claude/Slack — verify current quota)</li>
+        <li><span class="blank">[BLANK — current quota usage % from Firebase Console]</span></li>
+      </ul>
+
+      <h3>When we'd move to AWS</h3>
+      <p><span class="blank">[BLANK — criteria, e.g., Firebase outgrows us or company-wide infra mandate]</span></p>
+    </div>
+
+    <div>
+      <h3>JWT — how auth flows</h3>
+      <ol>
+        <li>User signs in with Google → Firebase Auth issues a JWT</li>
+        <li>Every RTDB read/write + Cloud Function call carries the JWT in the Authorization header</li>
+        <li>RTDB security rules (<code>database.rules.json</code>) check <code>auth.uid</code> + look up the user's role to allow/deny</li>
+        <li>Cloud Functions check <code>context.auth.uid</code> then re-verify role from <code>users/{uid}/role</code></li>
+        <li>Tokens auto-refresh in the browser; no server-side session needed</li>
+      </ol>
+
+      <div style="margin-top:16px; padding:14px; background:var(--inst-box-bg); border-left: 3px solid var(--inst-green); border-radius: 4px;">
+        <strong style="font-size:13px;">Why this matters:</strong>
+        <p style="margin:6px 0 0 0; font-size:12.5px;">External users physically cannot read other projects' data — rules deny it at the database layer, not just in the UI. This was a finding addressed during the v3.0.0 security review.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span></span>
+    <span class="footer-center">Confidential — Instrumental</span>
+    <span class="logo"><span class="logo-mark">IN</span>STRUMENTAL</span>
+    <span class="page-num">4</span>
+  </div>
+</div>
+
+<!-- ============== SLIDE 5 — Frontend/Backend ============== -->
+<div class="slide">
+  <h1>What's under the hood</h1>
+
+  <div class="two-col">
+    <div>
+      <h3>Frontend</h3>
+      <ul>
+        <li>React 18 + Vite</li>
+        <li>Single file <code>src/App.jsx</code> (~11,000 lines) — to be split as it grows</li>
+        <li>State: React <code>useState</code> + Firebase RTDB <code>onValue</code> listeners (no Redux / Zustand)</li>
+        <li>Bundle: ~770 KB main (gzip ~208 KB), code-split into react-vendor + firebase-vendor + xlsx-vendor chunks</li>
+        <li>UI: custom CSS-in-JS objects (no Tailwind), Instrumental color palette baked in</li>
+        <li>Multi-language UI (English, Español, Tiếng Việt, 繁體中文, 简体中文)</li>
+      </ul>
+
+      <h3>Data model</h3>
+      <ul>
+        <li><code>appState/projects/</code> — project list (synced from HubSpot)</li>
+        <li><code>appState/docData/{pid}/</code> — per-project state (projectDetails, hardware tracking, validation)</li>
+        <li><code>users/{uid}</code> — user records + role</li>
+        <li><code>hubspotSync/log/</code> — every sync attempt</li>
+        <li><code>hubspotWriteback/log/</code> — every writeback attempt</li>
+        <li><code>auditLog/</code> — sensitive admin actions</li>
+      </ul>
+    </div>
+
+    <div>
+      <h3>Backend</h3>
+      <p style="margin: 0 0 8px 0; font-size:13px; color: var(--inst-muted);"><code>functions/index.js</code> · ~85 KB packaged · Node 20</p>
+      <ul>
+        <li><strong>20+ callable functions</strong> spanning admin actions, HubSpot sync, writebacks, AI bot, Slack feedback</li>
+        <li>HubSpot sync: scheduled Tue/Fri 3 PM PT (<code>scheduledHubspotSync</code>) + on-demand (<code>manualHubspotSync</code>)</li>
+        <li>Writeback CFs:
+          <ul style="margin: 4px 0 4px 0;">
+            <li><code>writeProjectDateToHubspot</code></li>
+            <li><code>writeStageToHubspot</code></li>
+            <li><code>writeShipmentToHubspot</code></li>
+            <li><code>writeStationKitToHubspot</code></li>
+            <li><code>writeFleetAssetAssociation</code></li>
+          </ul>
+        </li>
+        <li>Admin callables with audit logging on every sensitive op</li>
+        <li><code>provisionUser</code> CF auto-creates @instrumental.com accounts on first sign-in</li>
+      </ul>
+
+      <h3>Database-level access control</h3>
+      <p>Rules enforce role + per-project grants at the RTDB layer, not just in the UI. External users physically cannot read other projects.</p>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span></span>
+    <span class="footer-center">Confidential — Instrumental</span>
+    <span class="logo"><span class="logo-mark">IN</span>STRUMENTAL</span>
+    <span class="page-num">5</span>
+  </div>
+</div>
+
+<!-- ============== SLIDE 6 — Claude Code + workflow + security + history ============== -->
+<div class="slide">
+  <h1>Built with Claude Code — workflow, learnings, history</h1>
+
+  <div class="two-col">
+    <div>
+      <h3>Common pitfalls — real lessons</h3>
+      <ul>
+        <li><strong>Nested React components</strong> defined inside the parent cause rapid remount/unmount, swallowing local state → always define at module scope</li>
+        <li><strong>Whole-node DB writes</strong> can wipe RTDB if local state is partial → field-level diffs only (v4.5.1 lesson)</li>
+        <li><strong>"First non-X" heuristics</strong> break when HubSpot reorders schemas → use stable type IDs as consts (v4.5.2 lesson)</li>
+        <li><strong>Server-side fetches</strong> need explicit error handling for HubSpot 429/5xx; otherwise sync silently produces partial data</li>
+      </ul>
+
+      <h3>Release workflow</h3>
+      <ol>
+        <li>Bump <code>package.json</code> + README version row</li>
+        <li><code>npm run build</code> — verify clean</li>
+        <li><code>firebase deploy --only [scoped]</code></li>
+        <li>Test in production: Manual Sync + targeted UI checks</li>
+        <li>Verify RTDB state via <code>firebase database:get</code></li>
+        <li>Git commit + co-author tag</li>
+        <li>Zip into <code>previous-versions/</code></li>
+        <li><code>git push origin main</code></li>
+        <li>Update auto-memory with learnings</li>
+      </ol>
+
+      <h3>Security</h3>
+      <ul>
+        <li><strong>Passed security review v3.0.0</strong> (April 2026) — 7 findings addressed in v4.0.0</li>
+        <li>DB-level access rules + audit log on all admin actions</li>
+        <li>HubSpot tokens as Cloud Functions env secrets — never in client</li>
+        <li>URL validation: https-only; <code>javascript:</code> / <code>data:</code> / <code>file:</code> blocked</li>
+        <li>Backups: RTDB daily snapshots, 7-day retention (enabled 2026-06-11)</li>
+      </ul>
+    </div>
+
+    <div>
+      <h3>Version history — key milestones</h3>
+      <table>
+        <tbody>
+          <tr><td><strong>v2.x</strong></td><td>Original 4-party portal (parties, checklists, training)</td></tr>
+          <tr><td><strong>v3.0.0</strong></td><td>HubSpot CRM sync, Projects Overview, <strong>security review passed</strong></td></tr>
+          <tr><td><strong>v3.1.0</strong></td><td>DB-level access control, Demand Plan, per-pipeline bar charts</td></tr>
+          <tr><td><strong>v3.2.0</strong></td><td>Removed 4-party system, unified Project Details</td></tr>
+          <tr><td><strong>v3.3.0</strong></td><td>SI Kanban, Gantt chart, AI Project Bot</td></tr>
+          <tr><td><strong>v4.0.0</strong></td><td>Security review response, Project Overview, hardware override, AI-drafted status</td></tr>
+          <tr><td><strong>v4.1.0</strong></td><td>Sidebar nav, non-PDF uploads, <strong>HubSpot date writeback</strong>, All SI Projects, <code>si_admin</code>, maintenance</td></tr>
+          <tr><td><strong>v4.3.x</strong></td><td>Audit Log browser, Slack feedback, schema diagnostic, MES Integration Checklist</td></tr>
+          <tr><td><strong>v4.4.x</strong></td><td>Stage 6A Shipment writeback + direct Project↔Shipment sync fix</td></tr>
+          <tr><td><strong>v4.5.x</strong> (current)</td><td>Stage 6B Kit + Fleet Asset writeback, <code>pd_station_kits</code> auto-sync, <strong>pd_team DRI sync</strong>, critical save() data-safety fix</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Links</h3>
+      <ul>
+        <li>App: <code>deployment-portal-instrumental.web.app</code></li>
+        <li>Repo: <code>github.com/asangmehta-dev/firebase-project</code></li>
+        <li>Guides: <code>HOW_TO_USE_GUIDE_4.5.3.md</code>, <code>4.1.0.md</code></li>
+        <li>Full version detail: <code>README.md</code></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span></span>
+    <span class="footer-center">Confidential — Instrumental</span>
+    <span class="logo"><span class="logo-mark">IN</span>STRUMENTAL</span>
+    <span class="page-num">6</span>
+  </div>
+</div>
+
+<!-- ============== SLIDE 7 — OPS workflow ============== -->
+<div class="slide">
+  <h1>Where this fits in the OPS workflow</h1>
+
+  <div style="display:flex; gap:24px; height: calc(100% - 100px);">
+    <div style="flex: 1.3;">
+      <h3 style="margin-top:4px;">Annotated OPS view — what this webapp owns</h3>
+      <svg viewBox="0 0 720 460" style="width:100%; height:auto; margin-top:6px;" xmlns="http://www.w3.org/2000/svg">
+        <!-- The dashed annotation box -->
+        <rect x="240" y="20" width="460" height="240"
+              fill="rgba(25,169,116,0.06)"
+              stroke="#19A974" stroke-width="3" stroke-dasharray="8 5" rx="8"/>
+        <text x="470" y="14" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#19A974">
+          Deployment Portal (this webapp) — reads + writes
+        </text>
+
+        <!-- Projects (top) -->
+        <rect x="300" y="38" width="340" height="38" fill="#FEF2F2" stroke="#DC2626" stroke-width="1.5" rx="3"/>
+        <text x="470" y="62" text-anchor="middle" font-family="Arial" font-size="14" font-weight="700" fill="#0F172A">Projects (5 project types)</text>
+
+        <!-- Station Kits -->
+        <rect x="280" y="100" width="160" height="48" fill="#FFFBEB" stroke="#D97706" stroke-width="1.5" rx="3"/>
+        <text x="360" y="120" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#0F172A">Station Kits</text>
+        <text x="360" y="138" text-anchor="middle" font-family="Arial" font-size="11" fill="#64748B">kit SN, computer SN, status</text>
+
+        <!-- Fleet Assets -->
+        <rect x="460" y="100" width="180" height="48" fill="#FFFBEB" stroke="#D97706" stroke-width="1.5" rx="3"/>
+        <text x="550" y="120" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#0F172A">Fleet Assets</text>
+        <text x="550" y="138" text-anchor="middle" font-family="Arial" font-size="11" fill="#64748B">Camera/Lens/Computer/LED SNs</text>
+
+        <!-- Shipments -->
+        <rect x="280" y="170" width="360" height="48" fill="#FCE7F3" stroke="#DB2777" stroke-width="1.5" rx="3"/>
+        <text x="460" y="190" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#0F172A">Shipments</text>
+        <text x="460" y="208" text-anchor="middle" font-family="Arial" font-size="11" fill="#64748B">INxxx, carrier, tracking, ship date</text>
+
+        <!-- Arrow lines connecting (Projects → Kits → Fleet, Projects → Shipments) -->
+        <line x1="470" y1="76" x2="360" y2="100" stroke="#94A3B8" stroke-width="1.2"/>
+        <line x1="470" y1="76" x2="550" y2="100" stroke="#94A3B8" stroke-width="1.2"/>
+        <line x1="360" y1="148" x2="460" y2="170" stroke="#94A3B8" stroke-width="1.2"/>
+        <line x1="550" y1="148" x2="460" y2="170" stroke="#94A3B8" stroke-width="1.2"/>
+        <line x1="470" y1="76" x2="460" y2="170" stroke="#94A3B8" stroke-width="1.2" stroke-dasharray="3 3"/>
+
+        <!-- Outside the box: CS Programs (partial) -->
+        <rect x="20" y="100" width="200" height="118" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.5" rx="3"/>
+        <text x="120" y="118" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#0F172A">CS Programs</text>
+        <text x="120" y="138" text-anchor="middle" font-family="Arial" font-size="11" fill="#64748B">Kickoff → Onboarding</text>
+        <text x="120" y="153" text-anchor="middle" font-family="Arial" font-size="11" fill="#64748B">→ Value Complete</text>
+        <text x="120" y="168" text-anchor="middle" font-family="Arial" font-size="11" fill="#64748B">→ Validation</text>
+        <text x="120" y="183" text-anchor="middle" font-family="Arial" font-size="11" fill="#64748B">→ Program Complete</text>
+        <text x="120" y="208" text-anchor="middle" font-family="Arial" font-size="10" font-style="italic" fill="#3B82F6">(partial integration)</text>
+
+        <line x1="220" y1="160" x2="300" y2="62" stroke="#94A3B8" stroke-width="1.2"/>
+
+        <!-- Outside: SalesHub Deals -->
+        <rect x="20" y="38" width="200" height="38" fill="#F0FDF4" stroke="#16A34A" stroke-width="1.5" rx="3"/>
+        <text x="120" y="58" text-anchor="middle" font-family="Arial" font-size="13" font-weight="700" fill="#0F172A">SalesHub — Deals</text>
+        <text x="120" y="72" text-anchor="middle" font-family="Arial" font-size="10" font-style="italic" fill="#16A34A">(no integration yet)</text>
+        <line x1="220" y1="57" x2="300" y2="57" stroke="#94A3B8" stroke-width="1.2"/>
+
+        <!-- Legend below diagram -->
+        <text x="20" y="260" font-family="Arial" font-size="12" font-weight="700" fill="#0F172A">Legend</text>
+        <rect x="20" y="270" width="14" height="14" fill="rgba(25,169,116,0.15)" stroke="#19A974" stroke-width="2" stroke-dasharray="4 2"/>
+        <text x="42" y="282" font-family="Arial" font-size="11" fill="#0F172A">Owned by Deployment Portal (read + write)</text>
+
+        <rect x="20" y="292" width="14" height="14" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.5"/>
+        <text x="42" y="304" font-family="Arial" font-size="11" fill="#0F172A">Partial integration (CS Programs)</text>
+
+        <rect x="20" y="314" width="14" height="14" fill="#F0FDF4" stroke="#16A34A" stroke-width="1.5"/>
+        <text x="42" y="326" font-family="Arial" font-size="11" fill="#0F172A">No integration yet (SalesHub Deals)</text>
+      </svg>
+    </div>
+
+    <div style="flex: 1;">
+      <h3 style="margin-top:4px;">What we read + write</h3>
+      <ul>
+        <li><strong>Projects</strong> → metadata, dates, stages (Kanban drag), DRI Owner IDs</li>
+        <li><strong>Station Kits</strong> → kit name, kit SN, computer SN, status, station type</li>
+        <li><strong>Fleet Assets</strong> → Camera/Lens/Computer/LED Light Controller SNs via labeled associations</li>
+        <li><strong>Shipments</strong> → INxxx create-or-update, carrier, tracking #, ship date, contents</li>
+      </ul>
+
+      <h3>Partial / no integration</h3>
+      <ul>
+        <li><strong>CS Programs</strong> — <span class="blank">[BLANK — which CS Program data flows into the webapp vs stays HubSpot-only]</span></li>
+        <li><strong>SalesHub Deals</strong> — <span class="blank">[BLANK — currently no integration; possible future]</span></li>
+      </ul>
+
+      <h3>Workstreams to connect next</h3>
+      <table>
+        <thead><tr><th>Workstream</th><th>Owner</th><th>What</th></tr></thead>
+        <tbody>
+          <tr><td>Cert / learning platform</td><td>Michael</td><td><span class="blank">[BLANK — platform name + endpoints]</span></td></tr>
+          <tr><td>Customer tracking</td><td>Amy</td><td><span class="blank">[BLANK — what Amy tracks + where it lives]</span></td></tr>
+          <tr><td>Amplitude metrics</td><td><span class="blank">[BLANK]</span></td><td>project opens, syncs triggered, writeback success, AI queries, time-to-first-edit, activation by role</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span></span>
+    <span class="footer-center">Confidential — Instrumental</span>
+    <span class="logo"><span class="logo-mark">IN</span>STRUMENTAL</span>
+    <span class="page-num">7</span>
+  </div>
+</div>
+
+</div>
+</body>
+</html>
