@@ -2801,6 +2801,12 @@ exports.ensureProjectTemplate = functions.runWith({ memory: "512MB" }).https.onC
     toAdd.push(JSON.parse(JSON.stringify(DEPLOYMENT_REQUIREMENTS_FOLDER)));
   if (!workingIds.has("pd_reference_info"))
     toAdd.push({ id: "pd_reference_info", name: "Reference Info", type: "folder", accessLevel: "open", items: [] });
+  // v4.5.8: ensure pd_cad + pd_meeting_notes appear on every project, even ones that pre-date them
+  // or have no HubSpot data yet. Lets users author notes from the app on any project.
+  if (!workingIds.has("pd_cad"))
+    toAdd.push({ id: "pd_cad", name: "CAD & Drawings", accessLevel: "open", items: [] });
+  if (!workingIds.has("pd_meeting_notes"))
+    toAdd.push({ id: "pd_meeting_notes", name: "Meeting Notes", type: "notes", accessLevel: "open", items: [] });
   if (!workingArr.some(c => c?.type === "checklist")) {
     const useSI = project.hubspotPipelineId === SI_PARTNER_PIPELINE_ID;
     buildProjectDetails(useSI).filter(c => c.type === "checklist").forEach(c => toAdd.push(c));
@@ -2846,6 +2852,9 @@ exports.backfillDeploymentDocs = functions.runWith({ memory: "1GB", timeoutSecon
       TABLE_TEMPLATES.forEach(t => { if (!workIds.has(t.id)) toAdd.push(JSON.parse(JSON.stringify(t))); });
       if (!workIds.has("pd_deployment_requirements")) toAdd.push(JSON.parse(JSON.stringify(DEPLOYMENT_REQUIREMENTS_FOLDER)));
       if (!workIds.has("pd_reference_info")) toAdd.push({ id: "pd_reference_info", name: "Reference Info", type: "folder", accessLevel: "open", items: [] });
+      // v4.5.8: ensure pd_cad + pd_meeting_notes on every project (admin-triggered backfill)
+      if (!workIds.has("pd_cad")) toAdd.push({ id: "pd_cad", name: "CAD & Drawings", accessLevel: "open", items: [] });
+      if (!workIds.has("pd_meeting_notes")) toAdd.push({ id: "pd_meeting_notes", name: "Meeting Notes", type: "notes", accessLevel: "open", items: [] });
 
       if (toAdd.length === 0 && !changed) { skipped++; continue; }
       await db.ref(`appState/docData/${pid}/projectDetails`).set([...workArr, ...toAdd]);

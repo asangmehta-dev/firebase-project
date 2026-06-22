@@ -484,8 +484,11 @@ const CHECKLIST_PATCHES = [
 // Standard folder templates auto-injected for any project missing them (e.g. older projects pre-dating the folder)
 // v4.5.6: pd_specs removed — non-SI projects route documentation through pd_cad (auto-populated from HubSpot).
 // SI projects that already have pd_specs keep it; this auto-inject path doesn't recreate it.
+// v4.5.8: pd_meeting_notes added so every project shows the Meeting Notes tab regardless of whether
+// HubSpot has notes for that project — users can author notes from the app for any project.
 const STANDARD_FOLDER_TEMPLATES = [
-  { id: "pd_cad",   name: "CAD & Drawings",                           accessLevel: "open", items: [] },
+  { id: "pd_cad",           name: "CAD & Drawings",  accessLevel: "open", items: [] },
+  { id: "pd_meeting_notes", name: "Meeting Notes",   accessLevel: "open", items: [], type: "notes" },
   APP_REFERENCE_INFO_FOLDER,
 ];
 // These 4 tabs use a transposed layout: attributes as rows, stations as columns (mirrors Excel format)
