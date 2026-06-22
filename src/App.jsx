@@ -2288,8 +2288,249 @@ function FolderSection({ cat, updateCats, user, canEdit, pid }) {
   );
 }
 
+/* ═══ NOTES SECTION — v4.5.7: Meeting Notes timeline (bidirectional with HubSpot Notes) ═══ */
+// Renders a project's notes (HubSpot-synced + manual) as a reverse-chronological timeline.
+// HubSpot-synced notes carry _hubspotNoteId; user-created notes carry _pendingId until the
+// writeNoteToHubspot CF returns the real ID.
+function NotesSection({ cat, updateCats, user, canEdit, pid, project }) {
+  const items = (cat.items || []).filter(i => i && !i._userDeleted);
+  const [composing, setComposing] = useState(false);
+  const [draftBody, setDraftBody] = useState("");
+  const [draftAtts, setDraftAtts] = useState([]); // [{name, base64, mimeType, dataUrl}]
+  const [wbStatus, setWbStatus] = useState({}); // { [localId]: "syncing"|"ok"|"error" }
+  const [wbErr, setWbErr] = useState({});
+  const setStatus = (k, v) => setWbStatus(s => ({ ...s, [k]: v }));
+  const setErr = (k, v) => setWbErr(s => ({ ...s, [k]: v }));
+  const clearStatusLater = (k) => setTimeout(() => setWbStatus(s => { const n = { ...s }; delete n[k]; return n; }), 3500);
+
+  // Detect URLs in plain text → render as clickable links
+  const renderBodyText = (text) => {
+    if (!text) return null;
+    const parts = String(text).split(/(https?:\/\/\S+)/g);
+    return parts.map((part, i) => {
+      if (/^https?:\/\//.test(part)) {
+        return <a key={i} href={part} target="_blank" rel="noopener noreferrer" style={{ color: "#0284C7", wordBreak: "break-all" }}>{part}</a>;
+      }
+      return <span key={i}>{part}</span>;
+    });
+  };
+
+  const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      const dataUrl = fr.result;
+      const base64 = String(dataUrl).split(",")[1] || "";
+      resolve({ name: file.name, base64, mimeType: file.type || "application/octet-stream", dataUrl });
+    };
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(file);
+  });
+
+  const addFiles = async (fileList) => {
+    const arr = Array.from(fileList || []);
+    if (!arr.length) return;
+    try {
+      const results = await Promise.all(arr.map(readFileAsBase64));
+      setDraftAtts(prev => [...prev, ...results]);
+    } catch (e) {
+      alert("Could not read file: " + (e.message || e));
+    }
+  };
+
+  // Clipboard paste: if user pastes an image, treat it as an attachment
+  const onPasteBody = async (e) => {
+    const items = e.clipboardData?.items || [];
+    const imgs = [];
+    for (const it of items) {
+      if (it.kind === "file" && /^image\//.test(it.type)) {
+        const f = it.getAsFile();
+        if (f) imgs.push(f);
+      }
+    }
+    if (imgs.length) {
+      e.preventDefault();
+      await addFiles(imgs);
+    }
+  };
+
+  const submit = async () => {
+    if (!project?.hubspotId) {
+      alert("This project has no HubSpot record — notes can only be added to projects synced from HubSpot.");
+      return;
+    }
+    if (!draftBody.trim() && !draftAtts.length) return;
+    const localId = `pending_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+    // v4.5.7 hotfix: do NOT put base64 dataUrl into state — it gets persisted to RTDB by save()
+    // and was bloating projectDetails to multi-MB, freezing the renderer + listener loop.
+    // We only store name + mimeType locally; the real URL comes in on next HubSpot sync.
+    const optimistic = {
+      id: localId,
+      _pendingId: localId,
+      body: draftBody.trim(),
+      timestamp: new Date().toISOString(),
+      author: user.name || user.email || "You",
+      authorEmail: user.email || "",
+      attachments: draftAtts.map(a => ({ name: a.name, mimeType: a.mimeType, pending: true })),
+      source: "manual",
+    };
+    updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, items: [optimistic, ...(c.items || [])] }));
+    setComposing(false);
+    setDraftBody("");
+    setDraftAtts([]);
+    setStatus(localId, "syncing");
+
+    try {
+      const fn = httpsCallable(functions, "writeNoteToHubspot");
+      const res = await fn({
+        projectHubspotId: project.hubspotId,
+        body: optimistic.body,
+        attachments: draftAtts.map(a => ({ name: a.name, base64: a.base64, mimeType: a.mimeType })),
+      });
+      const noteId = res?.data?.hubspotNoteId;
+      // Swap optimistic into a HubSpot-sourced item by _hubspotNoteId.
+      // v4.5.7 hotfix: must REMOVE _pendingId via destructure (not set to undefined). Firebase set()
+      // throws synchronously on any nested undefined value, which propagates out of setState's updater
+      // and crashes the React tree (white screen). Same applies to noteId — if missing, omit the field.
+      updateCats(cur => cur.map(c => {
+        if (c.id !== cat.id) return c;
+        return {
+          ...c,
+          items: (c.items || []).map(i => {
+            if (i.id !== localId) return i;
+            const { _pendingId, ...rest } = i;
+            const updated = { ...rest, source: "hubspot" };
+            if (noteId) updated._hubspotNoteId = String(noteId);
+            return updated;
+          }),
+        };
+      }));
+      setStatus(localId, "ok");
+      clearStatusLater(localId);
+    } catch (e) {
+      setStatus(localId, "error");
+      setErr(localId, e.message || String(e));
+    }
+  };
+
+  const delNote = (item) => {
+    if (item.source === "hubspot" || item._hubspotNoteId) {
+      // Soft-delete for HubSpot-synced notes
+      updateCats(cur => cur.map(c => c.id !== cat.id ? c : {
+        ...c,
+        items: (c.items || []).map(i => i.id !== item.id ? i : { ...i, _userDeleted: true }),
+      }));
+    } else {
+      if (!confirm("Delete this note?")) return;
+      updateCats(cur => cur.map(c => c.id !== cat.id ? c : {
+        ...c,
+        items: (c.items || []).filter(i => i.id !== item.id),
+      }));
+    }
+  };
+
+  const Indicator = ({ k }) => {
+    const s = wbStatus[k];
+    if (s === "syncing") return <span title="Syncing to HubSpot…" style={{ fontSize: 11, color: "#3B82F6", marginLeft: 6 }}>↑</span>;
+    if (s === "ok") return <span title="HubSpot note created" style={{ fontSize: 11, color: "#059669", marginLeft: 6 }}>✓</span>;
+    if (s === "error") return <span title={wbErr[k] || "Failed"} style={{ fontSize: 11, color: "#DC2626", marginLeft: 6, cursor: "help" }}>⚠</span>;
+    return null;
+  };
+
+  return (
+    <div>
+      {canEdit && (
+        composing ? (
+          <div style={{ background: "#F8FAFC", borderRadius: 10, padding: 14, marginBottom: 14, border: "1px solid #E2E8F0" }}>
+            <textarea
+              autoFocus
+              value={draftBody}
+              onChange={e => setDraftBody(e.target.value)}
+              onPaste={onPasteBody}
+              placeholder="Type your note. Paste a screenshot from clipboard, or use the button below to attach files."
+              style={{ width: "100%", minHeight: 100, padding: 10, fontSize: 13, fontFamily: F, border: "1px solid #CBD5E1", borderRadius: 6, resize: "vertical", boxSizing: "border-box" }}
+            />
+            {draftAtts.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+                {draftAtts.map((a, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, background: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: 6, padding: "4px 8px", fontSize: 12, fontFamily: F }}>
+                    {/^image\//.test(a.mimeType) ? <img src={a.dataUrl} alt={a.name} style={{ width: 24, height: 24, objectFit: "cover", borderRadius: 3 }} /> : <span>📎</span>}
+                    <span style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</span>
+                    <button onClick={() => setDraftAtts(prev => prev.filter((_, idx) => idx !== i))} style={{ border: "none", background: "transparent", color: "#64748B", cursor: "pointer", fontSize: 12 }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <button onClick={submit} disabled={!draftBody.trim() && !draftAtts.length} style={{ ...S.btnMain, width: "auto", padding: "8px 16px", marginTop: 0, opacity: (!draftBody.trim() && !draftAtts.length) ? 0.5 : 1 }}>Post to HubSpot</button>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#64748B", fontFamily: F, cursor: "pointer", padding: "8px 12px", border: "1px solid #CBD5E1", borderRadius: 6, background: "#FFF" }}>
+                📎 Attach files
+                <input type="file" multiple style={{ display: "none" }} onChange={e => { addFiles(e.target.files); e.target.value = ""; }} />
+              </label>
+              <button onClick={() => { setComposing(false); setDraftBody(""); setDraftAtts([]); }} style={{ ...S.btnFlat, width: "auto" }}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setComposing(true)} style={{ ...S.btnAddItem, marginBottom: 14 }}>✚ Add note</button>
+        )
+      )}
+
+      {items.length === 0 ? (
+        <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>
+          {project?.hubspotId ? "No meeting notes yet. Add one above — it'll also appear in HubSpot's Notes tab." : "No notes. This project isn't linked to HubSpot."}
+        </div>
+      ) : items.map(item => {
+        const att = Array.isArray(item.attachments) ? item.attachments : [];
+        const inlineImages = att.filter(a => a && /^image\//.test(a.mimeType || ""));
+        const fileChips = att.filter(a => a && !/^image\//.test(a.mimeType || ""));
+        return (
+          <div key={item.id} style={{ background: "#FFF", border: "1px solid #E2E8F0", borderRadius: 10, padding: 14, marginBottom: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: "#0F172A", fontFamily: F }}>{item.author || "Unknown"}</span>
+                <span style={{ fontSize: 11, color: "#94A3B8", fontFamily: F }}>{fmtDate(item.timestamp)}</span>
+                {item.source === "hubspot" && <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "#F3E8FF", color: "#7C3AED", fontWeight: 600 }}>HUBSPOT</span>}
+                <Indicator k={item._pendingId || item.id} />
+              </div>
+              {canEdit && <button onClick={() => delNote(item)} style={{ ...S.btnDel, padding: "2px 8px", fontSize: 11 }}>✕</button>}
+            </div>
+            {item.body && (
+              <div style={{ fontSize: 14, color: "#0F172A", fontFamily: F, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{renderBodyText(item.body)}</div>
+            )}
+            {inlineImages.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+                {inlineImages.map((a, i) => a.url ? (
+                  <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" style={{ display: "block" }}>
+                    <img src={a.url} alt={a.name} style={{ maxWidth: 300, maxHeight: 200, borderRadius: 6, border: "1px solid #E2E8F0" }} />
+                  </a>
+                ) : (
+                  <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px", background: "#FEF3C7", borderRadius: 6, fontSize: 12, color: "#92400E", fontStyle: "italic", fontFamily: F }}>
+                    🖼️ {a.name} {a.pending ? "(uploading — refresh after sync)" : "(URL not yet synced)"}
+                  </span>
+                ))}
+              </div>
+            )}
+            {fileChips.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                {fileChips.map((a, i) => a.url ? (
+                  <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "#F1F5F9", borderRadius: 6, fontSize: 12, color: "#0F172A", textDecoration: "none", fontFamily: F }}>
+                    📎 {a.name}
+                  </a>
+                ) : (
+                  <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 8px", background: "#FEF3C7", borderRadius: 6, fontSize: 12, color: "#92400E", fontStyle: "italic", fontFamily: F }}>
+                    📎 {a.name} {a.pending ? "(uploading…)" : ""}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 const TAB_ORDER = [
-  "pd_team", "pd_deployment_requirements", "pd_cad",
+  "pd_team", "pd_deployment_requirements", "pd_cad", "pd_meeting_notes",
   "inst_external_checklist", "inst_internal_checklist", "inst_mes_integration_checklist",
   "pd_specs", "pd_station_kits", "pd_in_factory_install", "pd_camera_settings",
   "pd_sop_plan", "pd_mes_station_plan", "pd_serialization", "pd_sku_configs",
@@ -2498,6 +2739,8 @@ function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state,
           ? <ChecklistSection cat={activeCat} cats={cats} updateCats={updateCats} user={user} canEdit={canEdit} pid={pid} lang={lang} />
           : activeCat.type === "program"
             ? <ProgramDetailsSection cat={activeCat} pid={pid} state={state} setState={setState} user={user} canEdit={canEdit} lang={lang} />
+            : activeCat.type === "notes"
+              ? <NotesSection cat={activeCat} updateCats={updateCats} user={user} canEdit={canEdit} pid={pid} project={project} />
             : activeCat.type === "table"
               ? TRANSPOSED_TABLE_IDS.has(activeCat.id)
                 ? <TransposedTableSection cat={activeCat} updateCats={updateCats} canEdit={canEdit} allCats={cats} />
@@ -2511,7 +2754,7 @@ function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state,
 /* Standard category IDs — protect from accidental deletion */
 const STANDARD_CAT_IDS = new Set([
   ...APP_TABLE_TEMPLATES.map(t => t.id),
-  "pd_specs", "pd_program", "pd_cad", "pd_deployment_requirements", "pd_reference_info",
+  "pd_specs", "pd_program", "pd_cad", "pd_meeting_notes", "pd_deployment_requirements", "pd_reference_info",
   "inst_internal_checklist", "inst_external_checklist", "inst_mes_integration_checklist", "inst_si_checklist",
 ]);
 

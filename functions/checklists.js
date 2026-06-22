@@ -737,6 +737,9 @@ function buildProjectDetails(isSI) {
     ...(isSI ? [{ id: "pd_specs", name: "Design Specifications & Integration Docs", accessLevel: "open", items: [] }] : []),
     { id: "pd_program", name: "Program Details & Timelines", accessLevel: "open", items: [], type: "program" },
     { id: "pd_cad", name: "CAD & Drawings", accessLevel: "open", items: [] },
+    // v4.5.7: Meeting Notes — timeline of HubSpot Notes (engagement type 0-46) associated to this project.
+    // Bidirectional sync: HubSpot Notes flow in on each sync; user-created notes here POST to HubSpot.
+    { id: "pd_meeting_notes", name: "Meeting Notes", type: "notes", accessLevel: "open", items: [] },
     JSON.parse(JSON.stringify(DEPLOYMENT_REQUIREMENTS_FOLDER)),
     ...TABLE_TEMPLATES.map(t => JSON.parse(JSON.stringify(t))),
     { id: "pd_reference_info", name: "Reference Info", type: "folder", accessLevel: "open", items: [] },

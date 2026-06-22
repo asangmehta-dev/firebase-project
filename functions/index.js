@@ -715,6 +715,134 @@ function buildTeamRowsFromDRIs(dri, ownersById) {
   });
 }
 
+// v4.5.7: Fetch HubSpot Notes (engagement type 0-46) associated to projects.
+// Returns { projectHsId: [{ _hubspotNoteId, body, timestamp, author, authorEmail, attachments, source, _userDeleted }, ...] }.
+// Notes are timeline-style (newest first). hs_note_body is rich HTML — we strip to plain text per the
+// v4.5.7 decision (clickable URLs detected client-side, images rendered via attachment chips).
+async function fetchNotesForProjects(token, projectHsIds, ownersById) {
+  if (!projectHsIds.length) return {};
+  const BATCH = 100;
+  // Step 1: Project → Note associations
+  const noteIdsByProject = {}; // projectHsId → [noteId, ...]
+  const assocBatches = [];
+  for (let i = 0; i < projectHsIds.length; i += BATCH) assocBatches.push(projectHsIds.slice(i, i + BATCH));
+  await Promise.all(assocBatches.map(async (batch) => {
+    try {
+      const res = await fetchWithTimeout(
+        `https://api.hubapi.com/crm/v4/associations/${OBJECT_TYPE}/notes/batch/read`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ inputs: batch.map(id => ({ id: String(id) })) }),
+        }
+      );
+      if (!res.ok) { console.warn("[notes] assoc batch error:", res.status); return; }
+      const data = await res.json();
+      for (const r of (data.results || [])) {
+        const ids = (r.to || []).map(t => String(t.toObjectId));
+        if (ids.length) noteIdsByProject[String(r.from.id)] = ids;
+      }
+      // numErrors expected when a project has no notes — non-fatal
+    } catch (e) {
+      console.warn("[notes] assoc batch failed:", e.name === "AbortError" ? "timeout (15s)" : e.message);
+    }
+  }));
+
+  const allNoteIds = [...new Set(Object.values(noteIdsByProject).flat())];
+  if (!allNoteIds.length) return {};
+  console.log(`[notes] found ${allNoteIds.length} unique note(s) across ${Object.keys(noteIdsByProject).length} project(s)`);
+
+  // Step 2: Batch-read note properties
+  const noteProps = {}; // noteId → { hs_note_body, hs_timestamp, hubspot_owner_id, hs_attachment_ids }
+  const propBatches = [];
+  for (let i = 0; i < allNoteIds.length; i += BATCH) propBatches.push(allNoteIds.slice(i, i + BATCH));
+  await Promise.all(propBatches.map(async (batch) => {
+    try {
+      const res = await fetchWithTimeout(`https://api.hubapi.com/crm/v3/objects/notes/batch/read`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          inputs: batch.map(id => ({ id })),
+          properties: ["hs_note_body", "hs_timestamp", "hubspot_owner_id", "hs_attachment_ids", "hs_createdate"],
+        }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      for (const obj of (data.results || [])) noteProps[obj.id] = obj.properties || {};
+    } catch (e) {
+      console.warn("[notes] props batch failed:", e.message);
+    }
+  }));
+
+  // Step 3: Collect unique attachment IDs across all notes; batch-fetch file metadata.
+  const allAttIds = [...new Set(Object.values(noteProps).flatMap(p => {
+    const raw = p.hs_attachment_ids || "";
+    return raw.split(",").map(s => s.trim()).filter(Boolean);
+  }))];
+  const attMeta = {}; // attId → { name, url, mimeType, hubspotFileId }
+  if (allAttIds.length) {
+    await Promise.all(allAttIds.map(async (attId) => {
+      try {
+        const res = await fetchWithTimeout(`https://api.hubapi.com/files/v3/files/${attId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const f = await res.json();
+        attMeta[attId] = {
+          hubspotFileId: String(f.id),
+          name: f.name || `attachment-${attId}`,
+          url: f.url || null,
+          mimeType: f.type || (f.extension ? `application/${f.extension}` : "application/octet-stream"),
+        };
+      } catch (_) { /* skip on error */ }
+    }));
+  }
+
+  // Strip HTML to plain text. Keeps line breaks from <br> and </p>; removes everything else.
+  const stripHtml = (html) => {
+    if (!html) return "";
+    return String(html)
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/p>/gi, "\n\n")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  };
+
+  // Step 4: Build per-project note items, newest first
+  const byProject = {};
+  for (const [projectHsId, ids] of Object.entries(noteIdsByProject)) {
+    const items = [];
+    for (const noteId of ids) {
+      const p = noteProps[noteId];
+      if (!p) continue;
+      const ownerId = p.hubspot_owner_id ? String(p.hubspot_owner_id) : null;
+      const owner = ownerId ? ownersById[ownerId] : null;
+      const attIds = (p.hs_attachment_ids || "").split(",").map(s => s.trim()).filter(Boolean);
+      const attachments = attIds.map(id => attMeta[id]).filter(Boolean);
+      items.push({
+        _hubspotNoteId: String(noteId),
+        body: stripHtml(p.hs_note_body || ""),
+        timestamp: p.hs_timestamp || p.hs_createdate || null,
+        author: owner?.name || "HubSpot user",
+        authorEmail: owner?.email || "",
+        attachments,
+        source: "hubspot",
+      });
+    }
+    // Sort newest first by timestamp
+    items.sort((a, b) => String(b.timestamp || "").localeCompare(String(a.timestamp || "")));
+    if (items.length) byProject[projectHsId] = items;
+  }
+  return byProject;
+}
+
 // Traverse Kit→Shipment associations to find INxxx numbers per project.
 // HubSpot has no direct Project→Shipment association; shipments are linked to Station Kits.
 // kitsByProject: { projectHsId: [kitId, ...] } — from fetchKitsForProjects, already available.
@@ -1202,6 +1330,79 @@ async function runSync(token, commit, syncCtx) {
       }
     } catch (cadErr) {
       console.warn("[cadDocs] CAD sync failed (non-fatal):", cadErr.message);
+    }
+
+    // v4.5.7: Meeting Notes sync — pull HubSpot Notes (engagement type 0-46) associated to each project
+    // and merge into pd_meeting_notes folder. Allow-list pattern: match by hidden _hubspotNoteId; preserve
+    // manual notes (no _hubspotNoteId); respect user soft-delete; auto-create pd_meeting_notes if missing.
+    try {
+      const projectHsIdsForNotes = incoming.map(p => p.hubspotId).filter(Boolean);
+      if (projectHsIdsForNotes.length > 0) {
+        // Fetch owners again (DRI block fetches its own copy in a different scope; cheap enough to repeat)
+        const notesOwnersById = await fetchAllOwners(token);
+        const notesByProject = await fetchNotesForProjects(token, projectHsIdsForNotes, notesOwnersById);
+        const HUBSPOT_DRIVEN_NOTE_KEYS = ["body", "timestamp", "author", "authorEmail", "attachments"];
+        const newRowId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        const notesUpdates = {};
+
+        for (const [projectHsId, newNotes] of Object.entries(notesByProject)) {
+          if (!newNotes.length) continue;
+          const pid = `hs_${projectHsId}`;
+          const pdSnap = await db.ref(`appState/docData/${pid}/projectDetails`).once("value");
+          const pdRaw = pdSnap.val();
+          const pdArr = Array.isArray(pdRaw) ? pdRaw : (pdRaw && typeof pdRaw === "object" ? Object.values(pdRaw) : []);
+
+          // Auto-create pd_meeting_notes if missing (legacy projects)
+          let mnIdx = pdArr.findIndex(c => c?.id === "pd_meeting_notes");
+          if (mnIdx === -1) {
+            pdArr.push({ id: "pd_meeting_notes", name: "Meeting Notes", type: "notes", accessLevel: "open", items: [] });
+            mnIdx = pdArr.length - 1;
+            console.log(`[notes] ${pid}: auto-created missing pd_meeting_notes folder`);
+          }
+
+          const mnCat = pdArr[mnIdx];
+          const existingItems = Array.isArray(mnCat.items) ? mnCat.items : [];
+
+          let mutated = false;
+          const matchedIds = new Set();
+          const updatedItems = existingItems.map(it => {
+            if (!it?._hubspotNoteId) return it; // preserve manual + non-hubspot items
+            matchedIds.add(it._hubspotNoteId);
+            if (it._userDeleted) return it; // respect soft-delete
+            const nn = newNotes.find(n => n._hubspotNoteId === it._hubspotNoteId);
+            if (!nn) return it; // note no longer in HubSpot — preserve last-known
+            const merged = { ...it };
+            for (const k of HUBSPOT_DRIVEN_NOTE_KEYS) merged[k] = nn[k];
+            // Only mark mutated if a key actually changed
+            if (HUBSPOT_DRIVEN_NOTE_KEYS.some(k => JSON.stringify(it[k]) !== JSON.stringify(nn[k]))) mutated = true;
+            return merged;
+          });
+
+          let added = 0;
+          for (const nn of newNotes) {
+            if (matchedIds.has(nn._hubspotNoteId)) continue;
+            updatedItems.push({ id: newRowId(), ...nn });
+            added++;
+            mutated = true;
+          }
+
+          if (mutated) {
+            // Re-sort newest-first by timestamp
+            updatedItems.sort((a, b) => String(b?.timestamp || "").localeCompare(String(a?.timestamp || "")));
+            const newPd = pdArr.map((c, i) => i === mnIdx ? { ...c, items: updatedItems } : c);
+            notesUpdates[`appState/docData/${pid}/projectDetails`] = sanitizeForFirebase(newPd);
+            console.log(`[notes] ${pid}: pd_meeting_notes — matched ${matchedIds.size} existing, added ${added} new`);
+          }
+        }
+        if (Object.keys(notesUpdates).length > 0) {
+          await db.ref().update(notesUpdates);
+          console.log(`[notes] synced pd_meeting_notes for ${Object.keys(notesUpdates).length} projects`);
+        }
+      } else {
+        console.log("[notes] no projects to scan — skipping");
+      }
+    } catch (notesErr) {
+      console.warn("[notes] Notes sync failed (non-fatal):", notesErr.message);
     }
 
     // Shipment Details sync — traverse Kit→Shipment associations (the actual HubSpot link) to find INxxx numbers.
@@ -2202,6 +2403,175 @@ exports.writeFleetAssetAssociation = functions.runWith({ memory: "256MB" }).http
     ...(deleteWarning ? { deleteWarning } : {}),
   });
   return { ok: true, newFleetAssetHubspotId: newFleetAssetId, deleteWarning };
+});
+
+/* ═══ v4.5.7 — WRITE NOTE TO HUBSPOT ═══ */
+// Creates a Note (engagement object 0-46) in HubSpot, uploads any attachments to HubSpot Files,
+// and associates the note to the given Project. Mirrors the writeShipmentToHubspot auth pattern.
+// data = { projectHubspotId, body, attachments?: [{ name, base64, mimeType }] }
+exports.writeNoteToHubspot = functions.runWith({ memory: "512MB", timeoutSeconds: 60 }).https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  const uid = context.auth.uid;
+  const userSnap = await db.ref(`users/${uid}`).once("value");
+  const user = userSnap.val();
+  if (!user) throw new functions.https.HttpsError("permission-denied", "User not found.");
+  const isInst = user.role === "admin" || user.role === "si_admin" || user.partyId === "instrumental";
+  if (!isInst) throw new functions.https.HttpsError("permission-denied", "Instrumental users only.");
+
+  const { projectHubspotId, body, attachments } = data || {};
+  if (!projectHubspotId || typeof projectHubspotId !== "string")
+    throw new functions.https.HttpsError("invalid-argument", "projectHubspotId required.");
+  const trimmedBody = String(body || "").trim();
+  if (!trimmedBody && !(Array.isArray(attachments) && attachments.length))
+    throw new functions.https.HttpsError("invalid-argument", "Either body text or at least one attachment is required.");
+
+  const token = process.env.HUBSPOT_TOKEN;
+  if (!token) throw new functions.https.HttpsError("internal", "HUBSPOT_TOKEN not configured.");
+
+  // Step 1: upload attachments to HubSpot Files (in parallel). Each item: { name, base64, mimeType }.
+  const attList = Array.isArray(attachments) ? attachments : [];
+  const fileIds = [];
+  const uploadErrors = [];
+  if (attList.length) {
+    const folder = `/deployment-portal-notes/${projectHubspotId}/${Date.now()}`;
+    await Promise.all(attList.map(async (att, idx) => {
+      try {
+        if (!att?.base64 || !att?.name) {
+          uploadErrors.push(`attachment[${idx}] missing name or base64`);
+          return;
+        }
+        const buf = Buffer.from(att.base64, "base64");
+        // v4.5.7 hotfix: build multipart body manually as Buffer. Node 20 native FormData + fetch
+        // in the Cloud Functions runtime doesn't reliably set Content-Type with boundary, causing
+        // HubSpot Files API to reject with HTTP 415. Manual construction is deterministic.
+        const boundary = `----dpFormBoundary${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+        const CRLF = "\r\n";
+        const optionsJson = JSON.stringify({ access: "PRIVATE", overwrite: false });
+        const parts = [
+          Buffer.from(
+            `--${boundary}${CRLF}` +
+            `Content-Disposition: form-data; name="file"; filename="${att.name.replace(/"/g, '\\"')}"${CRLF}` +
+            `Content-Type: ${att.mimeType || "application/octet-stream"}${CRLF}${CRLF}`,
+            "utf8"
+          ),
+          buf,
+          Buffer.from(
+            `${CRLF}--${boundary}${CRLF}` +
+            `Content-Disposition: form-data; name="folderPath"${CRLF}${CRLF}` +
+            `${folder}${CRLF}` +
+            `--${boundary}${CRLF}` +
+            `Content-Disposition: form-data; name="options"${CRLF}${CRLF}` +
+            `${optionsJson}${CRLF}` +
+            `--${boundary}--${CRLF}`,
+            "utf8"
+          ),
+        ];
+        const body = Buffer.concat(parts);
+        const res = await fetch("https://api.hubapi.com/files/v3/files", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": `multipart/form-data; boundary=${boundary}`,
+            "Content-Length": String(body.length),
+          },
+          body,
+        });
+        if (!res.ok) {
+          const errText = await res.text();
+          uploadErrors.push(`${att.name}: HTTP ${res.status} ${errText.slice(0, 150)}`);
+          return;
+        }
+        const f = await res.json();
+        if (f.id) fileIds.push(String(f.id));
+      } catch (e) {
+        uploadErrors.push(`${att?.name || `attachment[${idx}]`}: ${e.message || e}`);
+      }
+    }));
+    if (uploadErrors.length && !fileIds.length) {
+      // ALL uploads failed — abort before creating the note
+      await db.ref("hubspotWriteback/log").push({
+        ts: new Date().toISOString(), uid, projectHubspotId,
+        action: "write_note_upload_failed", status: "error",
+        uploadErrors,
+      });
+      throw new functions.https.HttpsError("internal", `All attachment uploads failed: ${uploadErrors.join("; ")}`);
+    }
+  }
+
+  // Step 2: try to resolve the caller to a HubSpot Owner by email (best-effort)
+  let ownerIdForNote = null;
+  if (user.email) {
+    try {
+      const ownersRes = await fetch(`https://api.hubapi.com/crm/v3/owners?email=${encodeURIComponent(user.email)}&limit=1`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (ownersRes.ok) {
+        const od = await ownersRes.json();
+        const o = (od.results || [])[0];
+        if (o?.id) ownerIdForNote = String(o.id);
+      }
+    } catch (_) { /* non-fatal */ }
+  }
+
+  // Step 3: create the Note object
+  // hs_note_body must be HTML — wrap plain text body in <p>. Escape HTML-special chars in user input.
+  const escapeHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const htmlBody = trimmedBody ? `<p>${escapeHtml(trimmedBody).replace(/\n/g, "<br>")}</p>` : "";
+  const noteProps = {
+    hs_timestamp: Date.now(),
+    hs_note_body: htmlBody,
+  };
+  if (fileIds.length) noteProps.hs_attachment_ids = fileIds.join(";");
+  if (ownerIdForNote) noteProps.hubspot_owner_id = ownerIdForNote;
+
+  const createNoteRes = await fetch("https://api.hubapi.com/crm/v3/objects/notes", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ properties: noteProps }),
+  });
+  if (!createNoteRes.ok) {
+    const errText = await createNoteRes.text();
+    await db.ref("hubspotWriteback/log").push({
+      ts: new Date().toISOString(), uid, projectHubspotId,
+      action: "write_note_create_failed", status: "error",
+      httpStatus: createNoteRes.status, body: errText.slice(0, 500),
+      uploadedFileIds: fileIds,
+    });
+    throw new functions.https.HttpsError("internal", `Create note failed: ${createNoteRes.status} ${errText.slice(0, 200)}`);
+  }
+  const noteData = await createNoteRes.json();
+  const noteId = String(noteData.id);
+
+  // Step 4: associate note → project (default HubSpot-defined association)
+  let assocWarning = null;
+  try {
+    const assocRes = await fetch(
+      `https://api.hubapi.com/crm/v4/objects/notes/${noteId}/associations/default/${OBJECT_TYPE}/${projectHubspotId}`,
+      { method: "PUT", headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!assocRes.ok) {
+      assocWarning = `Association PUT returned ${assocRes.status}: ${(await assocRes.text()).slice(0, 150)}`;
+      console.warn("[writeNoteToHubspot]", assocWarning);
+    }
+  } catch (e) {
+    assocWarning = `Association PUT threw: ${e.message || e}`;
+    console.warn("[writeNoteToHubspot]", assocWarning);
+  }
+
+  await db.ref("hubspotWriteback/log").push({
+    ts: new Date().toISOString(), uid, projectHubspotId,
+    action: "write_note", status: "ok",
+    hubspotNoteId: noteId,
+    fileIds, uploadErrors: uploadErrors.length ? uploadErrors : null,
+    ...(assocWarning ? { assocWarning } : {}),
+  });
+  return {
+    ok: true,
+    hubspotNoteId: noteId,
+    fileIds,
+    uploadErrors: uploadErrors.length ? uploadErrors : null,
+    assocWarning,
+  };
 });
 
 /* ═══ SLACK FEEDBACK — v4.3.1: in-app feedback button posts to Slack ═══ */
