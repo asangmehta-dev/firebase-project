@@ -153,9 +153,10 @@ const SEED_PROJECTS = [
   { id: "proj_nvidia_1", name: "NVIDIA — HGX B200 Inspection", customer: "NVIDIA", status: "active", stations: 0, isSI: true },
   { id: "proj_aws_1", name: "AWS — Trainium Board QC", customer: "AWS", status: "active", stations: 0, isSI: false },
 ];
-/* v3.2.0: Default project-details folders (applied to new projects). Checklist templates come from Cloud Functions. */
+/* v3.2.0: Default project-details folders (applied to new projects). Checklist templates come from Cloud Functions.
+   v4.5.6: pd_specs removed for non-SI projects (CAD/Specs docs route through pd_cad now, auto-populated by sync).
+   This client-side default never adds pd_specs; the backend `buildProjectDetails(isSI)` still adds it for SI projects. */
 const DEFAULT_PROJECT_DETAILS = [
-  { id: "pd_specs", name: "Design Specifications & Integration Docs", accessLevel: "open", items: [] },
   { id: "pd_program", name: "Program Details & Timelines", accessLevel: "open", items: [], type: "program" },
   { id: "pd_cad", name: "CAD & Drawings", accessLevel: "open", items: [] },
 ];
@@ -481,8 +482,9 @@ const CHECKLIST_PATCHES = [
   },
 ];
 // Standard folder templates auto-injected for any project missing them (e.g. older projects pre-dating the folder)
+// v4.5.6: pd_specs removed — non-SI projects route documentation through pd_cad (auto-populated from HubSpot).
+// SI projects that already have pd_specs keep it; this auto-inject path doesn't recreate it.
 const STANDARD_FOLDER_TEMPLATES = [
-  { id: "pd_specs", name: "Design Specifications & Integration Docs", accessLevel: "open", items: [] },
   { id: "pd_cad",   name: "CAD & Drawings",                           accessLevel: "open", items: [] },
   APP_REFERENCE_INFO_FOLDER,
 ];
@@ -2228,8 +2230,10 @@ function FolderSection({ cat, updateCats, user, canEdit, pid }) {
     setItemForm({ name: "", url: "", type: "link", lang: "en" }); setAddingItem(false);
   };
 
-  const delItem = (itemId, isSystem) => {
-    if (isSystem) {
+  // v4.5.5: HubSpot-sourced items (source === "hubspot") also soft-delete — otherwise hard-delete
+  // would let the next HubSpot sync resurrect the item. Mirrors the existing "system" path.
+  const delItem = (itemId, isManaged) => {
+    if (isManaged) {
       updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, items: (c.items || []).map(i => i.id !== itemId ? i : { ...i, _userDeleted: true }) }));
     } else {
       updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, items: (c.items || []).filter(i => i.id !== itemId) }));
@@ -2248,10 +2252,17 @@ function FolderSection({ cat, updateCats, user, canEdit, pid }) {
                 ? <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 15, fontWeight: 500, color: "#0284C7", textDecoration: "none", fontFamily: F }}>{item.name}</a>
                 : <span style={{ fontSize: 15, fontFamily: F }}>{item.name}</span>}
             <div style={{ fontSize: 12, color: "#94A3B8", fontFamily: F, display: "flex", gap: 6, alignItems: "center" }}>
-              {item.source === "system" ? <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "#FFF4F0", color: "#C2410C", fontWeight: 600 }}>SYSTEM</span> : `${item.addedBy} · ${fmtDate(item.addedAt)}`}
+              {item.source === "system" ? (
+                <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "#FFF4F0", color: "#C2410C", fontWeight: 600 }}>SYSTEM</span>
+              ) : item.source === "hubspot" ? (
+                <>
+                  <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "#F3E8FF", color: "#7C3AED", fontWeight: 600 }}>HUBSPOT</span>
+                  <span>{fmtDate(item.updatedAt || item.addedAt)}</span>
+                </>
+              ) : `${item.addedBy} · ${fmtDate(item.addedAt)}`}
             </div>
           </div>
-          {canEdit && <button style={{ ...S.btnDel, padding: "3px 8px", fontSize: 11 }} onClick={() => delItem(item.id, item.source === "system")}>✕</button>}
+          {canEdit && <button style={{ ...S.btnDel, padding: "3px 8px", fontSize: 11 }} onClick={() => delItem(item.id, item.source === "system" || item.source === "hubspot")}>✕</button>}
         </div>
       ))}
       {items.length === 0 && <div style={{ fontSize: 13, color: "#CBD5E1", fontStyle: "italic", fontFamily: F }}>No documents yet.</div>}

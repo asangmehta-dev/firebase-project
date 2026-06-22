@@ -54,6 +54,17 @@ const FLEET_ASSET_LABEL_TO_TYPE_ID = {
   "Ram Upgrade 1":        332,
   "RAM Upgrade 2":        244,
 };
+// v4.5.5: CAD release docs synced from HubSpot Project properties → pd_cad folder.
+// HDEs use a HubSpot workflow that writes URLs to 4 project properties + emails them.
+// We read the properties on every sync and surface them inside Project Details → CAD & Drawings.
+// Hidden _hubspotSource key on each item is the match key for re-runs (so we update
+// the existing item's URL instead of duplicating).
+const CAD_DOC_DEFS = [
+  { key: "cad_folder",          label: "CAD Folder",          type: "link" },
+  { key: "station_overview",    label: "Station Overview",    type: "link" },
+  { key: "station_bom_details", label: "Station BOM Details", type: "link" },
+  { key: "machining_notes",     label: "Machining Notes",     type: "link" },
+];
 // Per-SI-stage entered/exited date properties — populated by HubSpot
 // automatically as projects move through the SI Partner Deployment pipeline.
 // We request these so the timeline can pull actual stage dates without
@@ -81,7 +92,11 @@ const PROPERTIES = [
   "standard_cameras", "number_of_cameras__c", "regular_lenses", "tc_lense",
   "type_of_lenses", "led_light_controllers", "standard_station_frames",
   "large_station_frames", "computers", "monitor_screens", "barcode_scanners",
-  "station_bom_details_hde", "hs_createdate", "hs_lastmodifieddate",
+  "station_bom_details_hde",
+  // v4.5.5: CAD release URLs populated by the HubSpot CAD Release workflow.
+  // Synced into the pd_cad folder so HDE releases appear under "CAD & Drawings" in the app.
+  "cad_folder", "station_overview_hde", "machining_notes_hde",
+  "hs_createdate", "hs_lastmodifieddate",
   "actual_start_date", "actual_finish_date",
   ...SI_STAGE_DATE_PROPS,
 ].join(",");
@@ -308,6 +323,14 @@ function mapHubspotToProject(obj) {
       monitors: p.monitor_screens || null,
       barcodeScanner: p.barcode_scanners || null,
       bomDetails: p.station_bom_details_hde || null,
+    },
+    // v4.5.5: CAD release URLs (consumed by the pd_cad folder sync block in runSync).
+    // Each value is either a URL string or null; sync skips projects where all 4 are null.
+    cadDocs: {
+      cad_folder:          p.cad_folder              || null,
+      station_overview:    p.station_overview_hde    || null,
+      station_bom_details: p.station_bom_details_hde || null,
+      machining_notes:     p.machining_notes_hde     || null,
     },
     status: isClosed ? "inactive" : "active",
     si: isSI ? "" : "N/A",
@@ -1098,6 +1121,87 @@ async function runSync(token, commit, syncCtx) {
       }
     } catch (driErr) {
       console.warn("[dri] DRI sync failed (non-fatal):", driErr.message);
+    }
+
+    // v4.5.5: CAD release docs sync — populate the pd_cad folder ("CAD & Drawings") from HubSpot Project properties.
+    // HDEs use a HubSpot workflow that writes URLs to 4 properties (cad_folder, station_overview_hde,
+    // station_bom_details_hde, machining_notes_hde) + emails them. We mirror those URLs into the pd_cad folder
+    // so the team can find them under Project Details → CAD & Drawings without context-switching to email.
+    // Allow-list merge: match by hidden _hubspotSource key; preserve user-added items + soft-deletes.
+    try {
+      const projectsWithCadDocs = incoming.filter(p =>
+        p.hubspotId && p.cadDocs && Object.values(p.cadDocs).some(Boolean));
+      if (projectsWithCadDocs.length > 0) {
+        const newRowId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        const cadUpdates = {};
+        for (const p of projectsWithCadDocs) {
+          const pid = `hs_${p.hubspotId}`;
+          const pdSnap = await db.ref(`appState/docData/${pid}/projectDetails`).once("value");
+          const pdRaw = pdSnap.val();
+          const pdArr = Array.isArray(pdRaw) ? pdRaw : (pdRaw && typeof pdRaw === "object" ? Object.values(pdRaw) : []);
+          // v4.5.5: auto-create pd_cad if the project's projectDetails predates the standard template.
+          // Legacy projects (e.g. created before pd_cad was added) skip this category — we now create it
+          // on-demand the first time a CAD URL is synced, so HDE releases are never silently dropped.
+          let cadCatIdx = pdArr.findIndex(c => c?.id === "pd_cad");
+          if (cadCatIdx === -1) {
+            pdArr.push({ id: "pd_cad", name: "CAD & Drawings", accessLevel: "open", items: [] });
+            cadCatIdx = pdArr.length - 1;
+            console.log(`[cadDocs] ${pid}: auto-created missing pd_cad folder`);
+          }
+
+          const cadCat = pdArr[cadCatIdx];
+          const existingItems = Array.isArray(cadCat.items) ? cadCat.items : [];
+
+          let mutated = false;
+          const matchedKeys = new Set();
+          const updatedItems = existingItems.map(it => {
+            if (!it?._hubspotSource) return it; // preserve user-added + system items
+            const def = CAD_DOC_DEFS.find(d => d.key === it._hubspotSource);
+            if (!def) return it; // unknown source key — leave alone
+            matchedKeys.add(def.key);
+            if (it._userDeleted) return it; // respect user soft-delete (won't resurrect on sync)
+            const newUrl = p.cadDocs[def.key];
+            if (!newUrl || newUrl === it.url) return it; // no change
+            mutated = true;
+            return { ...it, url: newUrl, name: def.label, updatedAt: new Date().toISOString() };
+          });
+
+          // Append new HubSpot-sourced items for keys not yet present in the folder
+          let added = 0;
+          for (const def of CAD_DOC_DEFS) {
+            if (matchedKeys.has(def.key)) continue;
+            const url = p.cadDocs[def.key];
+            if (!url) continue;
+            updatedItems.push({
+              id: newRowId(),
+              name: def.label,
+              url,
+              type: def.type,
+              lang: "en",
+              source: "hubspot",
+              _hubspotSource: def.key,
+              addedBy: "HubSpot CAD Release sync",
+              addedAt: new Date().toISOString(),
+            });
+            added++;
+            mutated = true;
+          }
+
+          if (mutated) {
+            const newPd = pdArr.map((c, i) => i === cadCatIdx ? { ...c, items: updatedItems } : c);
+            cadUpdates[`appState/docData/${pid}/projectDetails`] = sanitizeForFirebase(newPd);
+            console.log(`[cadDocs] ${pid}: pd_cad — updated ${matchedKeys.size} existing item(s), added ${added} new`);
+          }
+        }
+        if (Object.keys(cadUpdates).length > 0) {
+          await db.ref().update(cadUpdates);
+          console.log(`[cadDocs] synced pd_cad for ${Object.keys(cadUpdates).length} projects`);
+        }
+      } else {
+        console.log("[cadDocs] no projects have CAD URLs set — skipping");
+      }
+    } catch (cadErr) {
+      console.warn("[cadDocs] CAD sync failed (non-fatal):", cadErr.message);
     }
 
     // Shipment Details sync — traverse Kit→Shipment associations (the actual HubSpot link) to find INxxx numbers.

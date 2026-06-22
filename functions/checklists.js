@@ -731,8 +731,10 @@ const TABLE_TEMPLATES = [
 /* ═══ v3.2.0 PROJECT CATEGORIES — unified (no party separation) ═══ */
 
 function buildProjectDetails(isSI) {
+  // v4.5.6: pd_specs is now SI-only. Non-SI projects route CAD/Specs documentation through
+  // pd_cad (auto-populated from HubSpot CAD Release workflow in v4.5.5). Reduces folder sprawl.
   const folders = [
-    { id: "pd_specs", name: "Design Specifications & Integration Docs", accessLevel: "open", items: [] },
+    ...(isSI ? [{ id: "pd_specs", name: "Design Specifications & Integration Docs", accessLevel: "open", items: [] }] : []),
     { id: "pd_program", name: "Program Details & Timelines", accessLevel: "open", items: [], type: "program" },
     { id: "pd_cad", name: "CAD & Drawings", accessLevel: "open", items: [] },
     JSON.parse(JSON.stringify(DEPLOYMENT_REQUIREMENTS_FOLDER)),
