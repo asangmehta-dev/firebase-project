@@ -8310,14 +8310,18 @@ function findLinkedSiProject(hubspotProject, siProjectsArr) {
     const byAutoPid = siProjectsArr.find(p => p.pid === autoPid);
     if (byAutoPid) return byAutoPid;
   }
-  // 2. Name-pattern fallbacks for manually-created records without hubspot_id
+  // 2. Name-pattern fallbacks for manually-created records without hubspot_id.
+  // Strip leading [SI][...] tags to get the "core" name, then only match a
+  // P-number if it appears at the very start — prevents "Aivres - Milipitas P3"
+  // from matching "P3 — NOVA" when "P3" is mid-name (plant/phase, not project #).
   const name = (hubspotProject.name || "").toLowerCase();
   if (!name) return null;
-  const pMatch = name.match(/\bp(\d+)\b/);
+  const coreName = name.replace(/^(\[si\]\s*\[[^\]]*\]\s*|\[[^\]]*\]\s*)+/gi, "").trim();
+  const pMatch = coreName.match(/^p(\d+)\b/i);
   if (pMatch) {
     const pNum = parseInt(pMatch[1], 10);
     const hit = siProjectsArr.find(p => {
-      const pn = (p.name || "").toLowerCase().match(/\bp(\d+)\b/);
+      const pn = (p.name || "").toLowerCase().match(/^p(\d+)\b/i);
       return pn && parseInt(pn[1], 10) === pNum;
     });
     if (hit) return hit;
