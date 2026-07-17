@@ -5430,7 +5430,15 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
     if (!candidates.length) return;
     (async () => {
       for (const hp of candidates) {
-        const linked = findLinkedSiProject(hp, allProjects);
+        // Check auto-stub first — if it already exists, nothing to do
+        const autoPid = `hs_${hp.hubspotId || hp.id}`;
+        if (siProjects[autoPid]) continue;
+        // Prefer hubspot_id match over fuzzy name matching to avoid
+        // false positives (e.g. "Aivres P3" matching "P3 — NOVA")
+        const byHsId = hp.hubspotId
+          ? allProjects.find(p => p.hubspot_id === hp.hubspotId)
+          : null;
+        const linked = byHsId || findLinkedSiProject(hp, allProjects);
         const hsStageDates = hp.hubspotStageDates || {};
         if (linked) {
           // Existing manual project — non-destructively merge any HubSpot
@@ -5443,8 +5451,6 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
           }
           continue;
         }
-        const autoPid = `hs_${hp.hubspotId || hp.id}`;
-        if (siProjects[autoPid]) continue;
         const hsStage = normalizeSiStage(hp.siStage);
         const stage = HUBSPOT_TO_SI_STAGE[hsStage] || "SIRD";
         const stageDates = buildStageDatesFromHubspot(hsStageDates);
