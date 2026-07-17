@@ -5376,6 +5376,24 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
   // Global preview-modal state. Components below set this when the user
   // clicks a file or inspection image; rendered once at the bottom.
   const [previewFile, setPreviewFile] = useState(null);
+  const [syncing, setSyncing]         = useState(false);
+  const [syncMsg, setSyncMsg]         = useState("");
+
+  const syncWithHubspot = async () => {
+    setSyncing(true); setSyncMsg("");
+    try {
+      const fn = httpsCallable(functions, "manualHubspotSync");
+      const res = await fn({ commit: true });
+      const n = res?.data?.synced ?? res?.data?.count ?? res?.data?.totalProjects ?? null;
+      setSyncMsg(n != null ? `Synced ${n} project${n === 1 ? "" : "s"}` : "Sync complete");
+      setTimeout(() => setSyncMsg(""), 6000);
+    } catch (e) {
+      setSyncMsg(`Sync failed: ${e?.message || e}`);
+      setTimeout(() => setSyncMsg(""), 8000);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   // Name search + SI + Stage filters. Has to come after the state hooks
   // so we don't hit a TDZ error.
@@ -5592,6 +5610,13 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
           </a>
         </div>
         <div style={{ flex: 1 }} />
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {syncMsg && <span style={{ fontFamily: SI_F, fontSize: 11, color: syncMsg.startsWith("Sync failed") ? "#DC2626" : "#16A34A" }}>{syncMsg}</span>}
+          <button onClick={syncWithHubspot} disabled={syncing}
+            style={{ padding: "5px 12px", border: `1px solid ${NAV_BORDER}`, borderRadius: 6, background: NAV_HOVER, color: NAV_TEXT, fontFamily: SI_F, fontSize: 12, fontWeight: 600, cursor: syncing ? "wait" : "pointer", opacity: syncing ? 0.7 : 1 }}>
+            {syncing ? "⏳ Syncing…" : "↻ Sync with HubSpot"}
+          </button>
+        </div>
       </div>
 
       <div style={{ padding: drillProject ? "16px 24px 80px" : "24px 32px 80px" }}>
@@ -8271,6 +8296,15 @@ function buildStageDatesFromHubspot(hubspotStageDates, existing = {}) {
 // Returns the matching siProject record (with .pid) or null.
 function findLinkedSiProject(hubspotProject, siProjectsArr) {
   if (!hubspotProject || !Array.isArray(siProjectsArr)) return null;
+  // 1. Exact hubspot_id match — most reliable, catches auto-stubs immediately
+  if (hubspotProject.hubspotId) {
+    const byId = siProjectsArr.find(p => p.hubspot_id === hubspotProject.hubspotId);
+    if (byId) return byId;
+    const autoPid = `hs_${hubspotProject.hubspotId}`;
+    const byAutoPid = siProjectsArr.find(p => p.pid === autoPid);
+    if (byAutoPid) return byAutoPid;
+  }
+  // 2. Name-pattern fallbacks for manually-created records without hubspot_id
   const name = (hubspotProject.name || "").toLowerCase();
   if (!name) return null;
   const pMatch = name.match(/\bp(\d+)\b/);
@@ -8314,31 +8348,12 @@ const NEW_PROJECT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;  // 14 days
 
 function SIKanbanBoard({ hubspotProjects, siProjects, onOpenDrillIn, setState, user }) {
   const siS = useSIS();
-  const [syncing, setSyncing] = useState(false);
-  const [syncMsg, setSyncMsg] = useState("");
   // v4.3.x — drag-drop HubSpot stage writeback (mirrors non-SI Kanban in ProjectsOverviewView)
   const canDrag = isInst(user);
   const [dragging, setDragging] = useState(null); // { projId, fromStage, hubspotId }
   const [dropTarget, setDropTarget] = useState(null); // canonical SI_STAGES key
   const [stageWriting, setStageWriting] = useState({}); // { [projId]: true }
   const [stageError, setStageError] = useState(null);
-  const refreshFromHubspot = async () => {
-    setSyncing(true); setSyncMsg("");
-    try {
-      const fn = httpsCallable(functions, "manualHubspotSync");
-      // commit:true — without this flag the Cloud Function only previews
-      // changes and never writes them back to RTDB.
-      const res = await fn({ commit: true });
-      const n = res?.data?.synced ?? res?.data?.count ?? res?.data?.totalProjects ?? null;
-      setSyncMsg(n != null ? `Synced ${n} project${n === 1 ? "" : "s"} from HubSpot` : "Sync complete");
-      setTimeout(() => setSyncMsg(""), 6000);
-    } catch (e) {
-      setSyncMsg(`Sync failed: ${e?.message || e}`);
-      setTimeout(() => setSyncMsg(""), 8000);
-    } finally {
-      setSyncing(false);
-    }
-  };
   // Materialize the manual siProjects collection as an array so we can
   // correlate each HubSpot card to a manually-maintained project.
   const siProjectsArr = useMemo(() => Object.entries(siProjects || {})
@@ -8371,12 +8386,7 @@ function SIKanbanBoard({ hubspotProjects, siProjects, onOpenDrillIn, setState, u
           ) : (
             <><strong style={{ color: siS.text }}>Read-only</strong> — pulled from HubSpot. {list.length} project{list.length === 1 ? "" : "s"} in the SI Partner Deployment pipeline.</>
           )}
-          {syncMsg && <span style={{ marginLeft: 8, color: syncMsg.startsWith("Sync failed") ? "#DC2626" : "#16A34A" }}>· {syncMsg}</span>}
         </span>
-        <button onClick={refreshFromHubspot} disabled={syncing}
-          style={{ padding: "5px 12px", border: `1px solid ${siS.cardBorder}`, borderRadius: 6, background: siS.cardSoft, color: siS.text, fontFamily: SI_F, fontSize: 11.5, fontWeight: 600, cursor: syncing ? "wait" : "pointer" }}>
-          {syncing ? "Syncing…" : "↻ Refresh from HubSpot"}
-        </button>
       </div>
       {stageError && (
         <div style={{ ...siS.card, padding: "10px 14px", borderColor: "#DC2626", background: "#FEF2F2", color: "#B91C1C", fontFamily: SI_F, fontSize: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
