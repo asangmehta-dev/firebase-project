@@ -7937,7 +7937,7 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
         <SIStageBarEditor info={editPopover} onClose={() => setEditPopover(null)} actor={actor} />
       )}
       {slideOutPid && (
-        <SIProjectSlideOut pid={slideOutPid}
+        <SIProjectSlideOut key={slideOutPid} pid={slideOutPid}
           project={projectList.find(p => p.pid === slideOutPid)}
           theme={theme}
           actor={actor}
