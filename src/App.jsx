@@ -11246,6 +11246,14 @@ function SITimelineView({ projects, tracker, setState, isSIAdminUser, fullscreen
     return Object.keys(g).sort().map(name => ({ name, projects: g[name] }));
   }, [projects, tracker]);
 
+  const expandedRef = useRef(false);
+  useEffect(() => {
+    if (!expandedRef.current && groups.length > 0) {
+      expandedRef.current = true;
+      setExpandedSIs(new Set(groups.map(g => g.name)));
+    }
+  }, [groups]);
+
   const saveStageDates = (pid, stageDates) => {
     dbWrite(`appState/siTracker/${pid}/stageDates`, stageDates);
     setState(prev => ({
