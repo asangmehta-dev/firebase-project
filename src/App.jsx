@@ -8313,7 +8313,7 @@ function SIStageBarEditor({ info, onClose, actor }) {
           </div>
           <div>
             <label style={labelStyle(true)}>Planned End <span style={{ marginLeft: 2 }}>🔒</span></label>
-            <input type="date" value={form.planned_end} onChange={e => set("planned_end", e.target.value)} style={inputStyle} />
+            <input type="date" value={form.planned_end} min={form.planned_start || undefined} onChange={e => set("planned_end", e.target.value)} style={inputStyle} />
           </div>
           <div>
             <label style={labelStyle(false)}>Actual Start</label>
@@ -8321,7 +8321,7 @@ function SIStageBarEditor({ info, onClose, actor }) {
           </div>
           <div>
             <label style={labelStyle(false)}>Actual End</label>
-            <input type="date" value={form.actual_end} onChange={e => set("actual_end", e.target.value)} style={inputStyle} />
+            <input type="date" value={form.actual_end} min={form.actual_start || undefined} onChange={e => set("actual_end", e.target.value)} style={inputStyle} />
           </div>
         </div>
         <p style={{ margin: "14px 0 12px", fontFamily: SI_F, fontSize: 11.5, color: "#94A3B8", fontStyle: "italic" }}>
@@ -8508,7 +8508,7 @@ function SlideStageDates({ pid, project, T, actor }) {
       <tbody>
         {SI_STAGES.map(stage => {
           const d = sd[stage] || {};
-          const inp = (k) => <input type="date" value={d[k] || ""} onChange={e => onChange(stage, k, e.target.value)}
+          const inp = (k, min) => <input type="date" value={d[k] || ""} min={min || undefined} onChange={e => onChange(stage, k, e.target.value)}
             style={{ padding: "4px 6px", border: `1px solid ${T.cardBorder}`, borderRadius: 4, background: T.cardSoft, color: T.text, fontFamily: SI_F, fontSize: 11.5, width: 130 }} />;
           return (
             <tr key={stage}>
@@ -8516,9 +8516,9 @@ function SlideStageDates({ pid, project, T, actor }) {
                 <span style={{ display: "inline-block", padding: "1px 8px", borderRadius: 999, background: SI_STAGE_COLORS[stage], color: "#FFF", fontFamily: SI_F, fontSize: 10.5, fontWeight: 700 }}>{stage}</span>
               </td>
               <td style={{ padding: "4px 6px" }}>{inp("planned_start")}</td>
-              <td style={{ padding: "4px 6px" }}>{inp("planned_end")}</td>
+              <td style={{ padding: "4px 6px" }}>{inp("planned_end", d.planned_start)}</td>
               <td style={{ padding: "4px 6px" }}>{inp("actual_start")}</td>
-              <td style={{ padding: "4px 6px" }}>{inp("actual_end")}</td>
+              <td style={{ padding: "4px 6px" }}>{inp("actual_end", d.actual_start)}</td>
             </tr>
           );
         })}
