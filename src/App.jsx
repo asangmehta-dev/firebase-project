@@ -7679,7 +7679,7 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
   const [fromYM, setFromYM] = useState(() => ymToStr(shifted(todayYM, -1)));
   const [toYM,   setToYM]   = useState(() => ymToStr(shifted(todayYM, 4)));
   const [groupBy, setGroupBy] = useState("si_name");
-  const [showPlanned, setShowPlanned] = useState(false);
+  const [showPlanned, setShowPlanned] = useState(true);
   const [showActual,  setShowActual]  = useState(true);
   const [vendorUploadOpen, setVendorUploadOpen] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState({});
@@ -8340,45 +8340,45 @@ function SlideOverview({ pid, project, T }) {
     notes: project.notes || "",
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  const save = async () => {
-    const patch = { ...form };
-    // Normalise empty strings to null so RTDB doesn't store blanks.
+  const saveNow = async (overrides = {}) => {
+    const patch = { ...form, ...overrides };
     Object.keys(patch).forEach(k => { if (patch[k] === "") patch[k] = null; });
     await update(ref(db, `appState/siProjects/${pid}`), { ...patch, updated_at: Date.now() });
   };
+  const blurSave = (k) => (e) => saveNow({ [k]: e.target.value });
+  const changeSave = (k) => (e) => { set(k, e.target.value); saveNow({ [k]: e.target.value }); };
   const del = async () => {
     if (!confirm(`Delete project "${project.name}"? This cannot be undone.`)) return;
     await remove(ref(db, `appState/siProjects/${pid}`));
   };
   return (
     <>
-      <SlideField label="Name *" T={T}><input style={_slideInput(T)} value={form.name} onChange={e => set("name", e.target.value)} /></SlideField>
-      <SlideField label="SI *"   T={T}><input style={_slideInput(T)} value={form.si_name} onChange={e => set("si_name", e.target.value)} /></SlideField>
-      <SlideField label="Customer" T={T}><input style={_slideInput(T)} value={form.customer} onChange={e => set("customer", e.target.value)} /></SlideField>
-      <SlideField label="CM Site"  T={T}><input style={_slideInput(T)} value={form.cm_site} onChange={e => set("cm_site", e.target.value)} /></SlideField>
-      <SlideField label="Factory Location" T={T}><input style={_slideInput(T)} value={form.factory_location} onChange={e => set("factory_location", e.target.value)} /></SlideField>
+      <SlideField label="Name *" T={T}><input style={_slideInput(T)} value={form.name} onChange={e => set("name", e.target.value)} onBlur={blurSave("name")} /></SlideField>
+      <SlideField label="SI *"   T={T}><input style={_slideInput(T)} value={form.si_name} onChange={e => set("si_name", e.target.value)} onBlur={blurSave("si_name")} /></SlideField>
+      <SlideField label="Customer" T={T}><input style={_slideInput(T)} value={form.customer} onChange={e => set("customer", e.target.value)} onBlur={blurSave("customer")} /></SlideField>
+      <SlideField label="CM Site"  T={T}><input style={_slideInput(T)} value={form.cm_site} onChange={e => set("cm_site", e.target.value)} onBlur={blurSave("cm_site")} /></SlideField>
+      <SlideField label="Factory Location" T={T}><input style={_slideInput(T)} value={form.factory_location} onChange={e => set("factory_location", e.target.value)} onBlur={blurSave("factory_location")} /></SlideField>
       <SlideField label="Current Stage"    T={T}>
-        <select style={_slideInput(T)} value={form.current_stage} onChange={e => set("current_stage", e.target.value)}>
+        <select style={_slideInput(T)} value={form.current_stage} onChange={changeSave("current_stage")}>
           {SI_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
       </SlideField>
-      <SlideField label="Station Type" T={T}><input style={_slideInput(T)} value={form.station_type} onChange={e => set("station_type", e.target.value)} placeholder="e.g. Semi-Automated Inspection Fixture" /></SlideField>
+      <SlideField label="Station Type" T={T}><input style={_slideInput(T)} value={form.station_type} onChange={e => set("station_type", e.target.value)} onBlur={blurSave("station_type")} placeholder="e.g. Semi-Automated Inspection Fixture" /></SlideField>
       <details style={{ marginBottom: 12 }} open>
         <summary style={{ fontFamily: SI_F, fontSize: 13, fontWeight: 700, color: T.text, cursor: "pointer", marginBottom: 8 }}>Contacts</summary>
-        <SlideField label="SI PM" T={T}><input style={_slideInput(T)} value={form.si_pm} onChange={e => set("si_pm", e.target.value)} /></SlideField>
-        <SlideField label="SI AE" T={T}><input style={_slideInput(T)} value={form.si_ae} onChange={e => set("si_ae", e.target.value)} /></SlideField>
+        <SlideField label="SI PM" T={T}><input style={_slideInput(T)} value={form.si_pm} onChange={e => set("si_pm", e.target.value)} onBlur={blurSave("si_pm")} /></SlideField>
+        <SlideField label="SI AE" T={T}><input style={_slideInput(T)} value={form.si_ae} onChange={e => set("si_ae", e.target.value)} onBlur={blurSave("si_ae")} /></SlideField>
       </details>
       <details style={{ marginBottom: 12 }} open>
         <summary style={{ fontFamily: SI_F, fontSize: 13, fontWeight: 700, color: T.text, cursor: "pointer", marginBottom: 8 }}>Key dates</summary>
-        <SlideField label="FAT Date" T={T}><input type="date" style={_slideInput(T)} value={form.fat_date} onChange={e => set("fat_date", e.target.value)} /></SlideField>
-        <SlideField label="SAT Date" T={T}><input type="date" style={_slideInput(T)} value={form.sat_date} onChange={e => set("sat_date", e.target.value)} /></SlideField>
-        <SlideField label="SAT Location" T={T}><input style={_slideInput(T)} value={form.sat_location} onChange={e => set("sat_location", e.target.value)} /></SlideField>
-        <SlideField label="Ship Date" T={T}><input type="date" style={_slideInput(T)} value={form.ship_date} onChange={e => set("ship_date", e.target.value)} /></SlideField>
+        <SlideField label="FAT Date" T={T}><input type="date" style={_slideInput(T)} value={form.fat_date} onChange={changeSave("fat_date")} /></SlideField>
+        <SlideField label="SAT Date" T={T}><input type="date" style={_slideInput(T)} value={form.sat_date} onChange={changeSave("sat_date")} /></SlideField>
+        <SlideField label="SAT Location" T={T}><input style={_slideInput(T)} value={form.sat_location} onChange={e => set("sat_location", e.target.value)} onBlur={blurSave("sat_location")} /></SlideField>
+        <SlideField label="Ship Date" T={T}><input type="date" style={_slideInput(T)} value={form.ship_date} onChange={changeSave("ship_date")} /></SlideField>
         <div style={{ fontFamily: SI_F, fontSize: 10.5, color: T.textMuted }}>Writing here also updates the matching stage_dates planned-start cell.</div>
       </details>
-      <SlideField label="Notes" T={T}><textarea style={{ ..._slideInput(T), minHeight: 70, resize: "vertical" }} value={form.notes} onChange={e => set("notes", e.target.value)} /></SlideField>
-      <button onClick={save} style={{ padding: "7px 16px", border: 0, borderRadius: 6, background: "#2563EB", color: "#FFF", fontFamily: SI_F, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Save</button>
-      <div style={{ marginTop: 24, padding: 12, border: `1px solid #EF4444`, borderRadius: 6 }}>
+      <SlideField label="Notes" T={T}><textarea style={{ ..._slideInput(T), minHeight: 70, resize: "vertical" }} value={form.notes} onChange={e => set("notes", e.target.value)} onBlur={blurSave("notes")} /></SlideField>
+      <div style={{ marginTop: 12, padding: 12, border: `1px solid #EF4444`, borderRadius: 6 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontFamily: SI_F, fontSize: 11, color: "#EF4444", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>Danger Zone</span>
           <button onClick={del}
