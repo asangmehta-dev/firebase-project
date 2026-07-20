@@ -8421,7 +8421,7 @@ function SlideStageDates({ pid, project, T, actor }) {
       <tbody>
         {SI_STAGES.map(stage => {
           const d = sd[stage] || {};
-          const inp = (k) => <input type="date" defaultValue={d[k] || ""} onChange={e => onChange(stage, k, e.target.value)}
+          const inp = (k) => <input type="date" value={d[k] || ""} onChange={e => onChange(stage, k, e.target.value)}
             style={{ padding: "4px 6px", border: `1px solid ${T.cardBorder}`, borderRadius: 4, background: T.cardSoft, color: T.text, fontFamily: SI_F, fontSize: 11.5, width: 130 }} />;
           return (
             <tr key={stage}>
