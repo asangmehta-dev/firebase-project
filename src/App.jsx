@@ -8293,16 +8293,20 @@ function SIProjectSlideOut({ pid, project, onClose, theme, actor }) {
         </div>
         <div style={{ display: "flex", gap: 16 }}>
           {tabBtn("overview", "Overview")}
-          {tabBtn("dates",    "Stage Dates")}
           {tabBtn("sub",      "Sub-stages")}
           {tabBtn("activity", "Activity")}
         </div>
       </div>
       <div style={{ padding: "16px 18px" }}>
         {tab === "overview" && <SlideOverview pid={pid} project={project} T={T} />}
-        {tab === "dates"    && <SlideStageDates pid={pid} project={project} T={T} actor={actor} />}
         {tab === "sub"      && <SlideSubStages pid={pid} project={project} T={T} />}
         {tab === "activity" && <SlideActivity pid={pid} T={T} />}
+      </div>
+      <div style={{ borderTop: `1px solid ${T.cardBorder}`, margin: "0 18px", paddingTop: 14, paddingBottom: 20 }}>
+        <div style={{ fontFamily: SI_F, fontSize: 11, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.7, fontWeight: 700, marginBottom: 10 }}>Stage Dates</div>
+        <div style={{ overflowX: "auto" }}>
+          <SlideStageDates pid={pid} project={project} T={T} actor={actor} />
+        </div>
       </div>
     </div>
   );
