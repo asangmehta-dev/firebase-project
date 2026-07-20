@@ -7689,6 +7689,20 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
   const [expandedProjects, setExpandedProjects] = useState({}); // pid → expanded
   const [editPopover, setEditPopover] = useState(null);
   const [slideOutPid, setSlideOutPid] = useState(null);
+  const [tooltip, setTooltip] = useState(null); // { x, y, stage, type, start, end }
+
+  const fmtDate = (iso) => {
+    if (!iso) return "—";
+    const d = new Date(iso + "T00:00:00");
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  };
+  const showTip = (e, stage, type, d) => {
+    const start = type === "planned" ? d.planned_start : d.actual_start;
+    const end   = type === "planned" ? d.planned_end   : (d.actual_end || d.actual_start);
+    setTooltip({ x: e.clientX, y: e.clientY, stage, type, start, end });
+  };
+  const moveTip = (e) => setTooltip(t => t ? { ...t, x: e.clientX, y: e.clientY } : null);
+  const hideTip = () => setTooltip(null);
 
   // Timeline follows the user's chosen theme (dark or light). Dark by
   // default matches fixture_tracker, but the top-bar toggle flips it.
@@ -7722,6 +7736,26 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
   const monthLabel = ({ y, m }) => new Date(y, m, 1).toLocaleString(undefined, { month: "short", year: "2-digit" }).toUpperCase();
   const todayPct = (() => { const t = new Date(); t.setHours(0,0,0,0); return pct(t.toISOString().slice(0,10)); })();
 
+  // Pan / zoom helpers
+  const panLeft  = () => { setFromYM(ymToStr(shifted(strToYM(fromYM), -1))); setToYM(ymToStr(shifted(strToYM(toYM), -1))); };
+  const panRight = () => { setFromYM(ymToStr(shifted(strToYM(fromYM),  1))); setToYM(ymToStr(shifted(strToYM(toYM),  1))); };
+  const zoomIn   = () => { const a = strToYM(fromYM), b = strToYM(toYM); if ((b.y - a.y) * 12 + (b.m - a.m) <= 2) return; setFromYM(ymToStr(shifted(a, 1))); setToYM(ymToStr(shifted(b, -1))); };
+  const zoomOut  = () => { setFromYM(ymToStr(shifted(strToYM(fromYM), -1))); setToYM(ymToStr(shifted(strToYM(toYM), 1))); };
+  const resetView = () => { setFromYM(ymToStr(shifted(todayYM, -1))); setToYM(ymToStr(shifted(todayYM, 4))); };
+
+  // Slider: represents center of the visible window as an absolute month number
+  const aYM = strToYM(fromYM), bYM = strToYM(toYM);
+  const windowMonths = (bYM.y - aYM.y) * 12 + (bYM.m - aYM.m) + 1;
+  const centerAbs = aYM.y * 12 + aYM.m + Math.floor(windowMonths / 2);
+  const sliderMin = 2019 * 12, sliderMax = 2031 * 12;
+  const onSlider = (e) => {
+    const nc = parseInt(e.target.value);
+    const half = Math.floor(windowMonths / 2);
+    const fa = nc - half, ta = fa + windowMonths - 1;
+    setFromYM(ymToStr({ y: Math.floor(fa / 12), m: fa % 12 }));
+    setToYM(ymToStr({ y: Math.floor(ta / 12), m: ta % 12 }));
+  };
+
   // Group projects.
   const groups = useMemo(() => {
     if (groupBy === "none") return [{ key: "All", projects: projectList }];
@@ -7752,12 +7786,18 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
       return (
         <React.Fragment key={stage}>
           {showP && (
-            <div title={`${stage} planned: ${d.planned_start} → ${d.planned_end}`}
-              style={{ position: "absolute", left: `${lp}%`, width: `${rp - lp}%`, top: 4, height: 15, background: SI_STAGE_COLORS[stage], opacity: 0.45, borderRadius: 3, pointerEvents: "none" }} />
+            <div
+              onMouseEnter={e => showTip(e, stage, "planned", d)}
+              onMouseMove={moveTip} onMouseLeave={hideTip}
+              style={{ position: "absolute", left: `${lp}%`, width: `${rp - lp}%`, top: 4, height: 15, background: SI_STAGE_COLORS[stage], opacity: 0.45, borderRadius: 3, display: "flex", alignItems: "center", padding: "0 4px", overflow: "hidden" }}>
+              <span style={{ color: "#FFF", fontFamily: SI_F, fontSize: 9.5, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{stage}</span>
+            </div>
           )}
           {showA && (
-            <div title={`${stage} actual: ${d.actual_start}${d.actual_end ? ` → ${d.actual_end}` : ""}`}
-              style={{ position: "absolute", left: `${la}%`, width: `${Math.max(1, ra - la)}%`, top: 19, height: 15, background: SI_STAGE_COLORS[stage], borderRadius: 3, pointerEvents: "none", display: "flex", alignItems: "center", padding: "0 4px", color: "#FFF", fontFamily: SI_F, fontSize: 10, fontWeight: 700 }}>
+            <div
+              onMouseEnter={e => showTip(e, stage, "actual", d)}
+              onMouseMove={moveTip} onMouseLeave={hideTip}
+              style={{ position: "absolute", left: `${la}%`, width: `${Math.max(1, ra - la)}%`, top: 19, height: 15, background: SI_STAGE_COLORS[stage], borderRadius: 3, display: "flex", alignItems: "center", padding: "0 4px", color: "#FFF", fontFamily: SI_F, fontSize: 9.5, fontWeight: 700 }}>
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{stage}</span>
             </div>
           )}
@@ -7778,12 +7818,17 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
     return (
       <React.Fragment key={stage}>
         {showP && (
-          <div onClick={openEdit} title={`${stage} planned: ${d.planned_start} → ${d.planned_end}`}
-            style={{ position: "absolute", left: `${lp}%`, width: `${rp - lp}%`, top: 7, height: 14, background: SI_STAGE_COLORS[stage], opacity: 0.45, borderRadius: 3, cursor: "pointer" }}>
+          <div onClick={openEdit}
+            onMouseEnter={e => showTip(e, stage, "planned", d)}
+            onMouseMove={moveTip} onMouseLeave={hideTip}
+            style={{ position: "absolute", left: `${lp}%`, width: `${rp - lp}%`, top: 7, height: 14, background: SI_STAGE_COLORS[stage], opacity: 0.45, borderRadius: 3, cursor: "pointer", display: "flex", alignItems: "center", padding: "0 5px", overflow: "hidden" }}>
+            <span style={{ color: "#FFF", fontFamily: SI_F, fontSize: 10, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{stage}</span>
           </div>
         )}
         {showA && (
-          <div onClick={openEdit} title={`${stage} actual: ${d.actual_start}${d.actual_end ? ` → ${d.actual_end}` : ""}`}
+          <div onClick={openEdit}
+            onMouseEnter={e => showTip(e, stage, "actual", d)}
+            onMouseMove={moveTip} onMouseLeave={hideTip}
             style={{ position: "absolute", left: `${la}%`, width: `${Math.max(1, ra - la)}%`, top: 7, height: 14, background: SI_STAGE_COLORS[stage], borderRadius: 3, cursor: "pointer", display: "flex", alignItems: "center", padding: "0 5px", color: "#FFF", fontFamily: SI_F, fontSize: 10, fontWeight: 700 }}>
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{stage}</span>
           </div>
@@ -7837,10 +7882,24 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
           📥 Upload vendor file
         </button>
         <div style={{ flex: 1 }} />
-        <span style={{ fontFamily: SI_F, fontSize: 11, color: TL_MUTED }}>FROM</span>
+        {/* Pan & zoom controls */}
+        {[
+          ["◀", panLeft,   "Shift window back 1 month"],
+          ["▶", panRight,  "Shift window forward 1 month"],
+        ].map(([label, fn, title]) => (
+          <button key={label} onClick={fn} title={title}
+            style={{ padding: "5px 10px", border: `1px solid ${TL_BORDER}`, borderRadius: 6, background: "transparent", color: TL_MUTED, fontFamily: SI_F, fontSize: 13, cursor: "pointer" }}>{label}</button>
+        ))}
+        <button onClick={zoomIn} title="Zoom in (show fewer months)"
+          style={{ padding: "5px 10px", border: `1px solid ${TL_BORDER}`, borderRadius: 6, background: "transparent", color: TL_MUTED, fontFamily: SI_F, fontSize: 13, cursor: "pointer" }}>−</button>
+        <span style={{ fontFamily: SI_F, fontSize: 11, color: TL_MUTED, minWidth: 60, textAlign: "center" }}>{windowMonths} mo</span>
+        <button onClick={zoomOut} title="Zoom out (show more months)"
+          style={{ padding: "5px 10px", border: `1px solid ${TL_BORDER}`, borderRadius: 6, background: "transparent", color: TL_MUTED, fontFamily: SI_F, fontSize: 13, cursor: "pointer" }}>+</button>
+        <button onClick={resetView} title="Reset to current date"
+          style={{ padding: "5px 10px", border: `1px solid ${TL_BORDER}`, borderRadius: 6, background: "transparent", color: TL_MUTED, fontFamily: SI_F, fontSize: 11, fontWeight: 700, cursor: "pointer" }}>Today</button>
         <input type="month" value={fromYM} onChange={e => setFromYM(e.target.value)}
           style={{ padding: "4px 8px", border: `1px solid ${TL_BORDER}`, borderRadius: 6, fontFamily: SI_F, fontSize: 12, background: TL_HOVER, color: TL_TEXT }} />
-        <span style={{ fontFamily: SI_F, fontSize: 11, color: TL_MUTED }}>TO</span>
+        <span style={{ fontFamily: SI_F, fontSize: 11, color: TL_MUTED }}>→</span>
         <input type="month" value={toYM} onChange={e => setToYM(e.target.value)}
           style={{ padding: "4px 8px", border: `1px solid ${TL_BORDER}`, borderRadius: 6, fontFamily: SI_F, fontSize: 12, background: TL_HOVER, color: TL_TEXT }} />
       </div>
@@ -7933,6 +7992,14 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
         </>
       )}
 
+      {/* Bottom timeline slider */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 0 4px" }}>
+        <span style={{ fontFamily: SI_F, fontSize: 10, color: TL_MUTED, whiteSpace: "nowrap" }}>{fromYM}</span>
+        <input type="range" min={sliderMin} max={sliderMax} value={centerAbs} onChange={onSlider}
+          style={{ flex: 1, accentColor: "#2563EB", cursor: "pointer" }} />
+        <span style={{ fontFamily: SI_F, fontSize: 10, color: TL_MUTED, whiteSpace: "nowrap" }}>{toYM}</span>
+      </div>
+
       {editPopover && (
         <SIStageBarEditor info={editPopover} onClose={() => setEditPopover(null)} actor={actor} />
       )}
@@ -7945,6 +8012,26 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
       )}
       {vendorUploadOpen && (
         <VendorFileUploadModal projectList={projectList} actor={actor} onClose={() => setVendorUploadOpen(false)} />
+      )}
+
+      {/* Hover tooltip */}
+      {tooltip && (
+        <div style={{
+          position: "fixed", left: tooltip.x + 14, top: tooltip.y - 70,
+          background: "#1E293B", border: "1px solid #334155", borderRadius: 8,
+          padding: "9px 13px", zIndex: 9999, pointerEvents: "none",
+          fontFamily: SI_F, boxShadow: "0 8px 24px rgba(0,0,0,0.55)", minWidth: 170,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
+            <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: SI_STAGE_COLORS[tooltip.stage], flexShrink: 0, opacity: tooltip.type === "planned" ? 0.55 : 1 }} />
+            <span style={{ fontWeight: 700, fontSize: 13, color: "#F8FAFC" }}>{tooltip.stage}</span>
+            <span style={{ fontSize: 10, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.5 }}>{tooltip.type}</span>
+          </div>
+          <div style={{ fontSize: 11.5, color: "#CBD5E1", lineHeight: 1.8 }}>
+            <span style={{ color: "#64748B", display: "inline-block", width: 38 }}>Start</span>{fmtDate(tooltip.start)}<br/>
+            <span style={{ color: "#64748B", display: "inline-block", width: 38 }}>End</span>{fmtDate(tooltip.end)}
+          </div>
+        </div>
       )}
     </div>
   );
