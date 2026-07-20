@@ -8385,15 +8385,9 @@ function SIProjectSlideOut({ pid, project, onClose, theme, actor }) {
         </div>
       </div>
       <div style={{ padding: "16px 18px" }}>
-        {tab === "overview" && <SlideOverview pid={pid} project={project} T={T} />}
+        {tab === "overview" && <SlideOverview pid={pid} project={project} T={T} actor={actor} />}
         {tab === "sub"      && <SlideSubStages pid={pid} project={project} T={T} />}
         {tab === "activity" && <SlideActivity pid={pid} T={T} />}
-      </div>
-      <div style={{ borderTop: `1px solid ${T.cardBorder}`, margin: "0 18px", paddingTop: 14, paddingBottom: 20 }}>
-        <div style={{ fontFamily: SI_F, fontSize: 11, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.7, fontWeight: 700, marginBottom: 10 }}>Stage Dates</div>
-        <div style={{ overflowX: "auto" }}>
-          <SlideStageDates pid={pid} project={project} T={T} actor={actor} />
-        </div>
       </div>
     </div>
   );
@@ -8409,7 +8403,7 @@ function SlideField({ label, T, children }) {
   return <div style={{ marginBottom: 12 }}><label style={_slideLabel(T)}>{label}</label>{children}</div>;
 }
 
-function SlideOverview({ pid, project, T }) {
+function SlideOverview({ pid, project, T, actor }) {
   const [form, setForm] = useState({
     name: project.name || "",
     si_name: project.si_name || "",
@@ -8465,7 +8459,16 @@ function SlideOverview({ pid, project, T }) {
         <div style={{ fontFamily: SI_F, fontSize: 10.5, color: T.textMuted }}>Writing here also updates the matching stage_dates planned-start cell.</div>
       </details>
       <SlideField label="Notes" T={T}><textarea style={{ ..._slideInput(T), minHeight: 70, resize: "vertical" }} value={form.notes} onChange={e => set("notes", e.target.value)} onBlur={blurSave("notes")} /></SlideField>
-      <div style={{ marginTop: 12, padding: 12, border: `1px solid #EF4444`, borderRadius: 6 }}>
+
+      {/* Stage Dates — always visible in Overview, above Danger Zone */}
+      <div style={{ borderTop: `1px solid ${T.cardBorder}`, marginTop: 16, paddingTop: 14, marginBottom: 16 }}>
+        <div style={{ fontFamily: SI_F, fontSize: 11, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.7, fontWeight: 700, marginBottom: 10 }}>Stage Dates</div>
+        <div style={{ overflowX: "auto" }}>
+          <SlideStageDates pid={pid} project={project} T={T} actor={actor} />
+        </div>
+      </div>
+
+      <div style={{ padding: 12, border: `1px solid #EF4444`, borderRadius: 6 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontFamily: SI_F, fontSize: 11, color: "#EF4444", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>Danger Zone</span>
           <button onClick={del}
