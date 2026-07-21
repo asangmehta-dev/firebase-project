@@ -5650,7 +5650,26 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
       const fn = httpsCallable(functions, "manualHubspotSync");
       const res = await fn({ commit: true });
       const n = res?.data?.synced ?? res?.data?.count ?? res?.data?.totalProjects ?? null;
-      setSyncMsg(n != null ? `Synced ${n} project${n === 1 ? "" : "s"}` : "Sync complete");
+      setSyncMsg("Writing dates to HubSpot…");
+      // Write FAT/SAT planned dates from all portal projects → HubSpot.
+      const writeFn = httpsCallable(functions, "writeProjectDateToHubspot");
+      await Promise.all(
+        allProjects
+          .filter(p => p.hubspot_id)
+          .map(p => {
+            const fields = {};
+            const fat = p.stage_dates?.FAT || {};
+            const sat = p.stage_dates?.SAT || {};
+            if (fat.planned_start) fields.fatPlannedStart = fat.planned_start;
+            if (fat.planned_end)   fields.fatPlannedEnd   = fat.planned_end;
+            if (sat.planned_start) fields.satPlannedStart = sat.planned_start;
+            if (sat.planned_end)   fields.satPlannedEnd   = sat.planned_end;
+            if (!Object.keys(fields).length) return Promise.resolve();
+            return writeFn({ hubspotId: p.hubspot_id, fields })
+              .catch(e => console.warn("[HS sync write]", p.pid, e.message));
+          })
+      );
+      setSyncMsg(n != null ? `Synced ${n} project${n === 1 ? "" : "s"} ✓` : "Sync complete ✓");
       setTimeout(() => setSyncMsg(""), 6000);
     } catch (e) {
       setSyncMsg(`Sync failed: ${e?.message || e}`);
@@ -8500,6 +8519,18 @@ function SlideStageDates({ pid, project, T, actor }) {
         logSIActivity(pid, "stage_advance", `Stage: ${prevStage} → ${newStage}`, actor);
       }
     } catch (e) { /* tolerate */ }
+    // Bidirectional HubSpot sync for FAT/SAT planned dates.
+    const HS_PLANNED = {
+      FAT: { planned_start: "fatPlannedStart", planned_end: "fatPlannedEnd" },
+      SAT: { planned_start: "satPlannedStart", planned_end: "satPlannedEnd" },
+    };
+    const hsKey = HS_PLANNED[stage]?.[key];
+    const hsId  = project.hubspot_id;
+    if (hsKey && hsId) {
+      httpsCallable(functions, "writeProjectDateToHubspot")({
+        hubspotId: hsId, fields: { [hsKey]: value || null },
+      }).catch(e => console.warn("[HS date sync]", e.message));
+    }
   };
   return (
     <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: SI_F, fontSize: 12.5, tableLayout: "auto" }}>
@@ -8654,8 +8685,12 @@ function buildStageDatesFromHubspot(hubspotStageDates, existing = {}) {
   for (const [stage, dates] of Object.entries(hubspotStageDates)) {
     const cur = out[stage] || {};
     const next = { ...cur };
-    if (!cur.planned_start && dates?.entered) next.planned_start = dates.entered;
-    if (!cur.planned_end   && dates?.exited)  next.planned_end   = dates.exited;
+    // Explicit planned dates (from writable HubSpot custom properties) always win.
+    // Auto-transition timestamps only fill in when no value exists yet.
+    if (dates?.explicit_planned_start)            next.planned_start = dates.explicit_planned_start;
+    else if (!cur.planned_start && dates?.entered) next.planned_start = dates.entered;
+    if (dates?.explicit_planned_end)              next.planned_end   = dates.explicit_planned_end;
+    else if (!cur.planned_end   && dates?.exited)  next.planned_end   = dates.exited;
     if (next.planned_start || next.planned_end || cur.actual_start || cur.actual_end) {
       out[stage] = next;
     }

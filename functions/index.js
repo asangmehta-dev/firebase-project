@@ -98,6 +98,8 @@ const PROPERTIES = [
   "cad_folder", "station_overview_hde", "machining_notes_hde",
   "hs_createdate", "hs_lastmodifieddate",
   "actual_start_date", "actual_finish_date",
+  // Explicit planned dates for FAT + SAT — writable custom properties, synced bidirectionally.
+  "fat_start_date", "fat_end_date", "sat_start_date", "sat_end_date",
   ...SI_STAGE_DATE_PROPS,
 ].join(",");
 
@@ -278,6 +280,17 @@ function mapHubspotToProject(obj) {
       const exited  = toISODate(p[`hs_v2_date_exited_${hsStageId}`]);
       if (entered || exited) hubspotStageDates[canonical] = { entered, exited };
     }
+    // Explicit planned dates from writable custom properties — these are set by the
+    // portal and take precedence over auto-transition timestamps when merging.
+    const setExplicit = (canonical, k, raw) => {
+      const v = toISODate(raw);
+      if (!v) return;
+      hubspotStageDates[canonical] = { ...(hubspotStageDates[canonical] || {}), [k]: v };
+    };
+    setExplicit("FAT", "explicit_planned_start", p.fat_start_date);
+    setExplicit("FAT", "explicit_planned_end",   p.fat_end_date);
+    setExplicit("SAT", "explicit_planned_start", p.sat_start_date);
+    setExplicit("SAT", "explicit_planned_end",   p.sat_end_date);
   }
 
   return {
@@ -2310,6 +2323,11 @@ const HUBSPOT_DATE_PROPS = {
   actualServiceStartDate: "actual_service_start_date__c",
   targetBuildDate:        "actual_target_build_date__c",
   actualDeployDate:       "actual_deploy_date_production_ready__c",
+  // Bidirectional FAT/SAT planned dates (SI Partner Deployment custom properties).
+  fatPlannedStart: "fat_start_date",
+  fatPlannedEnd:   "fat_end_date",
+  satPlannedStart: "sat_start_date",
+  satPlannedEnd:   "sat_end_date",
 };
 
 // Diagnostic: returns all property names + labels for the custom object type (admin-only).
