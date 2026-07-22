@@ -64,3 +64,51 @@ The command will print a preview URL you can share for review.
 ## Access
 
 You have full admin access. Once you sign up at the app with your `@instrumental.com` email, you'll have immediate access to all views including **🔒 All SI Projects** — no role promotion needed.
+
+---
+
+# QA & Regression Prevention Rules
+
+> Full guide: [QA_GUIDE.md](QA_GUIDE.md)
+
+## Mandatory pre-deploy checklist (functions)
+
+Before running `firebase deploy --only functions`, ALWAYS verify:
+
+```bash
+grep "^[A-Z]" functions/.env | cut -d= -f1
+# Must list ALL of:
+#   ANTHROPIC_API_KEY
+#   HUBSPOT_TOKEN
+```
+
+**Never deploy functions if any required key is missing.** Stop and resolve before proceeding.
+
+## Mandatory pre-change checklist
+
+1. Understand what the change touches — read the relevant code first.
+2. Identify every behavior that could be affected, not just the happy path.
+3. State the risk before editing, not after.
+
+## Mandatory post-change checklist
+
+After every code change, before reporting done:
+
+1. Run `npm run build` — must pass clean.
+2. Manually verify the changed feature still works.
+3. Explicitly check that adjacent features are not broken.
+4. For functions deploys: re-verify `functions/.env` has all keys.
+
+## Change discipline
+
+- Make the smallest change necessary — never refactor unrelated code.
+- Search for every call site before modifying shared code.
+- Preserve existing behavior unless explicitly asked to change it.
+
+## Completion report format
+
+Every completed task must include:
+- **Files changed**
+- **Behavior changed**
+- **Commands run and their results**
+- **Remaining risks**
