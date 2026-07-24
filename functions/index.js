@@ -1105,11 +1105,15 @@ async function runSync(token, commit, syncCtx) {
 
     // Station Kits sync — batch-read project→kit associations via v4 API, populate _hardwareTracking.
     // Wrapped in try/catch: station kit failures must not abort the main project sync.
+    // v4.6.0: closed projects are excluded from station kit re-sync — their hardware data freezes at the last sync before closure
+    // (saves HubSpot API quota + RTDB writes; pd_station_kits rows for closed projects remain readable, just not re-synced).
     try {
       const stationTypes = await discoverStationObjectTypes(token);
       if (stationTypes) {
         const { kitTypeId, componentTypeId } = stationTypes;
-        const projectHsIds = incoming.map(p => p.hubspotId).filter(Boolean);
+        const activeIncoming = incoming.filter(p => p.status === "active");
+        const projectHsIds = activeIncoming.map(p => p.hubspotId).filter(Boolean);
+        console.log(`[stationKits] filtering to active projects: ${activeIncoming.length} of ${incoming.length} (skipping ${incoming.length - activeIncoming.length} closed)`);
         const { byProject, kitProps } = await fetchKitsForProjects(token, projectHsIds, kitTypeId);
         kitsByProject = byProject; // save for shipments traversal
         const allKitIds = [...new Set(Object.values(byProject).flat())];

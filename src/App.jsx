@@ -983,19 +983,31 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
       setFbError(e.message || String(e));
     }
   };
-  // v4.5.4: opt-in toggle to include inactive/completed projects in the dropdown.
-  // Data is never deleted on completion — sync just flips status to "inactive". Toggle exposes them for read access.
-  // Persisted in sessionStorage so it survives a refresh but resets per session (avoids surprise on next login).
-  const [showInactive, setShowInactive] = useState(() => sessionStorage.getItem("v454_show_inactive") === "1");
-  useEffect(() => { sessionStorage.setItem("v454_show_inactive", showInactive ? "1" : "0"); }, [showInactive]);
+  // v4.6.0: "Include completed" toggle now persists across sessions (localStorage) and is exposed to non-admins too.
+  // Renamed key from v454_show_inactive (sessionStorage) → dp_show_inactive (localStorage). Old key intentionally not migrated.
+  const [showInactive, setShowInactive] = useState(() => { try { return localStorage.getItem("dp_show_inactive") === "1"; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem("dp_show_inactive", showInactive ? "1" : "0"); } catch {} }, [showInactive]);
   const dropdownProjects = admin
     ? projects.filter(p => p.hubspotPipelineId !== SI_PARTNER_PIPELINE_ID && (showInactive || p.status !== "inactive"))
-    : projects.filter(p => p.status === "active");
-  const inactiveCount = admin ? projects.filter(p => p.hubspotPipelineId !== SI_PARTNER_PIPELINE_ID && p.status === "inactive").length : 0;
+    : projects.filter(p => p.status === "active" || (showInactive && p.status === "inactive"));
+  const inactiveCount = admin
+    ? projects.filter(p => p.hubspotPipelineId !== SI_PARTNER_PIPELINE_ID && p.status === "inactive").length
+    : projects.filter(p => p.status === "inactive").length;
   // v4.0.2 — single-control combobox replaces the old <input>+<select> pair (which was glitchy on macOS browsers).
   const [projSearch, setProjSearch] = useState("");
   const [projOpen, setProjOpen] = useState(false);
-  const filteredProjects = projSearch.trim() ? dropdownProjects.filter(p => p.name.toLowerCase().includes(projSearch.trim().toLowerCase())) : dropdownProjects;
+  // v4.6.0: search now matches name, HubSpot ID, customer, codename, and stage label — not just name.
+  const projMatchesQuery = (p, q) => {
+    if (!q) return true;
+    const fields = [p.name, p.hubspotId, p.customer, p.codename, p.hubspotStageLabel];
+    return fields.some(f => f && String(f).toLowerCase().includes(q));
+  };
+  const queryLC = projSearch.trim().toLowerCase();
+  const filteredProjects = queryLC ? dropdownProjects.filter(p => projMatchesQuery(p, queryLC)) : dropdownProjects;
+  // v4.6.0: when a search has 0 visible results, check whether the pre-filter (Include completed off) is hiding matches.
+  const hiddenInactiveMatches = (queryLC && filteredProjects.length === 0 && !showInactive)
+    ? projects.filter(p => p.status === "inactive" && (admin ? p.hubspotPipelineId !== SI_PARTNER_PIPELINE_ID : true) && projMatchesQuery(p, queryLC)).length
+    : 0;
   const pickProject = (p) => { setProject(p); setProjSearch(""); setProjOpen(false); };
   const navActive = (v) => view === v ? { background: "rgba(255,255,255,.1)", color: "#F1F5F9", borderLeftColor: "#00C9A7" } : {};
   return (
@@ -1018,7 +1030,7 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
           onFocus={() => { setProjSearch(""); setProjOpen(true); }}
           onBlur={() => setTimeout(() => setProjOpen(false), 180)}
         />
-        {admin && inactiveCount > 0 && (
+        {inactiveCount > 0 && (
           <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 11, color: "#94A3B8", fontFamily: F, cursor: "pointer", userSelect: "none" }}>
             <input
               type="checkbox"
@@ -1032,7 +1044,17 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
         {projOpen && (
           <div style={{ position: "absolute", top: "100%", left: 18, right: 18, marginTop: 4, maxHeight: 280, overflowY: "auto", background: "#1E293B", border: "1px solid #334155", borderRadius: 6, zIndex: 100, boxShadow: "0 4px 12px rgba(0,0,0,.35)" }}>
             {filteredProjects.length === 0 ? (
-              <div style={{ padding: "10px 12px", color: "#64748B", fontSize: 12, fontFamily: F, fontStyle: "italic" }}>No projects{projSearch ? " matching search" : ""}</div>
+              <>
+                <div style={{ padding: "10px 12px", color: "#64748B", fontSize: 12, fontFamily: F, fontStyle: "italic" }}>No projects{projSearch ? " matching search" : ""}</div>
+                {hiddenInactiveMatches > 0 && (
+                  <button
+                    onMouseDown={e => { e.preventDefault(); setShowInactive(true); }}
+                    style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "rgba(251,191,36,.08)", border: "none", borderTop: "1px solid rgba(255,255,255,.04)", color: "#FBBF24", fontSize: 12, fontFamily: F, cursor: "pointer" }}
+                  >
+                    📦 {hiddenInactiveMatches} completed project{hiddenInactiveMatches === 1 ? "" : "s"} match — click to include completed
+                  </button>
+                )}
+              </>
             ) : filteredProjects.slice(0, 50).map(p => (
               <button
                 key={p.id}
@@ -5397,9 +5419,15 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
 
   // Name search + SI + Stage filters. Has to come after the state hooks
   // so we don't hit a TDZ error.
+  // v4.6.0: search now matches name, HubSpot ID, customer, codename, si_name, stage label — not just name.
   const q = search.trim().toLowerCase();
+  const siMatchesQuery = (p, qq) => {
+    if (!qq) return true;
+    const fields = [p.name, p.hubspotId, p.customer, p.codename, p.si_name, p.hubspotStageLabel, effectiveStage(p)];
+    return fields.some(f => f && String(f).toLowerCase().includes(qq));
+  };
   const projectList = allProjects.filter(p => {
-    if (q && !(p.name || "").toLowerCase().includes(q)) return false;
+    if (q && !siMatchesQuery(p, q)) return false;
     if (filterSi && p.si_name !== filterSi) return false;
     if (filterStage && effectiveStage(p) !== filterStage) return false;
     return true;

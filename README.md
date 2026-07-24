@@ -1,6 +1,6 @@
 # Deployment Portal
 
-**Version:** v4.5.8
+**Version:** v4.6.0
 
 A React 18 web application serving as a consolidated PMO-style frontend UI for the Customer Experience team to track and proactively manage risks/issues with CMs and customers. Speaks directly to HubSpot to provide real-time information on all projects in the deployment and sales pipeline. Coordinates documentation, milestones, and program details across Instrumental, Systems Integrator (SI), Customer, and CM stakeholders via a unified Project Details / Commercial / Training model.
 
@@ -180,6 +180,7 @@ New users sign in with Google and land in a pending queue until an admin approve
 
 | Version | Description |
 |---------|-------------|
+| v4.6.0 | **Search bar overhaul + closed-project sync filter** — response to manager's feedback that the search bar wasn't "pulling all the projects" and a question about whether station kits were being re-synced for completed projects. **(1) Multi-field search** ([src/App.jsx:991-1020](src/App.jsx#L991-L1020) sidebar, [src/App.jsx:5382-5395](src/App.jsx#L5382-L5395) SI tracker): both search bars now match `name`, `hubspotId`, `customer`, `codename`, and `hubspotStageLabel` (SI tracker also matches `si_name` + effective stage). Previously matched `name` only via `.includes()`, so searches like the HubSpot ID `316447023841` or a customer name like "Acme" returned nothing if it wasn't in the project name. **(2) "Include completed" toggle persistence + non-admin exposure**: moved from `sessionStorage.v454_show_inactive` → `localStorage.dp_show_inactive` so the choice survives sign-outs and new sessions; admin-only gate removed — non-admins now see the toggle if any of their assigned projects are inactive (e.g., they completed a deployment and want to look it up). **(3) Hidden-by-filter hint**: when a sidebar search returns 0 results AND there are matching completed projects hidden by the toggle being off, a yellow "📦 N completed projects match — click to include completed" button appears in the dropdown; one click flips the toggle on. **(4) Station kits no longer re-sync for closed projects** ([functions/index.js:1112-1116](functions/index.js#L1112-L1116)): added `incoming.filter(p => p.status === "active")` before computing `projectHsIds` for `fetchKitsForProjects`. Closed projects' existing `_hardwareTracking` and `pd_station_kits` rows stay in RTDB (readable, editable, writes-back-to-HubSpot still work) but are no longer re-fetched on each sync, saving HubSpot API quota + RTDB writes. Sync logs the filter count: `[stationKits] filtering to active projects: N of M (skipping K closed)`. Other sync blocks (DRIs, CAD docs, Notes, Shipments) intentionally unchanged — those are cheaper and benefit from staying current even after closure. |
 | v2.0.0 | Baseline — multi-party portal with milestones, documents, training, admin panel |
 | v2.1.0 | Firebase Hosting URL, multi-language UI, Instrumental/Customer dashboards, milestone % progress, inline editing |
 | v2.1.1 | Chronological milestone sort, drag-to-reorder for Program Details and Checklist Milestones |
