@@ -11887,7 +11887,8 @@ export default function App() {
           <Sidebar view={view} setView={setView} user={user} project={project} projects={userProjects} setProject={setProject} onLogout={onLogout} lang={lang} setLang={setLang} hasCommercialAccess={hasCommAccess} cats={projectCats} setDetailTab={(tabId) => { if (project?.id) localStorage.setItem(`dp_proj_tab_${project.id}`, tabId); setDetailTabKey(k => k + 1); setView("project_details"); }} />
         )}
         <main style={{ ...S.main, padding: 0 }}>
-          {!siFullscreen && <GlobalBotBar user={user} />}
+          {/* v4.7.1: GlobalBotBar now available in SI section too — fuzzy-match works across both projects and siProjects. */}
+          <GlobalBotBar user={user} />
           <div style={{ padding: siFullscreen ? 0 : "32px 40px" }}>{renderMain()}</div>
         </main>
         {!siFullscreen && <ProjectBotChat project={project} user={user} />}

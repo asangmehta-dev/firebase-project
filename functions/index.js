@@ -1767,12 +1767,17 @@ async function fetchSlackContext(project) {
   if (!botToken) { console.log("[slack] SLACK_BOT_TOKEN not set — skipping Slack context"); return null; }
 
   // Slack channels are named after the CODENAME (customer-facing mask), not the decoded customer.
-  // Try codename first, fall back to decoded customer just in case.
+  // Try codename first, fall back to decoded customer. v4.7.1: also try si_name for SI projects
+  // (which often lack codename/customer but do have a partner name that may match a channel).
   const slugify = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  const candidates = [slugify(project?.codename), slugify(project?.customer)].filter(Boolean);
+  const candidates = [
+    slugify(project?.codename),
+    slugify(project?.customer),
+    slugify(project?.si_name),
+  ].filter(Boolean);
   const uniqCandidates = [...new Set(candidates)];
-  console.log(`[slack] project ${project?.id || "?"}: codename="${project?.codename || ""}" customer="${project?.customer || ""}" → slugs [${uniqCandidates.join(", ")}]`);
-  if (uniqCandidates.length === 0) { console.log("[slack] no codename or customer — skipping"); return null; }
+  console.log(`[slack] project ${project?.id || "?"}: codename="${project?.codename || ""}" customer="${project?.customer || ""}" si_name="${project?.si_name || ""}" → slugs [${uniqCandidates.join(", ")}]`);
+  if (uniqCandidates.length === 0) { console.log("[slack] no codename / customer / si_name — skipping"); return null; }
 
   try {
     // Find candidate channels the bot is already in.
@@ -2969,37 +2974,66 @@ exports.askGlobalBot = functions.runWith({ memory: "512MB" }).https.onCall(async
   if (!apiKey) throw new functions.https.HttpsError("internal", "Anthropic API key not configured. Add ANTHROPIC_API_KEY to functions/.env");
 
   // Pull cross-project context. Cap to avoid huge prompts.
-  const [projSnap, docSnap, overviewSnap] = await Promise.all([
+  // v4.7.1: also pull SI projects so the global bot can answer SI-related questions.
+  const [projSnap, docSnap, overviewSnap, siSnap] = await Promise.all([
     db.ref("appState/projects").once("value"),
     db.ref("appState/docData").once("value"),
     db.ref("appState/projectOverview").once("value"),
+    db.ref("appState/siProjects").once("value"),
   ]);
   const projects = projSnap.val() || {};
   const docData = docSnap.val() || {};
   const overviews = overviewSnap.val() || {};
+  const siProjects = siSnap.val() || {};
 
   const allProjs = Object.values(projects).filter(p => p);
 
+  // v4.7.1: normalize SI projects into a project-shaped record so the same fuzzy-match works.
+  // SI projects live in appState/siProjects with a different schema — flatten key identifying fields.
+  const siProjsNormalized = Object.entries(siProjects).map(([pid, sp]) => ({
+    id: pid,
+    hubspotId: sp?.hubspot_id || null,
+    name: sp?.name || pid,
+    customer: sp?.customer || "",
+    codename: sp?.codename || null,
+    si_name: sp?.si_name || null,
+    hubspotStageLabel: sp?.current_stage || null,
+    hubspotPipelineLabel: "SI Partner Deployment",
+    status: sp?.status || "active",
+    stations: sp?.stations ? Object.keys(sp.stations).length : 0,
+    isSI: true,
+    _isSIRecord: true, // flag so downstream knows this came from siProjects
+  })).filter(p => p.name);
+  const combinedProjs = [...allProjs, ...siProjsNormalized];
+
   // v4.7.0: fuzzy-match the question against project names/codenames/customers to detect
   // if the user is asking about a specific project. If so, we'll pull Slack context for it.
+  // v4.7.1: also match against si_name so users can ask about SI partners by name.
   const qLower = String(question).toLowerCase();
   const qTokens = qLower.split(/[^a-z0-9]+/).filter(t => t.length >= 3);
-  const scoredProjects = allProjs.map(p => {
-    const searchable = [p.name, p.codename, p.customer, p.hubspotId, p.id].filter(Boolean).join(" ").toLowerCase();
+  const scoredProjects = combinedProjs.map(p => {
+    const searchable = [p.name, p.codename, p.customer, p.si_name, p.hubspotId, p.id].filter(Boolean).join(" ").toLowerCase();
     let score = 0;
     for (const t of qTokens) { if (searchable.includes(t)) score++; }
     return { p, score };
   }).filter(x => x.score >= 2).sort((a, b) => b.score - a.score);
   const mentionedProjects = scoredProjects.slice(0, 2).map(x => x.p);
-  if (mentionedProjects.length) console.log(`[global-bot] question mentions: ${mentionedProjects.map(p => p.name).join(" | ")}`);
+  if (mentionedProjects.length) console.log(`[global-bot] question mentions: ${mentionedProjects.map(p => `${p.name}${p._isSIRecord ? " [SI]" : ""}`).join(" | ")}`);
 
   // Bump cap and prefer active projects, but keep any mentioned projects visible even if inactive.
   const mentionedIds = new Set(mentionedProjects.map(p => p.id));
   const activeList = allProjs.filter(p => p.status === "active" && !mentionedIds.has(p.id)).slice(0, 100);
-  const projArr = [...mentionedProjects, ...activeList];
+  // v4.7.1: include a top slice of SI projects too (skip ones already mentioned)
+  const activeSIList = siProjsNormalized.filter(p => p.status === "active" && !mentionedIds.has(p.id)).slice(0, 40);
+  const projArr = [...mentionedProjects, ...activeList, ...activeSIList];
   const lines = [];
-  lines.push(`There are ${Object.keys(projects).length} total projects. ${projArr.length} projects summarized below${mentionedProjects.length ? ` (including ${mentionedProjects.length} project(s) directly referenced in your question)` : ""}.`);
+  lines.push(`There are ${Object.keys(projects).length} deployment projects and ${Object.keys(siProjects).length} SI projects total. ${projArr.length} summarized below${mentionedProjects.length ? ` (including ${mentionedProjects.length} project(s) directly referenced in your question)` : ""}.`);
   projArr.forEach(p => {
+    if (p._isSIRecord) {
+      // SI-flavored one-liner
+      lines.push(`• [SI] ${p.name} (SI partner: ${p.si_name || "?"}${p.customer ? `, customer: ${p.customer}` : ""}) — stage: ${p.hubspotStageLabel || "?"}; stations:${p.stations || 0}`);
+      return;
+    }
     const ov = overviews[p.id] || {};
     const pdd = docData[p.id] || {};
     const pdCats = pdd.projectDetails || [];
