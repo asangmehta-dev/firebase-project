@@ -11810,7 +11810,7 @@ export default function App() {
   // Guard: skip if state.projects is still the seed placeholder (Firebase hasn't loaded yet).
   useEffect(() => {
     if (user && state.projects && state.projects !== SEED_PROJECTS) {
-      const up = (Array.isArray(state.projects) ? state.projects : []).filter(p => user.role === "admin" || (user.projects||[]).includes(p.id));
+      const up = (Array.isArray(state.projects) ? state.projects : []).filter(p => isInst(user) || (user.projects||[]).includes(p.id));
       if (up.length > 0 && !project) {
         const lastId = localStorage.getItem("dp_last_project");
         setProject((lastId && up.find(p => p.id === lastId)) || up[0]);
@@ -11833,7 +11833,10 @@ export default function App() {
   if (!user || !loaded) return <div style={S.loginWrap}><div><p style={{ color: "#94A3B8", fontFamily: F }}>Loading your data…</p><p style={{ color: "#94A3B8", fontSize: 13, marginTop: 8 }}>Signed in as {authUser.email}</p></div></div>;
 
   const projectsArr = Array.isArray(state.projects) ? state.projects : (state.projects ? Object.values(state.projects) : []);
-  const userProjects = projectsArr.filter(p => user.role === "admin" || (user.projects||[]).includes(p.id));
+  // v4.7.0: bug fix — Wen (and other instrumental users with role="user") couldn't see completed projects because
+  // this filter narrowed the list to only projects explicitly in their user.projects array, dropping inactive ones.
+  // Now uses isInst() so instrumental users see all projects (same as admins). External users still gated by user.projects.
+  const userProjects = projectsArr.filter(p => isInst(user) || (user.projects||[]).includes(p.id));
   const admin = isInst(user);
   const projectCats = project ? getProjectDetails(state.docData, project.id) : [];
   const hasProjectAccess = !project || user.role === "admin" || admin || (user.projects||[]).includes(project.id);

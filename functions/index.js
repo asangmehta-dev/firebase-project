@@ -1667,6 +1667,240 @@ exports.applyChecklistTemplate = functions.https.onCall(async (data, context) =>
 });
 
 /* ═══ AI PROJECT BOT — v3.3.0: Claude-powered Q&A per project ═══ */
+// v4.7.0: Slack customer-channel context for the AI Bot.
+// Resolves a project's codename → matching `#customer-{slug}*` channel(s), pulls last ~100 messages,
+// filters them to only those relevant to the specific project (customer channels span many projects
+// per customer — we need to isolate the target project's messages). Fails gracefully on any error.
+
+// Stop words to ignore when extracting project identifiers from names.
+const SLACK_STOP_WORDS = new Set([
+  "the","a","an","and","or","for","with","from","to","of","in","on","at","by","is","are","be",
+  "deploy","deployment","project","projects","hardware","station","stations","install","test",
+  "us","usa","ca","tw","cn","china","taiwan","new","old","product","company","system",
+  "si","mes","cad","dry","run","phase","step","setup","support","team","service","open","close",
+]);
+
+// Common location abbreviations to include as identifiers.
+const SLACK_LOCATION_ABBREVS = {
+  "san jose": ["sj"], "san francisco": ["sf"], "new york": ["ny", "nyc"],
+  "los angeles": ["la"], "hong kong": ["hk"], "taipei": ["tpe"],
+  "shanghai": ["sh"], "shenzhen": ["szx"], "guangzhou": ["can"],
+};
+
+// Extract candidate identifiers from a project's name — tokens plus location abbreviations.
+function extractProjectIdentifiers(project) {
+  if (!project?.name) return [];
+  const name = String(project.name).toLowerCase();
+  const tokens = new Set();
+  // Words 3+ chars, not stop-listed
+  name.split(/[^a-z0-9]+/).forEach(w => {
+    if (w.length >= 3 && !SLACK_STOP_WORDS.has(w)) tokens.add(w);
+  });
+  // Location abbreviations
+  for (const [loc, abbrs] of Object.entries(SLACK_LOCATION_ABBREVS)) {
+    if (name.includes(loc)) abbrs.forEach(a => tokens.add(a));
+  }
+  // Also include codename (in case name doesn't already have it)
+  if (project.codename) {
+    project.codename.toLowerCase().split(/[^a-z0-9]+/).forEach(w => {
+      if (w.length >= 3) tokens.add(w);
+    });
+  }
+  // Manual override — user can hand-curate keywords in RTDB
+  if (Array.isArray(project._slackKeywords)) {
+    project._slackKeywords.forEach(k => { if (k) tokens.add(String(k).toLowerCase()); });
+  }
+  return [...tokens];
+}
+
+// Given the target project and all projects with the same codename, compute:
+//   - refined positive IDs: target's tokens MINUS shared-with-siblings MINUS codename
+//   - anti IDs: siblings' tokens MINUS target's tokens MINUS codename
+// The codename identifies the channel, not the project — it's not a differentiator.
+// Shared tokens (present in both target and a sibling) also don't differentiate.
+async function computePositiveAndAntiIdentifiers(project, db) {
+  const codenameLower = String(project?.codename || "").toLowerCase();
+  const codenameTokens = new Set(codenameLower.split(/[^a-z0-9]+/).filter(w => w.length >= 3));
+  const rawPositive = new Set(extractProjectIdentifiers(project));
+
+  if (!project?.codename) {
+    return { positiveIds: [...rawPositive], antiIds: [], hasSiblings: false };
+  }
+  try {
+    const snap = await db.ref("appState/projects").once("value");
+    const all = snap.val() || {};
+    const siblings = Object.values(all).filter(p =>
+      p && p.id !== project.id &&
+      p.codename && p.codename.toLowerCase() === codenameLower
+    );
+    if (siblings.length === 0) {
+      // No siblings — remove codename from positive (channel-level marker, not project) and return
+      const cleaned = [...rawPositive].filter(t => !codenameTokens.has(t));
+      return { positiveIds: cleaned, antiIds: [], hasSiblings: false };
+    }
+    const siblingTokens = new Set();
+    siblings.forEach(sib => extractProjectIdentifiers(sib).forEach(t => siblingTokens.add(t)));
+
+    // Refined positive: my tokens MINUS shared-with-any-sibling MINUS codename
+    const positiveIds = [...rawPositive].filter(t => !siblingTokens.has(t) && !codenameTokens.has(t));
+    // Anti: sibling tokens MINUS my tokens MINUS codename
+    const antiIds = [...siblingTokens].filter(t => !rawPositive.has(t) && !codenameTokens.has(t));
+
+    return { positiveIds, antiIds, hasSiblings: true };
+  } catch (e) {
+    console.warn("[slack] sibling id lookup failed:", e.message);
+    return { positiveIds: [...rawPositive].filter(t => !codenameTokens.has(t)), antiIds: [], hasSiblings: false };
+  }
+}
+
+// Score a message: +1 per positive identifier match, -1 per anti-identifier match.
+function scoreMessageForProject(text, positiveIds, antiIds) {
+  const t = String(text || "").toLowerCase();
+  let score = 0;
+  for (const id of positiveIds) { if (t.includes(id)) score++; }
+  for (const id of antiIds) { if (t.includes(id)) score--; }
+  return score;
+}
+
+async function fetchSlackContext(project) {
+  const botToken = process.env.SLACK_BOT_TOKEN;
+  if (!botToken) { console.log("[slack] SLACK_BOT_TOKEN not set — skipping Slack context"); return null; }
+
+  // Slack channels are named after the CODENAME (customer-facing mask), not the decoded customer.
+  // Try codename first, fall back to decoded customer just in case.
+  const slugify = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const candidates = [slugify(project?.codename), slugify(project?.customer)].filter(Boolean);
+  const uniqCandidates = [...new Set(candidates)];
+  console.log(`[slack] project ${project?.id || "?"}: codename="${project?.codename || ""}" customer="${project?.customer || ""}" → slugs [${uniqCandidates.join(", ")}]`);
+  if (uniqCandidates.length === 0) { console.log("[slack] no codename or customer — skipping"); return null; }
+
+  try {
+    // Find candidate channels the bot is already in.
+    const memberRes = await fetchWithTimeout("https://slack.com/api/users.conversations?types=public_channel,private_channel&limit=1000&exclude_archived=true", {
+      headers: { Authorization: `Bearer ${botToken}` },
+    });
+    const memberData = await memberRes.json();
+    if (!memberData.ok) { console.warn("[slack] users.conversations failed:", memberData.error); return null; }
+    console.log(`[slack] bot is member of ${(memberData.channels||[]).length} channels`);
+
+    let matches = [];
+    let matchedSlug = null;
+    for (const slug of uniqCandidates) {
+      matches = (memberData.channels || []).filter(c => c.name.startsWith(`customer-${slug}`) && !c.is_archived);
+      console.log(`[slack] trying slug "${slug}" → ${matches.length} match(es) in member list`);
+      if (matches.length > 0) { matchedSlug = slug; break; }
+    }
+
+    // If bot isn't in any matching channel, try auto-join via conversations.list of public channels.
+    // Requires channels:join scope. Falls back gracefully if scope missing or channel is private.
+    if (matches.length === 0) {
+      console.log(`[slack] no member matches — attempting auto-join lookup for public channels`);
+      const listRes = await fetchWithTimeout("https://slack.com/api/conversations.list?types=public_channel&limit=1000&exclude_archived=true", {
+        headers: { Authorization: `Bearer ${botToken}` },
+      });
+      const listData = await listRes.json();
+      if (!listData.ok) { console.warn("[slack] conversations.list for auto-join failed:", listData.error); return null; }
+      console.log(`[slack] conversations.list returned ${(listData.channels||[]).length} public channels for auto-join search`);
+
+      let joinCandidates = [];
+      for (const slug of uniqCandidates) {
+        joinCandidates = (listData.channels || []).filter(c => c.name.startsWith(`customer-${slug}`) && !c.is_archived);
+        if (joinCandidates.length > 0) { matchedSlug = slug; break; }
+      }
+      if (joinCandidates.length === 0) { console.log(`[slack] no public channels match any slug — skipping`); return null; }
+
+      // Prefer exact match over suffixed for auto-join too
+      const exactJoin = joinCandidates.find(c => c.name === `customer-${matchedSlug}`);
+      const toJoin = exactJoin || joinCandidates[0];
+      console.log(`[slack] auto-joining #${toJoin.name} (${toJoin.id})`);
+      const joinRes = await fetchWithTimeout("https://slack.com/api/conversations.join", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${botToken}`, "Content-Type": "application/x-www-form-urlencoded" },
+        body: `channel=${toJoin.id}`,
+      });
+      const joinData = await joinRes.json();
+      if (!joinData.ok) { console.warn(`[slack] auto-join #${toJoin.name} failed:`, joinData.error); return null; }
+      console.log(`[slack] auto-join succeeded — bot is now in #${toJoin.name}`);
+      matches = [toJoin];
+    }
+
+    // Ranking: explicit override > exact `customer-{slug}` match > first suffixed match.
+    // Exact match preferred because it's usually the "generic" account channel (broader activity).
+    // For per-project channel targeting, users can set `_slackChannelId` on the project record.
+    const exactMatch = matches.find(c => c.name === `customer-${matchedSlug}`);
+    const channel = project._slackChannelId
+      ? matches.find(c => c.id === project._slackChannelId) || exactMatch || matches[0]
+      : exactMatch || matches[0];
+    console.log(`[slack] project ${project.id || "?"}: matched channel #${channel.name} (from ${matches.length} candidates for slug "${matchedSlug}")`);
+
+    // Fetch history — 100 messages so we have a good pool to filter down
+    const histRes = await fetchWithTimeout(`https://slack.com/api/conversations.history?channel=${channel.id}&limit=100`, {
+      headers: { Authorization: `Bearer ${botToken}` },
+    });
+    const histData = await histRes.json();
+    if (!histData.ok) { console.warn("[slack] conversations.history:", histData.error); return null; }
+
+    const rawMessages = (histData.messages || []).filter(m => m.type === "message" && !m.subtype && m.text);
+    if (rawMessages.length === 0) return { channelName: channel.name, formatted: "(no recent messages)", positiveIds: [], antiIds: [] };
+
+    // Look up sibling projects (same codename, different project) with rich metadata
+    // so Claude can reason about which project a Slack message is about.
+    let siblings = [];
+    if (project.codename) {
+      try {
+        const snap = await db.ref("appState/projects").once("value");
+        const all = snap.val() || {};
+        siblings = Object.values(all).filter(p =>
+          p && p.id !== project.id &&
+          p.codename && p.codename.toLowerCase() === project.codename.toLowerCase()
+        ).map(p => ({
+          name: p.name,
+          id: p.id,
+          status: p.status,
+          stage: p.hubspotStageLabel || null,
+          stations: p.stations || null,
+          isSI: !!p.isSI,
+        }));
+      } catch (e) { console.warn("[slack] sibling lookup failed:", e.message); }
+    }
+    console.log(`[slack] target: "${project.name}" | ${siblings.length} sibling(s)`);
+
+    // Include the most recent 40 messages — let Claude filter based on rich context.
+    // Keyword-based filtering is unreliable when siblings share tokens (VR-SJ shares "vera",
+    // "rubin", "san", "jose" with VR-Taoyuan and GB300 — no unique keyword identifies it).
+    const filtered = rawMessages.slice(0, 40);
+    console.log(`[slack] passing ${filtered.length} recent messages to Claude for context-aware filtering`);
+
+    // Resolve authors — collect unique user IDs, batch-fetch names
+    const uniqUids = [...new Set(filtered.map(m => m.user).filter(Boolean))];
+    const userMap = {};
+    await Promise.all(uniqUids.map(async uid => {
+      try {
+        const uRes = await fetchWithTimeout(`https://slack.com/api/users.info?user=${uid}`, {
+          headers: { Authorization: `Bearer ${botToken}` },
+        });
+        const uData = await uRes.json();
+        if (uData.ok && uData.user) {
+          userMap[uid] = uData.user.real_name || uData.user.name || uid;
+        }
+      } catch (_) { /* ignore per-user failures */ }
+    }));
+
+    const formatted = filtered.map(m => {
+      const date = new Date(parseFloat(m.ts) * 1000).toISOString().slice(0, 16).replace("T", " ");
+      const author = userMap[m.user] || m.user || "unknown";
+      // Replace <@UXXX> mentions in body with names too
+      const body = String(m.text || "").replace(/<@([A-Z0-9]+)>/g, (_, uid) => `@${userMap[uid] || uid}`);
+      return `[${date}] ${author}: ${body}`;
+    }).join("\n");
+
+    return { channelName: channel.name, formatted, siblings };
+  } catch (err) {
+    console.warn("[slack] context fetch failed:", err.message);
+    return null;
+  }
+}
+
 exports.askProjectBot = functions.runWith({ memory: "512MB" }).https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
 
@@ -1729,10 +1963,41 @@ exports.askProjectBot = functions.runWith({ memory: "512MB" }).https.onCall(asyn
     progData.tasks.forEach(t => contextParts.push(`  ${t.type === "milestone" ? "🏁" : "📋"} ${t.name} — ${t.date || "No date"}${t.endDate ? " to " + t.endDate : ""}`));
   }
 
+  // v4.7.0: enrich with recent Slack customer-channel activity (fails gracefully if no channel / no token / API error)
+  const slackContext = await fetchSlackContext(project);
+  if (slackContext) {
+    contextParts.push(`\n=== RECENT SLACK ACTIVITY (#${slackContext.channelName}) ===`);
+    contextParts.push(`TARGET PROJECT: ${project.name}`);
+    contextParts.push(`  → status: ${project.status || "unknown"}, stage: ${project.hubspotStageLabel || "unknown"}, stations: ${project.stations || 0}`);
+    if (slackContext.siblings && slackContext.siblings.length) {
+      contextParts.push(`\nSIBLING PROJECTS (same customer, DIFFERENT projects; messages about these should NOT be attributed to the target):`);
+      slackContext.siblings.forEach(s => {
+        const bits = [s.name];
+        const meta = [
+          s.status === "inactive" ? "COMPLETED/INACTIVE" : (s.status || "unknown"),
+          s.stage ? `stage: ${s.stage}` : null,
+          s.stations ? `${s.stations} stations` : null,
+          s.isSI ? "SI" : null,
+        ].filter(Boolean);
+        bits.push(`  → ${meta.join(", ")}`);
+        contextParts.push(`  - ${bits[0]}\n     ${bits[1]}`);
+      });
+    }
+    contextParts.push(`\nLOCATION SHORTHAND commonly used in messages: SJ = San Jose, TW = Taiwan/Taoyuan, HK = Hong Kong, SF = San Francisco.`);
+    contextParts.push(`\nREASONING HINTS to match messages to projects:`);
+    contextParts.push(`  1. Recent activity is MOST LIKELY about ACTIVE projects (not COMPLETED/INACTIVE siblings — those rarely get new updates).`);
+    contextParts.push(`  2. Explicit product/program mentions ("GB300", "Vera Rubin", "VR") are strong signals.`);
+    contextParts.push(`  3. Location abbreviations (SJ, TW) match projects at that location.`);
+    contextParts.push(`  4. Station counts disambiguate (e.g., "4 stations" matches the 4-station project, not the 2-station one).`);
+    contextParts.push(`  5. Prefer surfacing information — err toward attributing a message if reasonably confident (>60%); flag uncertainty when needed but don't withhold everything.`);
+    contextParts.push(`\nRECENT MESSAGES from #${slackContext.channelName} (40 most recent, newest first):`);
+    contextParts.push(slackContext.formatted);
+  }
+
   const projectContext = contextParts.join("\n");
 
   // Build the prompt
-  let systemPrompt = `You are an AI assistant for Instrumental's Deployment Portal. You help the Customer Experience team manage deployment projects. You have access to the following project data:\n\n${projectContext}\n\nAnswer questions accurately based on this data. If information is not available in the data, say so clearly. Be concise and actionable.`;
+  let systemPrompt = `You are an AI assistant for Instrumental's Deployment Portal. You help the Customer Experience team manage deployment projects. You have access to the following project data:\n\n${projectContext}\n\n=== CORE RULES ===\n1. **Always ground your response with a date.** Never say "no updates" without a temporal reference. Always cite the last known activity, the last edit, or a stage/checklist milestone date — even if it's weeks or months old. If the project data is stale, mention when it was last updated.\n2. Be concise and actionable.${slackContext ? `\n\n=== HOW TO USE SLACK CONTEXT ===\nThe Slack channel #${slackContext.channelName} covers MULTIPLE projects for this customer, including "${project.name}" (TARGET) and sibling projects listed above. Each message may reference the target OR a sibling project.\n\nRULES for using the messages:\n1. For each message, identify which project it's about using: program/product name (e.g., "GB300" vs "Vera Rubin"), station name (e.g., "Midpoint", "Midplane"), location (e.g., "San Jose" vs "Taoyuan"), station count, or explicit mentions.\n2. If a message clearly references a SIBLING project, DO NOT attribute it to the target. Attribute correctly.\n3. **If channel activity is AMBIGUOUS** (could be about target OR siblings, no clear project marker): DO NOT dismiss it. INSTEAD, ask the user a clarifying question at the end of your response — e.g. "I see recent activity in #${slackContext.channelName} that could apply to multiple projects (${slackContext.siblings ? slackContext.siblings.slice(0,3).map(s=>s.name).join("; ") : "target + siblings"}). Are you asking about this specific project (${project.name}) or one of the siblings?" Then give your best answer with the caveat.\n4. **If NO Slack messages appear specific to the target**: still give a substantive answer grounded in deployment-portal data (checklists, dates, stage). Add: "Latest activity specific to ${project.name} in Slack: [most recent message with a date, even if older] — before that, most #${slackContext.channelName} discussion has been about [name the sibling that's active]." NEVER just say "no updates."\n5. When you cite a message, attribute to the author + date (e.g., "Michelle Chang on 2026-08-07 noted...").\n6. Never fabricate quotes or attributions.` : ""}`;
 
   let userMessage = question || "";
 
@@ -2713,9 +2978,27 @@ exports.askGlobalBot = functions.runWith({ memory: "512MB" }).https.onCall(async
   const docData = docSnap.val() || {};
   const overviews = overviewSnap.val() || {};
 
-  const projArr = Object.values(projects).filter(p => p && p.status === "active").slice(0, 80);
+  const allProjs = Object.values(projects).filter(p => p);
+
+  // v4.7.0: fuzzy-match the question against project names/codenames/customers to detect
+  // if the user is asking about a specific project. If so, we'll pull Slack context for it.
+  const qLower = String(question).toLowerCase();
+  const qTokens = qLower.split(/[^a-z0-9]+/).filter(t => t.length >= 3);
+  const scoredProjects = allProjs.map(p => {
+    const searchable = [p.name, p.codename, p.customer, p.hubspotId, p.id].filter(Boolean).join(" ").toLowerCase();
+    let score = 0;
+    for (const t of qTokens) { if (searchable.includes(t)) score++; }
+    return { p, score };
+  }).filter(x => x.score >= 2).sort((a, b) => b.score - a.score);
+  const mentionedProjects = scoredProjects.slice(0, 2).map(x => x.p);
+  if (mentionedProjects.length) console.log(`[global-bot] question mentions: ${mentionedProjects.map(p => p.name).join(" | ")}`);
+
+  // Bump cap and prefer active projects, but keep any mentioned projects visible even if inactive.
+  const mentionedIds = new Set(mentionedProjects.map(p => p.id));
+  const activeList = allProjs.filter(p => p.status === "active" && !mentionedIds.has(p.id)).slice(0, 100);
+  const projArr = [...mentionedProjects, ...activeList];
   const lines = [];
-  lines.push(`There are ${Object.keys(projects).length} total projects. ${projArr.length} active projects summarized below.`);
+  lines.push(`There are ${Object.keys(projects).length} total projects. ${projArr.length} projects summarized below${mentionedProjects.length ? ` (including ${mentionedProjects.length} project(s) directly referenced in your question)` : ""}.`);
   projArr.forEach(p => {
     const ov = overviews[p.id] || {};
     const pdd = docData[p.id] || {};
@@ -2733,10 +3016,20 @@ exports.askGlobalBot = functions.runWith({ memory: "512MB" }).https.onCall(async
     lines.push(`• ${p.name} (${p.customer || "?"}) — ${p.hubspotPipelineLabel || "?"} → ${p.hubspotStageLabel || "?"}; ${p.isSI ? "SI; " : ""}stations:${p.stations || 0}; cameras:${cameras}; computers:${computers}; checklist:${doneItems}/${totalItems}; CSProgID:${p.csProgramId || "—"}; status:"${(ov.projectStatus || "").substring(0, 120)}"`);
   });
 
+  // v4.7.0: if the user's question mentions specific projects, pull Slack context for them
+  const slackSections = [];
+  for (const p of mentionedProjects) {
+    const sctx = await fetchSlackContext(p);
+    if (sctx) {
+      const sibNames = (sctx.siblings || []).map(s => `${s.name}${s.status === "inactive" ? " [completed]" : ""}`).join("; ");
+      slackSections.push(`--- Slack context for "${p.name}" (from #${sctx.channelName}) ---\nTarget project status: ${p.status || "?"}, stage: ${p.hubspotStageLabel || "?"}\n${sibNames ? `Sibling projects (attribute messages carefully): ${sibNames}\n` : ""}Recent messages (may span multiple projects; use product name, station name, location, station count to disambiguate):\n${sctx.formatted}`);
+    }
+  }
+
   const systemPrompt = `You are an AI assistant for Instrumental's Deployment Portal, helping the Customer Experience team manage hardware deployment projects across all customers. You can answer questions that span multiple projects — e.g. "which projects are blocked", "what's our total camera demand", "list projects in CAD review". Use only the data below. If a question can't be answered from this data, say so plainly.
 
 PROJECT DATA:
-${lines.join("\n")}
+${lines.join("\n")}${slackSections.length ? `\n\n=== SLACK CONTEXT FOR REFERENCED PROJECTS ===\n${slackSections.join("\n\n")}\n\nWhen citing Slack activity: attribute to author + date. Never fabricate. If a message clearly references a sibling project, don't attribute to the target. If channel activity is ambiguous, ask a clarifying question. Always cite a date — never say "no updates" without a temporal reference.` : ""}
 
 Keep answers concise and actionable. Use bullet points or short tables when listing multiple projects. Reference projects by name, not ID.`;
 

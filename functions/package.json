@@ -2,7 +2,7 @@
   "name": "deployment-portal-functions",
   "description": "Firebase Cloud Functions for HubSpot sync",
   "scripts": { "serve": "firebase emulators:start --only functions", "deploy": "firebase deploy --only functions" },
-  "engines": { "node": "20" },
+  "engines": { "node": "22" },
   "main": "index.js",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
