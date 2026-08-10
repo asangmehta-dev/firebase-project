@@ -3778,13 +3778,20 @@ function GlobalBotBar({ user }) {
   );
 }
 
-function ProjectBotChat({ project, user }) {
+function ProjectBotChat({ project, user, isSIProject = false }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
 
   if (!project || !isInst(user)) return null;
+
+  // v4.7.2: builds the correct CF payload — regular projects use projectId; SI projects use siProjectId
+  // so the CF reads from appState/siProjects (different schema than appState/projects).
+  const buildCallData = (extra) => ({
+    ...(isSIProject ? { siProjectId: project.id } : { projectId: project.id }),
+    ...extra,
+  });
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return;
@@ -3794,7 +3801,7 @@ function ProjectBotChat({ project, user }) {
     setLoading(true);
     try {
       const fn = httpsCallable(functions, "askProjectBot");
-      const res = await fn({ projectId: project.id, question: q });
+      const res = await fn(buildCallData({ question: q }));
       setMessages(prev => [...prev, { role: "assistant", text: res.data?.answer || "No response." }]);
     } catch (e) {
       setMessages(prev => [...prev, { role: "assistant", text: "Error: " + (e.message || String(e)) }]);
@@ -3807,7 +3814,7 @@ function ProjectBotChat({ project, user }) {
     setLoading(true);
     try {
       const fn = httpsCallable(functions, "askProjectBot");
-      const res = await fn({ projectId: project.id, action: "fill_section", sectionId });
+      const res = await fn(buildCallData({ action: "fill_section", sectionId }));
       setMessages(prev => [...prev, { role: "assistant", text: res.data?.answer || "No suggestions." }]);
     } catch (e) {
       setMessages(prev => [...prev, { role: "assistant", text: "Error: " + (e.message || String(e)) }]);
@@ -3838,18 +3845,29 @@ function ProjectBotChat({ project, user }) {
       <div style={{ flex: 1, overflowY: "auto", padding: 14, maxHeight: "50vh" }}>
         {messages.length === 0 && (
           <div style={{ textAlign: "center", padding: 20 }}>
-            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 12 }}>Ask me anything about this project. I can see checklists, milestones, hardware, and documents.</div>
+            <div style={{ fontSize: 14, color: "#64748B", marginBottom: 12 }}>
+              {isSIProject
+                ? "Ask me anything about this SI project. I can see stations, stage dates, files (SIRD/FAT/SAT), inspection status, and recent Slack activity."
+                : "Ask me anything about this project. I can see checklists, milestones, hardware, and documents."}
+            </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {["What's the checklist progress?", "What are the upcoming milestones?", "Summarize the project status"].map(q => (
+              {(isSIProject
+                ? ["What's the current stage?", "Summarize station deployment status", "What files do we have and any gaps?"]
+                : ["What's the checklist progress?", "What are the upcoming milestones?", "Summarize the project status"]
+              ).map(q => (
                 <button key={q} onClick={() => { setInput(q); }} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #E2E8F0", background: "#F8FAFC", color: "#475569", fontSize: 12, cursor: "pointer", textAlign: "left", fontFamily: F }}>{q}</button>
               ))}
             </div>
-            <div style={{ marginTop: 12, fontSize: 12, color: "#94A3B8" }}>Or ask the AI to fill a section:</div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6, justifyContent: "center" }}>
-              {["Hardware", "Program Details", "Deployment Planning"].map(s => (
-                <button key={s} onClick={() => fillSection(s)} style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #00C9A7", background: "#ECFDF5", color: "#059669", fontSize: 11, cursor: "pointer", fontFamily: F }}>Fill: {s}</button>
-              ))}
-            </div>
+            {!isSIProject && (
+              <>
+                <div style={{ marginTop: 12, fontSize: 12, color: "#94A3B8" }}>Or ask the AI to fill a section:</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6, justifyContent: "center" }}>
+                  {["Hardware", "Program Details", "Deployment Planning"].map(s => (
+                    <button key={s} onClick={() => fillSection(s)} style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #00C9A7", background: "#ECFDF5", color: "#059669", fontSize: 11, cursor: "pointer", fontFamily: F }}>Fill: {s}</button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
         {messages.map((m, i) => (
@@ -5662,6 +5680,7 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
               siProjects={siProjects}
               isSIAdminUser={isSIAdminUser}
               actor={actor}
+              user={user}
               onBack={() => setSelectedPid(null)}
               onDelete={() => deleteProject(selectedPid, drillProject.name)}
               saveField={saveField}
@@ -6005,7 +6024,7 @@ class SIDrillBoundary extends React.Component {
   }
 }
 
-function SIProjectDetail({ pid, project, siProjects, isSIAdminUser, actor, onBack, onDelete, saveField, writeAt, updateAt, removeAt }) {
+function SIProjectDetail({ pid, project, siProjects, isSIAdminUser, actor, user, onBack, onDelete, saveField, writeAt, updateAt, removeAt }) {
   const siS = useSIS();
   const stations = project.stations || {};
   const files = project.files || {};
@@ -6095,6 +6114,9 @@ function SIProjectDetail({ pid, project, siProjects, isSIAdminUser, actor, onBac
           pid={pid} inspection={project.inspection || {}} isSIAdminUser={isSIAdminUser} actor={actor}
           writeAt={writeAt} updateAt={updateAt} removeAt={removeAt} />
       </div>
+      {/* v4.7.2: AI Bot for the SI drill-in — reuses ProjectBotChat UI with isSIProject flag.
+          The CF (askProjectBot) branches on siProjectId to read appState/siProjects schema. */}
+      <ProjectBotChat project={{ id: pid, name: project.name }} user={user} isSIProject={true} />
     </div>
   );
 }

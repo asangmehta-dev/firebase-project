@@ -1917,28 +1917,106 @@ exports.askProjectBot = functions.runWith({ memory: "512MB" }).https.onCall(asyn
     throw new functions.https.HttpsError("permission-denied", "Instrumental users only.");
   }
 
-  const { projectId, question, action, sectionId } = data || {};
-  if (!projectId) throw new functions.https.HttpsError("invalid-argument", "projectId required.");
+  const { projectId, siProjectId, question, action, sectionId } = data || {};
+  if (!projectId && !siProjectId) throw new functions.https.HttpsError("invalid-argument", "projectId or siProjectId required.");
   if (!question && !action) throw new functions.https.HttpsError("invalid-argument", "question or action required.");
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new functions.https.HttpsError("internal", "Anthropic API key not configured. Add ANTHROPIC_API_KEY to functions/.env");
 
-  // Build project context from DB
+  // v4.7.2: branch on whether this is an SI project (different schema) or a regular deployment project.
+  // SI projects live in appState/siProjects/{pid} with fields: stations(map), files, inspection,
+  // stage_dates, si_name, si_pm, cm_site, factory_location, current_stage — no checklists/hardware.
+  const isSI = !!siProjectId;
+  const activeId = siProjectId || projectId;
+  const projectPath = isSI ? `appState/siProjects/${activeId}` : `appState/projects/${activeId}`;
+
   const [projSnap, docSnap] = await Promise.all([
-    db.ref(`appState/projects/${projectId}`).once("value"),
-    db.ref(`appState/docData/${projectId}`).once("value"),
+    db.ref(projectPath).once("value"),
+    isSI ? Promise.resolve({ val: () => ({}) }) : db.ref(`appState/docData/${activeId}`).once("value"),
   ]);
-  const project = projSnap.val() || {};
+  const rawProject = projSnap.val() || {};
   const docData = docSnap.val() || {};
+
+  // Normalize the SI project record into a shape compatible with fetchSlackContext + downstream logic.
+  const project = isSI ? {
+    id: activeId,
+    hubspotId: rawProject.hubspot_id || null,
+    name: rawProject.name || activeId,
+    customer: rawProject.customer || "",
+    codename: rawProject.codename || null,
+    si_name: rawProject.si_name || null,
+    hubspotStageLabel: rawProject.current_stage || null,
+    hubspotPipelineLabel: "SI Partner Deployment",
+    status: rawProject.status || "active",
+    stations: rawProject.stations ? Object.keys(rawProject.stations).length : 0,
+    isSI: true,
+  } : rawProject;
 
   // Flatten project context into a readable summary for the AI
   const contextParts = [];
-  contextParts.push(`Project: ${project.name || projectId}`);
-  contextParts.push(`Customer: ${project.customer || "Unknown"}`);
-  contextParts.push(`Status: ${project.status || "unknown"}, Stations: ${project.stations || 0}, SI Involved: ${project.isSI ? "Yes" : "No"}`);
-  if (project.hubspotPipelineLabel) contextParts.push(`Pipeline: ${project.hubspotPipelineLabel}, Stage: ${project.hubspotStageLabel || "Unknown"}`);
-  if (project.hardware) contextParts.push(`Hardware: ${JSON.stringify(project.hardware)}`);
+  contextParts.push(`Project: ${project.name || activeId}`);
+
+  if (isSI) {
+    // SI-specific context: stations map, files, inspection, stage_dates, partner info.
+    const stationsMap = rawProject.stations || {};
+    const stationsList = Object.entries(stationsMap).map(([sid, s]) => ({ sid, ...(s || {}) }))
+      .sort((a, b) => (a.station_number || 0) - (b.station_number || 0));
+    contextParts.push(`SI Partner: ${rawProject.si_name || "Unknown"}`);
+    if (rawProject.si_pm) contextParts.push(`SI PM: ${rawProject.si_pm}`);
+    if (rawProject.customer) contextParts.push(`Customer: ${rawProject.customer}`);
+    if (rawProject.cm_site) contextParts.push(`CM Site: ${rawProject.cm_site}`);
+    if (rawProject.factory_location) contextParts.push(`Factory Location: ${rawProject.factory_location}`);
+    contextParts.push(`Current Stage: ${rawProject.current_stage || "Unknown"}, Status: ${rawProject.status || "active"}, Stations: ${stationsList.length}`);
+    if (rawProject.drive_url) contextParts.push(`Drive folder: ${rawProject.drive_url}`);
+
+    if (rawProject.stage_dates) {
+      contextParts.push(`\nStage Dates (planned starts):`);
+      Object.entries(rawProject.stage_dates).forEach(([stage, dates]) => {
+        if (dates?.planned_start) contextParts.push(`  ${stage}: ${dates.planned_start}${dates.actual_start ? ` (actual: ${dates.actual_start})` : ""}`);
+      });
+    }
+
+    if (stationsList.length > 0) {
+      contextParts.push(`\nStations (${stationsList.length}):`);
+      stationsList.forEach(s => {
+        const bits = [];
+        if (s.station_number) bits.push(`#${s.station_number}`);
+        if (s.name) bits.push(s.name);
+        if (s.deployment_factory) bits.push(`@${s.deployment_factory}`);
+        if (s.count) bits.push(`${s.count}x`);
+        if (s.fat_result) bits.push(`FAT: ${s.fat_result}`);
+        if (s.sat_result) bits.push(`SAT: ${s.sat_result}`);
+        contextParts.push(`  - ${bits.join(", ")}`);
+      });
+    }
+
+    const files = rawProject.files || {};
+    const fileGroups = Object.entries(files);
+    if (fileGroups.length > 0) {
+      contextParts.push(`\nFiles / Documents:`);
+      fileGroups.forEach(([groupName, groupItems]) => {
+        const items = groupItems && typeof groupItems === "object" ? Object.values(groupItems).filter(Boolean) : [];
+        if (items.length > 0) {
+          contextParts.push(`  ${groupName}: ${items.length} item(s)`);
+        }
+      });
+    }
+
+    if (rawProject.inspection) {
+      const insp = rawProject.inspection;
+      const inspBits = [];
+      if (insp.reviewed) inspBits.push(`reviewed: ${insp.reviewed}`);
+      if (insp.next_step) inspBits.push(`next step: ${insp.next_step}`);
+      if (inspBits.length > 0) contextParts.push(`\nInspection: ${inspBits.join(", ")}`);
+    }
+  } else {
+    // Original deployment-project context
+    contextParts.push(`Customer: ${project.customer || "Unknown"}`);
+    contextParts.push(`Status: ${project.status || "unknown"}, Stations: ${project.stations || 0}, SI Involved: ${project.isSI ? "Yes" : "No"}`);
+    if (project.hubspotPipelineLabel) contextParts.push(`Pipeline: ${project.hubspotPipelineLabel}, Stage: ${project.hubspotStageLabel || "Unknown"}`);
+    if (project.hardware) contextParts.push(`Hardware: ${JSON.stringify(project.hardware)}`);
+  }
 
   // Include checklist data
   const pdCats = docData.projectDetails || docData.instrumental || [];
