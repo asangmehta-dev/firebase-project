@@ -100,6 +100,12 @@ const PROPERTIES = [
   "actual_start_date", "actual_finish_date",
   // Explicit planned dates for FAT + SAT — writable custom properties, synced bidirectionally.
   "fat_start_date", "fat_end_date", "sat_start_date", "sat_end_date",
+  // Team enrichment: TPM, FDE, FAT owner, SAT owner, and SI PM contact.
+  "tpm_technical_program_manager",
+  "fde_forward_deployed_engineer",
+  "fat_owner",
+  "sat_owner",
+  "si_project_manager",
   ...SI_STAGE_DATE_PROPS,
 ].join(",");
 
@@ -315,7 +321,11 @@ function mapHubspotToProject(obj) {
     csProgramId: p.associated_cs_program_id_last || null,
     deployLocation: p.deploy_location_from_opportunity__c || null,
     deployRegion: p.deploy_region__c || null,
-    tpm: p.deployzen_datazen_tpm || null,
+    tpmOwnerId: p.tpm_technical_program_manager || p.deployzen_datazen_tpm || null,
+    fdeOwnerId: p.fde_forward_deployed_engineer || null,
+    fatOwnerOwnerId: p.fat_owner || null,
+    satOwnerOwnerId: p.sat_owner || null,
+    siPmContactId: p.si_project_manager || null,
     hde: p.hde__hardware_design_engineer_ || null,
     // v4.5.3: all 4 DRI Owner IDs (numeric strings) for pd_team sync. Resolution to person details happens in runSync.
     dri: {
@@ -674,6 +684,40 @@ function buildStationKitsRowsFromKits(projectKitIds, kitProps, componentsByKit) 
   return rows;
 }
 
+// Fetch SI PM contact details in batch by contact IDs. Returns { id → { name, email, wechat } }.
+async function fetchContactsByIds(token, contactIds) {
+  const unique = [...new Set(contactIds.filter(Boolean))];
+  if (!unique.length) return {};
+  try {
+    const res = await fetchWithTimeout(
+      "https://api.hubapi.com/crm/v3/objects/contacts/batch/read",
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          inputs: unique.map(id => ({ id: String(id) })),
+          properties: ["email", "firstname", "lastname", "wechat_id"],
+        }),
+      }
+    );
+    if (!res.ok) { console.warn("[contacts] batch read failed:", res.status); return {}; }
+    const data = await res.json();
+    const map = {};
+    for (const c of (data.results || [])) {
+      const cp = c.properties || {};
+      map[String(c.id)] = {
+        name: `${cp.firstname || ""} ${cp.lastname || ""}`.trim() || cp.email || "",
+        email: cp.email || "",
+        wechat: cp.wechat_id || "",
+      };
+    }
+    return map;
+  } catch (e) {
+    console.warn("[contacts] fetch failed:", e.message);
+    return {};
+  }
+}
+
 // v4.5.3: Fetch ALL HubSpot Owners once per sync (paginated, ~100/page). Owners are users in HubSpot —
 // returned as { id → { name, email } }. Used to resolve DRI Owner IDs on each Project record to person
 // details for pd_team rows. Limit 50 pages safety; orgs typically have <5000 owners.
@@ -681,7 +725,8 @@ async function fetchAllOwners(token) {
   const owners = {};
   let after = null;
   for (let i = 0; i < 50; i++) {
-    const url = `https://api.hubapi.com/crm/v3/owners?limit=100${after ? `&after=${encodeURIComponent(after)}` : ""}`;
+    // includeInactive=true catches deactivated users still referenced on deals.
+    const url = `https://api.hubapi.com/crm/v3/owners?limit=100&includeInactive=true${after ? `&after=${encodeURIComponent(after)}` : ""}`;
     try {
       const res = await fetchWithTimeout(url, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) { console.warn("[owners] fetch page failed:", res.status); break; }
@@ -690,10 +735,12 @@ async function fetchAllOwners(token) {
         const fn = o.firstName || "";
         const ln = o.lastName  || "";
         const full = `${fn} ${ln}`.trim();
-        owners[String(o.id)] = {
-          name:  full || o.email || String(o.id),
-          email: o.email || "",
-        };
+        const entry = { name: full || o.email || String(o.id), email: o.email || "" };
+        // Index by owner ID (used by most owner-type properties).
+        owners[String(o.id)] = entry;
+        // Also index by portal user ID — some custom HubSpot user properties
+        // store userId instead of ownerId (e.g. cs_customer_success).
+        if (o.userId) owners[String(o.userId)] = entry;
       }
       after = data.paging?.next?.after;
       if (!after) break;
@@ -702,7 +749,7 @@ async function fetchAllOwners(token) {
       break;
     }
   }
-  console.log(`[owners] fetched ${Object.keys(owners).length} HubSpot Owners`);
+  console.log(`[owners] fetched ${Object.keys(owners).length} HubSpot Owners (indexed by id + userId)`);
   return owners;
 }
 
@@ -1093,6 +1140,13 @@ async function runSync(token, commit, syncCtx) {
           hubspotStageOrder: incoming_p.hubspotStageOrder,
           status: incoming_p.status,
           hardware: incoming_p.hardware,
+          tpmOwnerId: incoming_p.tpmOwnerId,
+          fdeOwnerId: incoming_p.fdeOwnerId,
+          fatOwnerOwnerId: incoming_p.fatOwnerOwnerId,
+          satOwnerOwnerId: incoming_p.satOwnerOwnerId,
+          siPmContactId: incoming_p.siPmContactId,
+          deployLocation: incoming_p.deployLocation,
+          dri: incoming_p.dri,
           syncedAt: incoming_p.syncedAt,
         };
       }
@@ -1107,6 +1161,42 @@ async function runSync(token, commit, syncCtx) {
     const mergedObj = {};
     merged.forEach(p => { if (p && p.id) mergedObj[p.id] = p; });
     await db.ref("appState/projects").set(sanitizeForFirebase(mergedObj));
+
+    // Team enrichment — resolve owner IDs and SI PM contact details for SI projects.
+    try {
+      const siPipeline = incoming.filter(p => p.hubspotPipelineId === SI_PARTNER_PIPELINE_ID);
+      if (siPipeline.length > 0) {
+        const ownersForTeam = await fetchAllOwners(token);
+
+        // Fetch SI PM contact details
+        const siPmContactIds = [...new Set(siPipeline.map(p => p.siPmContactId).filter(Boolean))];
+        const siPmById = await fetchContactsByIds(token, siPmContactIds);
+
+        const teamUpdates = {};
+        for (const p of siPipeline) {
+          const resolve = (ownerId) => ownerId ? {
+            name:  ownersForTeam[String(ownerId)]?.name  || null,
+            email: ownersForTeam[String(ownerId)]?.email || null,
+          } : null;
+
+          teamUpdates[`${p.id}/team`] = sanitizeForFirebase({
+            tpm:              resolve(p.tpmOwnerId),
+            fde:              resolve(p.fdeOwnerId),
+            sa:               resolve(p.dri?.sa),
+            cs:               resolve(p.dri?.cs),
+            fatOwner:         resolve(p.fatOwnerOwnerId),
+            satOwner:         resolve(p.satOwnerOwnerId),
+            siPm:             p.siPmContactId ? (siPmById[String(p.siPmContactId)] || null) : null,
+            deployLocation:   p.deployLocation || null,
+          });
+        }
+        await db.ref("appState/projects").update(teamUpdates);
+        console.log(`[team] enriched ${siPipeline.length} SI project(s) with team data`);
+      }
+    } catch (e) {
+      console.warn("[team] enrichment failed (non-fatal):", e.message);
+    }
+
     // Ensure schema version is set so the app-side migration can skip
     await db.ref("_schemaVersion").set("v3.2.0");
 
@@ -1507,6 +1597,27 @@ async function runSync(token, commit, syncCtx) {
       }
     } catch (shipErr) {
       console.warn("[shipments] shipment sync failed (non-fatal):", shipErr.message);
+    }
+
+    // Reconcile siProjects: delete any entry whose hubspot_id is no longer in the SI pipeline
+    try {
+      const siSnap = await db.ref("appState/siProjects").once("value");
+      const siProjects = siSnap.val() || {};
+      const activeSiHsIds = new Set(
+        incoming
+          .filter(p => p.hubspotPipelineId === SI_PARTNER_PIPELINE_ID && p.status === "active")
+          .map(p => String(p.hubspotId))
+          .filter(Boolean)
+      );
+      const toDelete = Object.entries(siProjects)
+        .filter(([, sp]) => sp.hubspot_id && !activeSiHsIds.has(String(sp.hubspot_id)));
+      for (const [pid] of toDelete) {
+        await db.ref(`appState/siProjects/${pid}`).remove();
+        console.log(`[siProjects] removed ${pid} — no longer in HubSpot SI pipeline`);
+      }
+      if (toDelete.length > 0) console.log(`[siProjects] reconciled ${toDelete.length} stale siProject(s)`);
+    } catch (e) {
+      console.warn("[siProjects] reconcile failed (non-fatal):", e.message);
     }
 
     // Secondary ops — each wrapped so a log/status failure never masks a successful sync
@@ -3474,29 +3585,252 @@ function buildDocBlock({ fileBase64, mimeType, fileName }) {
   }
 }
 
+// Extended doc block builder: PDF, images (vision), DOCX (mammoth), XLSX (SheetJS), text/CSV.
+async function buildDocBlockV2({ fileBase64, mimeType, fileName }) {
+  if (!fileBase64) throw new functions.https.HttpsError("invalid-argument", "fileBase64 required.");
+
+  if (mimeType === "application/pdf") {
+    return { type: "document", source: { type: "base64", media_type: "application/pdf", data: fileBase64 } };
+  }
+
+  const imageTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+  if (imageTypes.includes(mimeType)) {
+    return { type: "image", source: { type: "base64", media_type: mimeType, data: fileBase64 } };
+  }
+
+  const name = (fileName || "").toLowerCase();
+
+  if (mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || name.endsWith(".docx")) {
+    try {
+      const mammoth = require("mammoth");
+      const result = await mammoth.extractRawText({ buffer: Buffer.from(fileBase64, "base64") });
+      return { type: "text", text: `[Word Document: ${fileName || "document.docx"}]\n\n${result.value}` };
+    } catch (_) {}
+  }
+
+  if (
+    mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    mimeType === "application/vnd.ms-excel" ||
+    name.endsWith(".xlsx") || name.endsWith(".xls")
+  ) {
+    try {
+      const xlsx = require("xlsx");
+      const wb = xlsx.read(Buffer.from(fileBase64, "base64"), { type: "buffer" });
+      const parts = wb.SheetNames.map(n => `--- Sheet: ${n} ---\n${xlsx.utils.sheet_to_csv(wb.Sheets[n])}`);
+      return { type: "text", text: `[Spreadsheet: ${fileName || "file.xlsx"}]\n\n${parts.join("\n\n")}` };
+    } catch (_) {}
+  }
+
+  try {
+    const text = Buffer.from(fileBase64, "base64").toString("utf-8");
+    return { type: "text", text: `[File: ${fileName || "unknown"}]\n\n${text}` };
+  } catch (e) {
+    throw new functions.https.HttpsError("invalid-argument", `Could not decode file: ${e.message}`);
+  }
+}
+
+exports.aiSITimelinePanel = functions.runWith({ memory: "512MB", timeoutSeconds: 120 })
+  .https.onCall(async (data, context) => {
+    await requireSIWrite(context);
+    const { fileBase64, mimeType, fileName, question, projectsSummary, stages, currentPid, currentStageDates } = data || {};
+    const client = getAnthropicClient();
+    const stageList = (stages && stages.length) ? stages : ["SIRD","DFM","Quote","PO","Build","FAT","In Transit","SAT","Live"];
+
+    // FILE IMPORT mode: propose changes for user review.
+    const fileSystemPrompt =
+      `You are an AI assistant for a project deployment timeline system. Parse vendor schedules and extract stage dates.\n\n` +
+      `Defined stages: ${stageList.join(", ")}\n\n` +
+      `Rules:\n` +
+      `- Extract EVERY date in the document, even for stages with no existing data.\n` +
+      `- Map vendor terminology to the closest stage (e.g. "fabrication" → Build, "factory acceptance" → FAT).\n` +
+      `- For sub-tasks that don't map to a stage, propose them as sub_stages under the best-fit parent.\n` +
+      `- If you can identify which project the document is for, set suggested_pid to its pid.\n\n` +
+      `Return STRICT JSON only:\n` +
+      `{ "answer": "<brief summary>", "suggested_pid": "<pid or null>", "auto_apply": false,` +
+      `"db_updates": {}, ` +
+      `"changes": [{ "stage": "<stage>", "field": "planned_start"|"planned_end"|"actual_start"|"actual_end", "new_value": "YYYY-MM-DD", "evidence": "<short quote>" }], ` +
+      `"sub_stages": [{ "name": "<name>", "parent_stage": "<parent>", "planned_start": "YYYY-MM-DD"|null, "planned_end": "YYYY-MM-DD"|null, "evidence": "<short quote>" }] }`;
+
+    // COMMAND mode: execute writes directly. db_updates paths are relative to appState/siProjects/{pid}/.
+    // Setting a value to null deletes it from Firebase.
+    const commandSystemPrompt =
+      `You are a write-capable AI assistant for an SI project deployment tracker. You EXECUTE database changes when asked.\n\n` +
+      `DATABASE SCHEMA (paths relative to the project root):\n` +
+      `Top-level strings: name, si_name, customer, cm_site, factory_location, current_stage (one of: ${stageList.join("|")}), fat_date, sat_date, ship_date, sat_location, station_type, si_pm, si_ae, notes, drive_url\n` +
+      `Top-level booleans: is_blocked\n` +
+      `Stage dates: stage_dates/{STAGE}/planned_start|planned_end|actual_start|actual_end  (STAGE: ${stageList.join("|")}; dates in YYYY-MM-DD format)\n` +
+      `Program document URLs: documents/active_program_folder, documents/scoping_doc, documents/fat, documents/sat, documents/dfm, documents/sird\n\n` +
+      `RULES:\n` +
+      `- Setting a value to null DELETES it from the database.\n` +
+      `- Always use YYYY-MM-DD format for all dates.\n` +
+      `- "Clear all dates" → set stage_dates to null (deletes the entire subtree).\n` +
+      `- "Clear FAT dates" → set stage_dates/FAT to null.\n` +
+      `- When the user gives a relative date instruction (e.g. "shift all 2025 to 2026"), use the current stage_dates context provided to compute exact new values.\n` +
+      `- Identify the target project from the known project list using suggested_pid.\n` +
+      `- Put ALL required writes in db_updates as a flat object of { "path": value_or_null }.\n` +
+      `- Never write to hubspot_id, team, created_at, updated_at, or any HubSpot owner ID fields.\n\n` +
+      `Return STRICT JSON only:\n` +
+      `{ "answer": "<what you did, in past tense>", "suggested_pid": "<pid>", "auto_apply": true, ` +
+      `"db_updates": { "<relative/path>": <value or null> }, "changes": [], "sub_stages": [] }\n\n` +
+      `Examples:\n` +
+      `- "clear all dates" → db_updates: { "stage_dates": null }\n` +
+      `- "set SIRD planned start to 2026-01-15" → db_updates: { "stage_dates/SIRD/planned_start": "2026-01-15" }\n` +
+      `- "set Build planned start to 2026-09-01" → db_updates: { "stage_dates/Build/planned_start": "2026-09-01" }\n` +
+      `- "mark as blocked" → db_updates: { "is_blocked": true }\n` +
+      `- "set current stage to FAT" → db_updates: { "current_stage": "FAT" }\n` +
+      `- "set SI PM to John" → db_updates: { "si_pm": "John" }\n` +
+      `- "set notes to awaiting PO" → db_updates: { "notes": "awaiting PO" }`;
+
+    const projectsCtx = projectsSummary
+      ? { type: "text", text: `Known projects:\n${projectsSummary}` }
+      : null;
+
+    let contentBlocks;
+    let systemPrompt;
+    if (fileBase64) {
+      systemPrompt = fileSystemPrompt;
+      const docBlock = await buildDocBlockV2({ fileBase64, mimeType, fileName });
+      contentBlocks = [
+        docBlock,
+        ...(projectsCtx ? [projectsCtx] : []),
+        { type: "text", text: question
+            ? `Additional instruction: ${question}\n\nExtract ALL dates from the document and return JSON only.`
+            : "Extract ALL stage dates and sub-tasks from this document. Include every date you find. Return JSON only." },
+      ];
+    } else if (question) {
+      systemPrompt = commandSystemPrompt;
+      const stageDatesCtx = (currentPid && currentStageDates && typeof currentStageDates === "object")
+        ? { type: "text", text: `Current stage_dates for the active project (pid: ${currentPid}):\n${JSON.stringify(currentStageDates, null, 2)}\n\nUse these values as the baseline when computing any relative changes.` }
+        : null;
+      contentBlocks = [
+        ...(projectsCtx ? [projectsCtx] : []),
+        ...(stageDatesCtx ? [stageDatesCtx] : []),
+        { type: "text", text: `${question}\n\nReturn JSON only.` },
+      ];
+    } else {
+      throw new functions.https.HttpsError("invalid-argument", "fileBase64 or question is required.");
+    }
+
+    const resp = await client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 3000,
+      system: systemPrompt,
+      messages: [{ role: "user", content: contentBlocks }],
+    });
+
+    const raw = (resp.content || []).map(b => b.type === "text" ? b.text : "").join("\n").trim();
+    let parsed;
+    try { parsed = JSON.parse(raw); }
+    catch (_) {
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (!m) return { answer: raw, auto_apply: false, db_updates: {}, changes: [], sub_stages: [], suggested_pid: null };
+      try { parsed = JSON.parse(m[0]); } catch (_2) { return { answer: raw, auto_apply: false, db_updates: {}, changes: [], sub_stages: [], suggested_pid: null }; }
+    }
+    return {
+      answer: parsed?.answer || "",
+      suggested_pid: parsed?.suggested_pid || null,
+      auto_apply: parsed?.auto_apply === true,
+      db_updates: (parsed?.db_updates && typeof parsed.db_updates === "object" && !Array.isArray(parsed.db_updates)) ? parsed.db_updates : {},
+      changes: Array.isArray(parsed?.changes) ? parsed.changes : [],
+      sub_stages: Array.isArray(parsed?.sub_stages) ? parsed.sub_stages : [],
+    };
+  });
+
 exports.aiSIParseTimelineImport = functions.runWith({ memory: "512MB", timeoutSeconds: 60 })
   .https.onCall(async (data, context) => {
     await requireSIWrite(context);
     const { fileBase64, mimeType, fileName, currentStageDates, stages } = data || {};
     const client = getAnthropicClient();
     const stageList = (stages && stages.length) ? stages : ["SIRD","DFM","Quote","PO","Build","FAT","In Transit","SAT","Live"];
-    const systemPrompt = (
-      "You're a project-timeline parser. Given a vendor's schedule file, extract proposed start/end dates per stage. " +
-      "Only emit a change if the file evidence clearly indicates a different date than what's currently stored. " +
-      "Stages are: " + stageList.join(", ") + ". " +
-      "Return STRICT JSON only — no commentary, no prose. Schema: " +
-      "{ \"changes\": [ { \"stage\": <stage>, \"field\": \"planned_start\"|\"planned_end\"|\"actual_start\"|\"actual_end\", \"new_value\": \"YYYY-MM-DD\", \"evidence\": <short quote from the file> } ] }"
+
+    // Option B: pre-parse the file server-side so Claude receives clean ISO date
+    // strings rather than raw binary. This eliminates year-inference errors that
+    // occurred when Claude had to derive dates from Excel serial numbers embedded
+    // in the garbled UTF-8 representation of a ZIP/XML archive.
+    let tableText;
+    const name = (fileName || "").toLowerCase();
+    const isXlsx = (
+      mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+      mimeType === "application/vnd.ms-excel" ||
+      name.endsWith(".xlsx") || name.endsWith(".xls")
     );
-    const userBlocks = [
-      buildDocBlock({ fileBase64, mimeType, fileName }),
-      { type: "text", text: "Current stage dates on record (JSON):\n" + JSON.stringify(currentStageDates || {}, null, 2) +
-        "\n\nReturn proposed changes vs. what's on record. JSON only." },
-    ];
+
+    if (isXlsx && fileBase64) {
+      try {
+        const xlsx = require("xlsx");
+        const wb = xlsx.read(Buffer.from(fileBase64, "base64"), { type: "buffer", cellDates: true });
+        // Convert any Date object or Excel serial number to YYYY-MM-DD.
+        // raw:true is required so cellDates:true delivers actual Date objects
+        // rather than the cell's built-in MM/DD format string overriding dateNF.
+        const toISO = (v) => {
+          if (!v) return null;
+          if (v instanceof Date) return v.toISOString().slice(0, 10);
+          if (typeof v === "number" && v > 1000) {
+            return new Date(Math.round((v - 25569) * 86400 * 1000)).toISOString().slice(0, 10);
+          }
+          return String(v);
+        };
+        const sheetParts = wb.SheetNames.map(sn => {
+          const ws = wb.Sheets[sn];
+          const rows = xlsx.utils.sheet_to_json(ws, { raw: true, defval: null });
+          const rowLines = rows.map(r => {
+            const out = {};
+            for (const [k, v] of Object.entries(r)) {
+              // Normalize any cell that holds a Date or looks like a date column.
+              out[k] = (v instanceof Date || (typeof v === "number" && /date/i.test(k))) ? toISO(v) : v;
+            }
+            return JSON.stringify(out);
+          }).join("\n");
+          return `--- Sheet: ${sn} ---\n${rowLines}`;
+        });
+        tableText = `[Spreadsheet: ${fileName}]\n\n${sheetParts.join("\n\n")}`;
+      } catch (e) {
+        console.warn("XLSX pre-parse failed, falling back to text decode:", e.message);
+        tableText = null;
+      }
+    }
+
+    // Fallback for PDFs, CSVs, or if XLSX parse failed.
+    if (!tableText) {
+      if (mimeType === "application/pdf") {
+        // PDF: send as document block directly to Claude below
+        tableText = null;
+      } else {
+        try {
+          tableText = `[File: ${fileName}]\n\n` + Buffer.from(fileBase64, "base64").toString("utf-8");
+        } catch (_) {
+          tableText = "";
+        }
+      }
+    }
+
+    const systemPrompt = (
+      "You're a project-timeline mapper. You will receive a vendor's schedule as pre-parsed rows with dates already " +
+      "in YYYY-MM-DD format. Your job is ONLY semantic mapping — decide which row maps to which deployment stage and field. " +
+      "Do NOT modify, re-interpret, or re-calculate any date value. Use every date exactly as given. " +
+      "Stages are: " + stageList.join(", ") + ". " +
+      "Return STRICT JSON only — no commentary. Schema: " +
+      "{ \"changes\": [ { \"stage\": <stage>, \"field\": \"planned_start\"|\"planned_end\"|\"actual_start\"|\"actual_end\", \"new_value\": \"YYYY-MM-DD\", \"evidence\": <milestone name from the file> } ] }"
+    );
+
+    const userContent = [];
+    if (mimeType === "application/pdf" && !tableText) {
+      userContent.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: fileBase64 } });
+    } else {
+      userContent.push({ type: "text", text: tableText || "" });
+    }
+    userContent.push({
+      type: "text",
+      text: "Current stage dates on record (for reference — do not let these influence your date values):\n" +
+        JSON.stringify(currentStageDates || {}, null, 2) +
+        "\n\nMap each milestone row to the correct stage and field. JSON only.",
+    });
+
     const resp = await client.messages.create({
       model: "claude-sonnet-4-6",
       max_tokens: 2000,
       system: systemPrompt,
-      messages: [{ role: "user", content: userBlocks }],
+      messages: [{ role: "user", content: userContent }],
     });
     const raw = (resp.content || []).map(b => b.type === "text" ? b.text : "").join("\n").trim();
     let parsed;
@@ -3544,4 +3878,51 @@ exports.aiSIParseCoverageDoc = functions.runWith({ memory: "512MB", timeoutSecon
     }
     return { suggestions: parsed?.suggestions || {} };
   });
+
+/* ═══ SI STATUS UPDATE — post one project's status to Slack ═══ */
+exports.sendSIStatusUpdate = functions.runWith({ memory: "256MB" }).https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  const { pid } = data || {};
+  if (!pid) throw new functions.https.HttpsError("invalid-argument", "pid required.");
+
+  const webhook = process.env.SLACK_WEBHOOK_SI_DIGEST;
+  if (!webhook) throw new functions.https.HttpsError("failed-precondition", "SLACK_WEBHOOK_SI_DIGEST is not configured.");
+
+  const snap = await db.ref(`appState/siProjects/${pid}`).once("value");
+  const p = snap.val();
+  if (!p) throw new functions.https.HttpsError("not-found", `Project ${pid} not found.`);
+
+  const su      = p.status_update || {};
+  const health  = su.health || "on_track";
+  const emoji   = { on_track: "🟢", at_risk: "🟡", blocked: "🔴" }[health] || "⚪";
+  const label   = { on_track: "On Track", at_risk: "At Risk", blocked: "Blocked" }[health] || health;
+  const stage   = p.current_stage || "—";
+
+  const blockers = Object.values(su.blockers || {}).filter(b => b && !b.resolved);
+  const actions  = Object.values(su.action_items || {}).filter(a => a && !a.done);
+
+  const lines = [
+    `${emoji} *${p.name || pid}* — ${label}  ·  Stage: ${stage}`,
+    su.summary ? `\n${su.summary}` : null,
+    su.next_milestone ? `\n*Next:* ${su.next_milestone}` : null,
+    blockers.length > 0
+      ? `\n*Blockers (${blockers.length}):*\n${blockers.map(b => `• ${b.text}${b.dri ? " _(DRI: " + b.dri + ")_" : ""}`).join("\n")}`
+      : null,
+    actions.length > 0
+      ? `\n*Action items (${actions.length}):*\n${actions.map(a => `• ${a.text}${a.dri ? " _(DRI: " + a.dri + ")_" : ""}${a.due_date ? " · due " + a.due_date : ""}`).join("\n")}`
+      : null,
+  ].filter(Boolean).join("\n");
+
+  const res = await fetch(webhook, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: lines }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new functions.https.HttpsError("internal", `Slack webhook failed: ${res.status} ${body}`);
+  }
+  return { ok: true };
+});
+
 

@@ -1,0 +1,53 @@
+Section,Firebase Key,UI Label,Type,Description,HubSpot Property,Sync Direction
+Top-Level,pid,Project ID,string,"Firebase key. Auto-created stubs use hs_<hubspotId>.",hs_object_id (prefix),← HS→App
+Top-Level,name,Project Name,string,Full project name pulled from HubSpot.,project_name,← HS→App
+Top-Level,si_name,SI *,string,"SI partner short name, e.g. NewPower. Extracted from project name.",—,Not synced
+Top-Level,customer,Customer,string,Customer name decoded from the company codename.,company_codename,← HS→App
+Top-Level,cm_site,CM Site,string,Contract manufacturer site location.,—,Not synced
+Top-Level,factory_location,Factory Location,string,Deployment factory / install location.,deploy_location_from_opportunity__c,← HS→App
+Top-Level,current_stage,Current Stage,enum,"One of: SIRD · DFM · Quote · PO · Build · FAT · In Transit · SAT · Live. In Transit is app-only.",hs_pipeline_stage,↔ Bidirectional
+Top-Level,station_type,Station Type,string,"Fixture description, e.g. Semi-Automated Inspection Fixture.",—,Not synced
+Top-Level,hubspot_id,HubSpot ID,string,The numeric HubSpot record ID for this custom object.,hs_object_id,← HS→App
+Top-Level,hubspot_pipeline_id,Pipeline,string,HubSpot pipeline ID. SI Partner = 2206979797.,hs_pipeline,← HS→App
+Top-Level,si_pm,SI PM,string,SI Project Manager name.,—,Not synced
+Top-Level,si_ae,SI AE,string,SI Account Executive name.,—,Not synced
+Top-Level,fat_date,FAT Date,date (YYYY-MM-DD),"Key date shortcut. Also updates stage_dates/FAT/planned_start.",fat_start_date,↔ Bidirectional
+Top-Level,sat_date,SAT Date,date (YYYY-MM-DD),"Key date shortcut. Also updates stage_dates/SAT/planned_start.",sat_start_date,↔ Bidirectional
+Top-Level,sat_location,SAT Location,string,Location where SAT will take place.,—,Not synced
+Top-Level,ship_date,Ship Date,date (YYYY-MM-DD),Planned shipment date.,date_shipped__c,→ App→HS
+Top-Level,notes,Notes,string,Free-form project notes.,—,Not synced
+Top-Level,drive_url,Drive URL,string,Google Drive folder link.,—,Not synced
+Top-Level,is_blocked,Blocked,boolean,Whether this project is currently blocked.,—,Not synced
+Top-Level,source,Source,string,"hubspot_auto for auto-created stubs, else manual.",—,Not synced
+Top-Level,created_at,Created At,timestamp (Unix ms),Creation timestamp.,hs_createdate,← HS→App
+Top-Level,created_by,Created By,string,Actor who created the record.,—,Not synced
+Top-Level,updated_at,Updated At,timestamp (Unix ms),Last update timestamp. Set on every field write.,hs_lastmodifieddate,← HS→App
+Stage Dates,stage_dates/{STAGE}/planned_start,Planned Start,date (YYYY-MM-DD),When this stage is planned to begin. STAGE = SIRD · DFM · Quote · PO · Build · FAT · In Transit · SAT · Live,"FAT→fat_start_date · SAT→sat_start_date · Others: —",↔ FAT & SAT only
+Stage Dates,stage_dates/{STAGE}/planned_end,Planned End,date (YYYY-MM-DD),When this stage is planned to end.,"FAT→fat_end_date · SAT→sat_end_date · Others: —",↔ FAT & SAT only
+Stage Dates,stage_dates/{STAGE}/actual_start,Actual Start,date (YYYY-MM-DD),When the stage actually began. Auto-derived from HubSpot transition timestamp.,hs_v2_date_entered_{stageId},⟳ Auto HS→App
+Stage Dates,stage_dates/{STAGE}/actual_end,Actual End,date (YYYY-MM-DD),When the stage actually ended. Auto-derived from HubSpot transition timestamp.,hs_v2_date_exited_{stageId},⟳ Auto HS→App
+Sub-Stages,sub_stages/{key}/name,Name,string,"Sub-stage label, e.g. PCB Assembly.",—,Not synced
+Sub-Stages,sub_stages/{key}/parent_stage,Parent Stage,enum,The SI stage this sub-stage belongs to.,—,Not synced
+Sub-Stages,sub_stages/{key}/planned_start,Planned Start,date (YYYY-MM-DD),,—,Not synced
+Sub-Stages,sub_stages/{key}/planned_end,Planned End,date (YYYY-MM-DD),,—,Not synced
+Sub-Stages,sub_stages/{key}/actual_start,Actual Start,date (YYYY-MM-DD),,—,Not synced
+Sub-Stages,sub_stages/{key}/actual_end,Actual End,date (YYYY-MM-DD),,—,Not synced
+Stations,stations/{key}/station_number,Station #,number,Sequential number within this project.,—,Not synced
+Stations,stations/{key}/name,Name,string,"Station label, e.g. Station 1.",—,Not synced
+Stations,stations/{key}/count,Count,number,Number of identical units in this station.,—,Not synced
+Stations,stations/{key}/customer,Customer,string,Customer assigned to this station.,—,Not synced
+Stations,stations/{key}/deployment_factory,Deploy Factory,string,Factory/site where this station will be deployed.,—,Not synced
+Stations,stations/{key}/notes,Notes,string,Station-level notes.,—,Not synced
+Stations,stations/{key}/fat_result,FAT Result,enum,pending · pass · fail · ncr,—,Not synced
+Stations,stations/{key}/sat_result,SAT Result,enum,pending · pass · fail · ncr,—,Not synced
+Stations,stations/{key}/created_at,Created At,timestamp (Unix ms),,—,Not synced
+Test Plans,test_plans/{FAT|SAT}/status,Status,enum,draft · complete,—,Not synced
+Test Plans,test_plans/{FAT|SAT}/station_count,Station Count,number,Number of stations covered by this plan.,—,Not synced
+Test Plans,test_plans/{FAT|SAT}/version,Version,number,Plan revision number.,—,Not synced
+Test Plans,test_plans/{FAT|SAT}/rows/{key},Test Rows,collection,"Test items: sort_order, result (pending/pass/fail/ncr), created_at.",—,Not synced
+Test Plans,test_plans/{FAT|SAT}/executed_uploads/{key},Executed XLSXs,collection,"filename, storagePath, downloadUrl, uploaded_at, uploaded_by.",—,Not synced
+Test Plans,test_plans/{FAT|SAT}/test_records/{key},Test Records,collection,"filename, storagePath, downloadUrl, uploaded_at, uploaded_by.",—,Not synced
+Files,files/{key}/filename,Filename,string,Original filename as uploaded.,—,Not synced
+Files,files/{key}/storagePath,Storage Path,string,Firebase Storage path for deletion/re-download.,—,Not synced
+Files,files/{key}/downloadUrl,Download URL,string,Signed Firebase Storage URL.,—,Not synced
+Files,files/{key}/uploaded_at,Uploaded At,timestamp (Unix ms),,—,Not synced

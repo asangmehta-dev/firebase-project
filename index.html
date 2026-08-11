@@ -8,7 +8,15 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3/dist/tabler-icons.min.css" rel="stylesheet" />
-    <style>body { margin: 0; background: #F8FAFC; }</style>
+    <style>
+      body { margin: 0; background: #F8FAFC; }
+      /* Visible focus ring for keyboard users [WCAG 2.4.11] */
+      *:focus-visible { outline: 2px solid #2563EB; outline-offset: 2px; }
+      /* Respect OS reduced-motion preference [WCAG 2.3.3] */
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

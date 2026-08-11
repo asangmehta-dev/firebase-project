@@ -149,6 +149,14 @@ const LEGACY_SI_STAGE_MAP = {
   warranty: "live", complete: "live",
 };
 const normalizeSiStage = (s) => LEGACY_SI_STAGE_MAP[s] || s || "sird";
+const HEALTH_COLORS = { on_track: "#22C55E", at_risk: "#F59E0B", blocked: "#EF4444" };
+const HEALTH_LABELS = { on_track: "On Track", at_risk: "At Risk",  blocked: "Blocked"  };
+const HEALTH_EMOJI  = { on_track: "🟢",       at_risk: "🟡",       blocked: "🔴"        };
+const timeAgo = (ts) => {
+  if (!ts) return "";
+  const d = Math.floor((Date.now() - ts) / 86400000);
+  return d === 0 ? "today" : d === 1 ? "1d ago" : `${d}d ago`;
+};
 const SEED_PROJECTS = [
   { id: "proj_nvidia_1", name: "NVIDIA — HGX B200 Inspection", customer: "NVIDIA", status: "active", stations: 0, isSI: true },
   { id: "proj_aws_1", name: "AWS — Trainium Board QC", customer: "AWS", status: "active", stations: 0, isSI: false },
@@ -1074,13 +1082,13 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
       </div>
       <nav style={S.navList}>
         {/* Overview — slightly bigger font */}
-        <button onClick={() => setView("dashboard")} style={{ ...S.navBtn, fontSize: 17, fontWeight: 600, ...navActive("dashboard") }}>{"⊙ " + t("Overview", lang)}</button>
+        <button onClick={() => setView("dashboard")} aria-current={view === "dashboard" ? "page" : undefined} style={{ ...S.navBtn, fontSize: 17, fontWeight: 600, ...navActive("dashboard") }}>{"⊙ " + t("Overview", lang)}</button>
         <div style={S.divider} />
         {/* Project Details — with collapse/expand chevron */}
         <div style={{ display: "flex", alignItems: "center" }}>
-          <button onClick={() => setView("project_details")} style={{ ...S.navBtn, flex: 1, width: "auto", ...navActive("project_details") }}>📋 Project Details</button>
+          <button onClick={() => setView("project_details")} aria-current={view === "project_details" ? "page" : undefined} style={{ ...S.navBtn, flex: 1, width: "auto", ...navActive("project_details") }}>📋 Project Details</button>
           {project && (
-            <button onClick={() => setSubOpen(o => !o)} style={{ padding: "8px 10px", background: "none", border: "none", color: "#64748B", cursor: "pointer", fontSize: 14, lineHeight: 1, fontFamily: F }}>
+            <button onClick={() => setSubOpen(o => !o)} aria-label={subOpen ? "Collapse project sections" : "Expand project sections"} aria-expanded={subOpen} style={{ padding: "8px 10px", background: "none", border: "none", color: "#64748B", cursor: "pointer", fontSize: 14, lineHeight: 1, fontFamily: F }}>
               {subOpen ? "▾" : "▸"}
             </button>
           )}
@@ -1111,18 +1119,18 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
           });
         })()}
         {/* Commercial — restricted indicator */}
-        <button onClick={() => setView("commercial")} style={{ ...S.navBtn, ...navActive("commercial"), color: view === "commercial" ? "#F1F5F9" : hasCommercialAccess ? "#94A3B8" : "#64748B" }}>
+        <button onClick={() => setView("commercial")} aria-current={view === "commercial" ? "page" : undefined} style={{ ...S.navBtn, ...navActive("commercial"), color: view === "commercial" ? "#F1F5F9" : hasCommercialAccess ? "#94A3B8" : "#64748B" }}>
           {hasCommercialAccess ? "📂" : "🔒"} Commercial
         </button>
         {/* Training */}
-        <button onClick={() => setView("training")} style={{ ...S.navBtn, ...navActive("training") }}>🎓 Training</button>
+        <button onClick={() => setView("training")} aria-current={view === "training" ? "page" : undefined} style={{ ...S.navBtn, ...navActive("training") }}>🎓 Training</button>
         {/* AI Chat — available to all authenticated users */}
-        <button onClick={() => setView("chat")} style={{ ...S.navBtn, ...navActive("chat") }}>💬 AI Chat</button>
+        <button onClick={() => setView("chat")} aria-current={view === "chat" ? "page" : undefined} style={{ ...S.navBtn, ...navActive("chat") }}>💬 AI Chat</button>
         {/* Admin only */}
         {admin && (<>
           <div style={S.divider} />
-          <button onClick={() => setView("admin")} style={{ ...S.navBtn, ...navActive("admin") }}>{"⊞ " + t("Admin Panel", lang)}</button>
-          <button onClick={() => setView("manage")} style={{ ...S.navBtn, ...navActive("manage") }}>{"⊕ " + t("Manage Projects", lang)}</button>
+          <button onClick={() => setView("admin")} aria-current={view === "admin" ? "page" : undefined} style={{ ...S.navBtn, ...navActive("admin") }}>{"⊞ " + t("Admin Panel", lang)}</button>
+          <button onClick={() => setView("manage")} aria-current={view === "manage" ? "page" : undefined} style={{ ...S.navBtn, ...navActive("manage") }}>{"⊕ " + t("Manage Projects", lang)}</button>
         </>)}
       </nav>
       <div style={S.sideFoot}>
@@ -1144,7 +1152,7 @@ function Sidebar({ view, setView, user, project, projects, setProject, onLogout,
           <div onClick={e => e.stopPropagation()} style={{ background: "#FFF", borderRadius: 14, padding: 24, width: "100%", maxWidth: 480, fontFamily: F, boxShadow: "0 20px 50px rgba(0,0,0,.30)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
               <div style={{ fontSize: 18, fontWeight: 700, color: "#0F172A" }}>💬 Send Feedback</div>
-              <button onClick={() => setFbOpen(false)} style={{ background: "none", border: "none", fontSize: 22, color: "#94A3B8", cursor: "pointer", lineHeight: 1 }}>✕</button>
+              <button onClick={() => setFbOpen(false)} aria-label="Close feedback" style={{ background: "none", border: "none", fontSize: 22, color: "#94A3B8", cursor: "pointer", lineHeight: 1 }}>✕</button>
             </div>
             <p style={{ fontSize: 13, color: "#64748B", marginBottom: 16 }}>Share a bug, idea, or comment. SI-related feedback routes to Sneha; everything else routes to Asang.</p>
             <label style={{ fontSize: 11, color: "#64748B", fontWeight: 600, textTransform: "uppercase", letterSpacing: .5, marginBottom: 6, display: "block" }}>Category</label>
@@ -1729,8 +1737,10 @@ function TableSection({ cat, updateCats, canEdit, allCats = [] }) {
     updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, rows: [...(c.rows || []), newRow] }));
   };
 
-  const delRow = (rowId) =>
+  const delRow = (rowId) => {
+    if (!window.confirm("Delete this row? This cannot be undone.")) return;
     updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, rows: (c.rows || []).filter(r => r.id !== rowId) }));
+  };
 
   const startEdit = (rowId, key, val) => { setEditCell({ rowId, key }); setEditVal(val || ""); };
   const commitEdit = () => {
@@ -1905,7 +1915,7 @@ function TableSection({ cat, updateCats, canEdit, allCats = [] }) {
                   {isShipmentTable && shipWritebackStatus[row.id] === "syncing" && <span title="Syncing to HubSpot…" style={{ fontSize: 11, color: "#3B82F6", marginRight: 6 }}>↑</span>}
                   {isShipmentTable && shipWritebackStatus[row.id] === "ok" && <span title="HubSpot updated" style={{ fontSize: 11, color: "#059669", marginRight: 6 }}>✓</span>}
                   {isShipmentTable && shipWritebackStatus[row.id] === "error" && <span title={shipWritebackErr[row.id] || "HubSpot writeback failed — saved locally"} style={{ fontSize: 11, color: "#DC2626", marginRight: 6, cursor: "help" }}>⚠</span>}
-                  <button onClick={() => delRow(row.id)} style={{ ...S.btnDel, padding: "2px 6px", fontSize: 11 }} title="Delete row">✕</button>
+                  <button onClick={() => delRow(row.id)} style={{ ...S.btnDel, padding: "2px 6px", fontSize: 11 }} title="Delete row" aria-label="Delete row">✕</button>
                 </td>}
               </tr>
             ))}
@@ -1954,8 +1964,10 @@ function TransposedTableSection({ cat, updateCats, canEdit, allCats = [] }) {
     updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, rows: [...(c.rows || []), newRow] }));
   };
 
-  const delStation = (rowId) =>
+  const delStation = (rowId) => {
+    if (!window.confirm("Delete this station? This cannot be undone.")) return;
     updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, rows: (c.rows || []).filter(r => r.id !== rowId) }));
+  };
 
   const startEdit = (rowId, key, val) => { setEditCell({ rowId, key }); setEditVal(val || ""); };
   const commitEdit = () => {
@@ -2098,7 +2110,7 @@ function TransposedTableSection({ cat, updateCats, canEdit, allCats = [] }) {
                 <th key={row.id} style={{ ...thBase, textAlign: "center", minWidth: 130 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
                     {stationLabel(row, i)}
-                    {canEdit && <button onClick={() => delStation(row.id)} style={{ ...S.btnDel, padding: "1px 4px", fontSize: 9, lineHeight: 1 }} title="Remove station">✕</button>}
+                    {canEdit && <button onClick={() => delStation(row.id)} style={{ ...S.btnDel, padding: "1px 4px", fontSize: 9, lineHeight: 1 }} title="Remove station" aria-label="Remove station">✕</button>}
                   </div>
                 </th>
               ))}
@@ -2258,6 +2270,7 @@ function FolderSection({ cat, updateCats, user, canEdit, pid }) {
   // v4.5.5: HubSpot-sourced items (source === "hubspot") also soft-delete — otherwise hard-delete
   // would let the next HubSpot sync resurrect the item. Mirrors the existing "system" path.
   const delItem = (itemId, isManaged) => {
+    if (!window.confirm("Delete this item? This cannot be undone.")) return;
     if (isManaged) {
       updateCats(cur => cur.map(c => c.id !== cat.id ? c : { ...c, items: (c.items || []).map(i => i.id !== itemId ? i : { ...i, _userDeleted: true }) }));
     } else {
@@ -3349,7 +3362,7 @@ function ProgramDetailsSection({ cat, pid, state, setState, user, canEdit, lang 
 
   const updateProg = (newTasks) => setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), _programDetails: { ...progData, tasks: newTasks } } } }));
   const addTask = () => { if (!form.name.trim()) return; updateProg([...tasks, { id: genId(), ...form, addedAt: new Date().toISOString() }]); setForm({ name: "", type: "task", date: "", endDate: "" }); setShowForm(false); };
-  const delTask = (id) => updateProg(tasks.filter(t => t.id !== id));
+  const delTask = (id) => { if (!window.confirm("Delete this task? This cannot be undone.")) return; updateProg(tasks.filter(t => t.id !== id)); };
 
   return (
     <div style={{ ...S.card, marginBottom: 12, borderLeft: "3px solid #F59E0B" }}>
@@ -3758,7 +3771,7 @@ function TrainingView({ user, project, state, setState, lang = "en" }) {
   const updateTraining = (data) => setState(prev => ({ ...prev, docData: { ...prev.docData, [pid]: { ...(prev.docData?.[pid]||{}), _training: data } } }));
   const toggleEnabled = () => updateTraining({ ...trainingData, enabled: !enabled });
   const addMaterial = () => { if (!matForm.name.trim()) return; const url = commitUrl(matForm.url); if (url === null) return; updateTraining({ ...trainingData, materials: [...materials, { id: genId(), ...matForm, url, addedBy: user.name, addedAt: new Date().toISOString() }] }); setMatForm({ name: "", url: "", belt: "white" }); setAddMat(false); };
-  const delMaterial = (id) => updateTraining({ ...trainingData, materials: materials.filter(m => m.id !== id) });
+  const delMaterial = (id) => { if (!window.confirm("Delete this material? This cannot be undone.")) return; updateTraining({ ...trainingData, materials: materials.filter(m => m.id !== id) }); };
   const assignBelt = (uid, belt) => updateTraining({ ...trainingData, assignments: { ...assignments, [uid]: belt } });
   const removeBelt = (uid) => { const next = { ...assignments }; delete next[uid]; updateTraining({ ...trainingData, assignments: next }); };
 
@@ -5544,8 +5557,8 @@ const THEMES = {
     cardBorder: "#E2E8F0",
     cardSoft:   "#F1F5F9",
     text:       "#0F172A",
-    textMuted:  "#64748B",
-    textLow:    "#94A3B8",
+    textMuted:  "#475569",   // 6.6:1 on white — WCAG AA ✓ (was #64748B at 4.3:1)
+    textLow:    "#64748B",   // 4.3:1 on white — passes AA for large/UI text (was #94A3B8 at 2.9:1)
     inputBg:    "#FFFFFF",
     inputBorder:"#CBD5E1",
     accent:     "#00C9A7",
@@ -5585,6 +5598,332 @@ const SI_STAGE_COLORS = {
   SAT: "#14B8A6", Live: "#16A34A",
 };
 
+function SIMeetingGantt({ project, T }) {
+  const [tooltip, setTooltip] = useState(null);
+  const sd = project?.stage_dates || {};
+  const allDates = [];
+  for (const s of SI_STAGES) {
+    const d = sd[s] || {};
+    ["planned_start","planned_end","actual_start","actual_end"].forEach(k => { if (d[k]) allDates.push(new Date(d[k])); });
+  }
+  const fmtD = (iso) => { if (!iso) return "—"; const d = new Date(iso + "T00:00:00"); return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); };
+  if (!allDates.length) return <div style={{ color: T.textMuted, fontFamily: SI_F, fontSize: 12, padding: "8px 0" }}>No timeline data.</div>;
+  const showTip = (e, stage, type, d) => setTooltip({ x: e.clientX, y: e.clientY, stage, type, start: type === "planned" ? d.planned_start : d.actual_start, end: type === "planned" ? d.planned_end : (d.actual_end || null) });
+  const moveTip = (e) => setTooltip(t => t ? { ...t, x: e.clientX, y: e.clientY } : null);
+  const hideTip = () => setTooltip(null);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const minDate = new Date(Math.min(...allDates.map(d => d.getTime())));
+  const maxDate = new Date(Math.max(...allDates.map(d => d.getTime())));
+  const rangeStart = new Date(minDate); rangeStart.setDate(rangeStart.getDate() - 7);
+  // rangeEnd must include both the last project date and today, each with a 1-week buffer.
+  const minRangeEnd = new Date(today); minRangeEnd.setDate(minRangeEnd.getDate() + 7);
+  const projRangeEnd = new Date(maxDate); projRangeEnd.setDate(projRangeEnd.getDate() + 7);
+  const rangeEnd = minRangeEnd > projRangeEnd ? minRangeEnd : projRangeEnd;
+  const totalMs = rangeEnd - rangeStart;
+  const pct = (iso) => {
+    if (!iso) return null;
+    const d = new Date(iso); if (isNaN(d)) return null;
+    return Math.max(0, Math.min(100, ((d - rangeStart) / totalMs) * 100));
+  };
+  const todayPct = pct(new Date().toISOString().slice(0, 10));
+  const stagesWithData = SI_STAGES.filter(s => { const d = sd[s] || {}; return d.planned_start || d.planned_end || d.actual_start || d.actual_end; });
+
+  // Adaptive date markers: choose interval so labels never crowd.
+  const rangeDays = (rangeEnd - rangeStart) / 86400000;
+  const weeks = [];
+  if (rangeDays <= 84) {
+    // Weekly — snap to nearest Monday
+    const cur = new Date(rangeStart);
+    while (cur.getDay() !== 1) cur.setDate(cur.getDate() + 1);
+    while (cur <= rangeEnd) {
+      const p = pct(cur.toISOString().slice(0, 10));
+      if (p !== null) weeks.push({ p, label: cur.toLocaleDateString(undefined, { month: "short", day: "numeric" }) });
+      cur.setDate(cur.getDate() + 7);
+    }
+  } else {
+    // Monthly or coarser — snap to 1st of month, step by monthStep
+    const monthStep = rangeDays <= 300 ? 1 : rangeDays <= 600 ? 2 : 3;
+    const cur = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
+    while (cur <= rangeEnd) {
+      if (cur >= rangeStart) {
+        const p = pct(cur.toISOString().slice(0, 10));
+        const mo = cur.toLocaleDateString(undefined, { month: "short" });
+        const yr = String(cur.getFullYear()).slice(2);
+        if (p !== null) weeks.push({ p, label: `${mo} '${yr}` });
+      }
+      cur.setMonth(cur.getMonth() + monthStep);
+    }
+  }
+
+  const LABEL_W = 75;
+  const ROW_H   = 22;
+
+  return (
+    <div style={{ fontFamily: SI_F }}>
+      {/* Date ruler */}
+      <div style={{ marginLeft: LABEL_W + 8, position: "relative", height: 20, marginBottom: 2 }}>
+        {weeks.map((w, i) => (
+          <div key={i} style={{ position: "absolute", left: `${w.p}%`, transform: "translateX(-50%)", fontSize: 9, color: T.textMuted, whiteSpace: "nowrap", userSelect: "none" }}>
+            {w.label}
+          </div>
+        ))}
+        {/* Tick marks */}
+        {weeks.map((w, i) => (
+          <div key={`t${i}`} style={{ position: "absolute", left: `${w.p}%`, bottom: 0, width: 1, height: 4, background: T.cardBorder }} />
+        ))}
+      </div>
+
+      {/* Stage rows */}
+      {stagesWithData.map(stage => {
+        const d = sd[stage] || {};
+        const color = SI_STAGE_COLORS[stage] || "#94A3B8";
+        const ps = pct(d.planned_start), pe = pct(d.planned_end);
+        const as_ = pct(d.actual_start), aeRaw = pct(d.actual_end);
+        const aeEff = aeRaw ?? (as_ !== null ? todayPct : null);
+        const hasPlanned = ps !== null && pe !== null;
+        const hasActual  = as_ !== null && aeEff !== null;
+        const plL = hasPlanned ? Math.min(ps, pe) : null;
+        const plW = hasPlanned ? Math.max(1, Math.abs(pe - ps)) : null;
+        const acL = hasActual  ? Math.min(as_, aeEff) : null;
+        const acW = hasActual  ? Math.max(1, Math.abs(aeEff - as_)) : null;
+        return (
+          <div key={stage} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, height: ROW_H }}>
+            <div style={{ width: LABEL_W, fontSize: 10, color: T.textMuted, flexShrink: 0, textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{stage}</div>
+            <div style={{ flex: 1, position: "relative", height: ROW_H }}>
+              {/* Week grid lines */}
+              {weeks.map((w, i) => <div key={i} style={{ position: "absolute", top: 0, bottom: 0, left: `${w.p}%`, width: 1, background: T.cardBorder, opacity: 0.5 }} />)}
+              {/* Today line */}
+              {todayPct !== null && <div style={{ position: "absolute", top: 0, bottom: 0, left: `${todayPct}%`, width: 1.5, background: "#EF4444", zIndex: 4 }} />}
+              {/* Planned bar — lighter fill */}
+              {hasPlanned && <div onMouseEnter={e => showTip(e, stage, "planned", d)} onMouseMove={moveTip} onMouseLeave={hideTip} style={{ position: "absolute", left: `${plL}%`, width: `${plW}%`, height: 16, top: "50%", transform: "translateY(-50%)", background: color, opacity: 0.28, borderRadius: 3, zIndex: 1, cursor: "default" }} />}
+              {/* Actual bar — full fill */}
+              {hasActual && <div onMouseEnter={e => showTip(e, stage, "actual", d)} onMouseMove={moveTip} onMouseLeave={hideTip} style={{ position: "absolute", left: `${acL}%`, width: `${acW}%`, height: 16, top: "50%", transform: "translateY(-50%)", background: color, borderRadius: 3, zIndex: 2, cursor: "default" }} />}
+              {/* Labels — separate layer, pointer-events off so mouse reaches the bar */}
+              {hasActual && acW > 4 && (
+                <div style={{ position: "absolute", left: `${acL}%`, width: `${acW}%`, height: 16, top: "50%", transform: "translateY(-50%)", zIndex: 3, display: "flex", alignItems: "center", paddingLeft: 4, overflow: "hidden", pointerEvents: "none" }}>
+                  <span style={{ color: "#FFF", fontSize: 9, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{stage}</span>
+                </div>
+              )}
+              {!hasActual && hasPlanned && plW > 4 && (
+                <div style={{ position: "absolute", left: `${plL}%`, width: `${plW}%`, height: 16, top: "50%", transform: "translateY(-50%)", zIndex: 3, display: "flex", alignItems: "center", paddingLeft: 4, overflow: "hidden", pointerEvents: "none" }}>
+                  <span style={{ color: color, fontSize: 9, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{stage}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Hover tooltip */}
+      {tooltip && (
+        <div style={{ position: "fixed", left: Math.min(tooltip.x + 14, window.innerWidth - 210), top: tooltip.y - 80, background: "#1E293B", border: "1px solid #334155", borderRadius: 8, padding: "9px 13px", zIndex: 9999, pointerEvents: "none", fontFamily: SI_F, boxShadow: "0 8px 24px rgba(0,0,0,0.55)", minWidth: 170 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
+            <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: SI_STAGE_COLORS[tooltip.stage] || "#94A3B8", flexShrink: 0, opacity: tooltip.type === "planned" ? 0.55 : 1 }} />
+            <span style={{ fontWeight: 700, fontSize: 13, color: "#F8FAFC" }}>{tooltip.stage}</span>
+            <span style={{ fontSize: 10, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.5 }}>{tooltip.type}</span>
+          </div>
+          <div style={{ fontSize: 11.5, color: "#CBD5E1", lineHeight: 1.8 }}>
+            <span style={{ color: "#64748B", display: "inline-block", width: 38 }}>Start</span>{fmtD(tooltip.start)}<br/>
+            <span style={{ color: "#64748B", display: "inline-block", width: 38 }}>End</span>{fmtD(tooltip.end)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SIMeetingMode({ projectList, actor, theme, setTheme }) {
+  const T = THEMES[theme] || THEMES.light;
+  const [filterHealth, setFilterHealth] = useState("all");
+  const [search, setSearch] = useState("");
+  const [meetingPids, setMeetingPids] = useState([]);
+  const [meetingIdx, setMeetingIdx] = useState(0);
+  const [meetingActive, setMeetingActive] = useState(false);
+
+  const filtered = projectList.filter(p => {
+    const h = p.status_update?.health || "on_track";
+    const matchH = filterHealth === "all" || h === filterHealth;
+    const matchS = !search || (p.name || "").toLowerCase().includes(search.toLowerCase());
+    return matchH && matchS;
+  });
+
+  const healthOrder = { blocked: 0, at_risk: 1, on_track: 2 };
+  const sorted = [...filtered].sort((a, b) => {
+    const ha = healthOrder[a.status_update?.health] ?? 2;
+    const hb = healthOrder[b.status_update?.health] ?? 2;
+    return ha - hb || (a.name || "").localeCompare(b.name || "");
+  });
+
+  const startMeeting = (pids) => { setMeetingPids(pids); setMeetingIdx(0); setMeetingActive(true); };
+
+  useEffect(() => {
+    if (!meetingActive) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") { setMeetingActive(false); return; }
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") setMeetingIdx(i => Math.min(i + 1, meetingPids.length - 1));
+      if (e.key === "ArrowLeft"  || e.key === "ArrowUp")   setMeetingIdx(i => Math.max(i - 1, 0));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [meetingActive, meetingPids.length]);
+
+  const currentPid     = meetingPids[meetingIdx];
+  const currentProject = projectList.find(p => p.pid === currentPid);
+
+  if (meetingActive && currentProject) {
+    const health = currentProject.status_update?.health || "on_track";
+    return (
+      <div style={{ position: "fixed", inset: 0, background: T.pageBg, zIndex: 9999, display: "flex", flexDirection: "column", fontFamily: SI_F }}>
+
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", padding: "0 20px", borderBottom: `1px solid ${T.cardBorder}`, background: T.cardBg, height: 48, flexShrink: 0 }}>
+          <span style={{ color: T.textMuted, fontSize: 12, fontWeight: 600, minWidth: 60 }}>{meetingIdx + 1} / {meetingPids.length}</span>
+          <div style={{ flex: 1, textAlign: "center", fontSize: 12, color: T.textMuted, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase" }}>Meeting Mode</div>
+          <div style={{ display: "flex", gap: 8, minWidth: 60, justifyContent: "flex-end" }}>
+            <button onClick={() => setTheme && setTheme(theme === "dark" ? "light" : "dark")}
+              aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              title={theme === "dark" ? "Light mode" : "Dark mode"}
+              style={{ padding: "5px 9px", border: `1px solid ${T.cardBorder}`, borderRadius: 6, background: T.cardSoft, color: T.textMuted, fontFamily: SI_F, fontSize: 14, cursor: "pointer" }}>
+              {theme === "dark" ? "☀" : "☾"}
+            </button>
+            <button onClick={() => setMeetingActive(false)}
+              style={{ padding: "5px 12px", border: `1px solid ${T.cardBorder}`, borderRadius: 6, background: "transparent", color: T.textMuted, fontFamily: SI_F, fontSize: 12, cursor: "pointer" }}>
+              Esc
+            </button>
+          </div>
+        </div>
+
+        {/* Main: 3-panel row */}
+        <div style={{ flex: 1, minHeight: 0, display: "flex", overflow: "hidden" }}>
+
+          {/* Left: project navigation */}
+          <div style={{ width: 220, flexShrink: 0, borderRight: `1px solid ${T.cardBorder}`, background: T.cardBg, display: "flex", flexDirection: "column", justifyContent: "space-between", padding: "24px 16px", overflowY: "auto" }}>
+            <div>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 12px", borderRadius: 999, background: HEALTH_COLORS[health] + "22", border: `1px solid ${HEALTH_COLORS[health]}44`, marginBottom: 14 }}>
+                <span style={{ fontSize: 13 }}>{HEALTH_EMOJI[health]}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: HEALTH_COLORS[health] }}>{HEALTH_LABELS[health]}</span>
+              </div>
+              <div style={{ fontFamily: SI_F, fontSize: 14, fontWeight: 700, color: T.text, lineHeight: 1.35, marginBottom: 8 }}>{currentProject.name}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                {currentProject.si_name && <span style={{ fontFamily: SI_F, fontSize: 12, color: T.textMuted }}>{currentProject.si_name}</span>}
+                <span style={{ background: SI_STAGE_COLORS[currentProject.current_stage] || "#475569", color: "#FFF", padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700 }}>
+                  {currentProject.current_stage || effectiveStage(currentProject)}
+                </span>
+              </div>
+            </div>
+            <div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 12, justifyContent: "center" }}>
+                {meetingPids.map((pid, i) => {
+                  const h = projectList.find(pp => pp.pid === pid)?.status_update?.health || "on_track";
+                  return (
+                    <button key={pid} onClick={() => setMeetingIdx(i)}
+                      style={{ width: i === meetingIdx ? 20 : 6, height: 6, borderRadius: 999, background: i === meetingIdx ? HEALTH_COLORS[h] : T.cardBorder, border: 0, cursor: "pointer", transition: "width .15s, background .15s", padding: 0 }} />
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={() => setMeetingIdx(i => Math.max(i - 1, 0))} disabled={meetingIdx === 0}
+                  style={{ flex: 1, padding: "7px 0", border: `1px solid ${T.cardBorder}`, borderRadius: 6, background: T.cardSoft, color: meetingIdx === 0 ? T.textLow : T.text, fontFamily: SI_F, fontSize: 12, fontWeight: 600, cursor: meetingIdx === 0 ? "default" : "pointer" }}>
+                  ← Prev
+                </button>
+                <button onClick={() => setMeetingIdx(i => Math.min(i + 1, meetingPids.length - 1))} disabled={meetingIdx === meetingPids.length - 1}
+                  style={{ flex: 1, padding: "7px 0", border: `1px solid ${T.cardBorder}`, borderRadius: 6, background: T.cardSoft, color: meetingIdx === meetingPids.length - 1 ? T.textLow : T.text, fontFamily: SI_F, fontSize: 12, fontWeight: 600, cursor: meetingIdx === meetingPids.length - 1 ? "default" : "pointer" }}>
+                  Next →
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Center: Status + Gantt */}
+          <div style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: "20px 24px" }}>
+            <div style={{ fontFamily: SI_F, fontSize: 10.5, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.7, fontWeight: 700, marginBottom: 10 }}>Status</div>
+            <SlideStatusBlock key={currentPid} pid={currentPid} project={currentProject} T={T} actor={actor} />
+            <div style={{ fontFamily: SI_F, fontSize: 10.5, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.7, fontWeight: 700, margin: "20px 0 10px" }}>Timeline</div>
+            <div style={{ background: T.cardBg, border: `1px solid ${T.cardBorder}`, borderRadius: 8, padding: "14px 16px" }}>
+              <SIMeetingGantt project={currentProject} T={T} />
+            </div>
+          </div>
+
+          {/* Right: Overview */}
+          <div style={{ width: 320, flexShrink: 0, borderLeft: `1px solid ${T.cardBorder}`, background: T.cardBg, overflowY: "auto", padding: "20px 18px" }}>
+            <div style={{ fontFamily: SI_F, fontSize: 10.5, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.7, fontWeight: 700, marginBottom: 10 }}>Overview</div>
+            <SlideOverview key={currentPid} pid={currentPid} project={currentProject} T={T} actor={actor} />
+          </div>
+        </div>
+
+        {/* Bottom: Activity */}
+        <div style={{ height: 260, flexShrink: 0, borderTop: `1px solid ${T.cardBorder}`, background: T.cardBg, overflowY: "auto", padding: "12px 24px" }}>
+          <div style={{ fontFamily: SI_F, fontSize: 10.5, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.7, fontWeight: 700, marginBottom: 10 }}>Activity</div>
+          <SlideActivity key={currentPid} pid={currentPid} T={T} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <input type="search" value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Search project…"
+          style={{ fontFamily: SI_F, fontSize: 12, padding: "6px 10px", border: `1px solid ${T.cardBorder}`, borderRadius: 6, background: T.cardSoft, color: T.text, minWidth: 160 }} />
+        {["all", "blocked", "at_risk", "on_track"].map(h => (
+          <button key={h} onClick={() => setFilterHealth(h)}
+            style={{ padding: "5px 11px", border: `1px solid ${filterHealth === h ? (h === "all" ? "#2563EB" : HEALTH_COLORS[h]) : T.cardBorder}`, borderRadius: 6, background: filterHealth === h ? (h === "all" ? "#DBEAFE" : HEALTH_COLORS[h] + "22") : T.cardSoft, color: filterHealth === h ? (h === "all" ? "#1D4ED8" : HEALTH_COLORS[h]) : T.textMuted, fontFamily: SI_F, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+            {h === "all" ? "All" : HEALTH_EMOJI[h] + " " + HEALTH_LABELS[h]}
+          </button>
+        ))}
+        <div style={{ flex: 1 }} />
+        {sorted.length > 0 && (
+          <button onClick={() => startMeeting(sorted.map(p => p.pid))}
+            style={{ padding: "7px 16px", border: 0, borderRadius: 6, background: "#2563EB", color: "#FFF", fontFamily: SI_F, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+            Start meeting ({sorted.length})
+          </button>
+        )}
+      </div>
+
+      {sorted.length === 0 ? (
+        <div style={{ color: T.textMuted, fontFamily: SI_F, fontSize: 13, padding: "20px 0" }}>No projects match this filter.</div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12 }}>
+          {sorted.map(p => {
+            const su         = p.status_update || {};
+            const health     = su.health || "on_track";
+            const blockerCnt = Object.values(su.blockers || {}).filter(b => b && !b.resolved).length;
+            const actionCnt  = Object.values(su.action_items || {}).filter(a => a && !a.done).length;
+            return (
+              <div key={p.pid} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderLeft: `4px solid ${HEALTH_COLORS[health]}`, borderRadius: 8, padding: "14px 16px" }}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontSize: 16 }}>{HEALTH_EMOJI[health]}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontFamily: SI_F, fontSize: 14, fontWeight: 700, color: T.text }}>{p.name}</div>
+                    <div style={{ fontFamily: SI_F, fontSize: 11.5, color: T.textMuted, marginTop: 3, display: "flex", alignItems: "center", gap: 8 }}>
+                      {p.si_name && <span>{p.si_name}</span>}
+                      <span style={{ background: SI_STAGE_COLORS[p.current_stage] || "#94A3B8", color: "#FFF", padding: "1px 7px", borderRadius: 999, fontSize: 10.5, fontWeight: 700 }}>{p.current_stage || effectiveStage(p)}</span>
+                    </div>
+                  </div>
+                  <button onClick={() => startMeeting([p.pid])}
+                    style={{ padding: "4px 10px", border: `1px solid ${T.cardBorder}`, borderRadius: 5, background: "transparent", color: T.textMuted, fontFamily: SI_F, fontSize: 11, cursor: "pointer", flexShrink: 0 }}>
+                    Present
+                  </button>
+                </div>
+                {su.summary && (
+                  <p style={{ fontFamily: SI_F, fontSize: 12.5, color: T.textMuted, lineHeight: 1.55, margin: "0 0 8px 0", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{su.summary}</p>
+                )}
+                <div style={{ display: "flex", gap: 10, fontFamily: SI_F, fontSize: 11, alignItems: "center" }}>
+                  {blockerCnt > 0 && <span style={{ color: HEALTH_COLORS.blocked }}>🔴 {blockerCnt} blocker{blockerCnt > 1 ? "s" : ""}</span>}
+                  {actionCnt  > 0 && <span style={{ color: T.textMuted }}>📋 {actionCnt} action{actionCnt > 1 ? "s" : ""}</span>}
+                  {su.updated_at && <span style={{ color: T.textMuted, marginLeft: "auto" }}>{timeAgo(su.updated_at)}</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFullscreen }) {
   // AllSIProjectsView is the provider — it computes siS from T and pushes
   // into context. Don't read from context here; we'd hit a circular dep.
@@ -5593,6 +5932,7 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
   const allProjects = Object.entries(siProjects)
     .map(([pid, p]) => ({ pid, ...(p || {}) }))
     .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const [syncVersion, setSyncVersion]  = useState(0); // bumped on every manual sync to force auto-stub re-run
   const [tab, setTab]                 = useState("dashboard"); // dashboard | timeline | kanban | si_fleet | si_sird_gen | si_testplan_gen | misc_docs
   // Per-tab theme: each tab remembers its own preference. Timeline
   // defaults to light (Gantt reads better there); others default to dark.
@@ -5622,7 +5962,40 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
     setThemeState(t);
     try { localStorage.setItem(`dp_si_theme.${tab}`, t); } catch (_) {}
   };
-  const [selectedPid, setSelectedPid] = useState(null);
+  // URL routing: /si/projects/{pid} gives each project a shareable URL.
+  const [selectedPid, setSelectedPidRaw] = useState(() => {
+    const m = window.location.pathname.match(/^\/si\/projects\/([^/]+)\/?$/);
+    return m ? m[1] : null;
+  });
+  // True when selectedPid was set by a user click (not from the URL on initial load).
+  // We never auto-bounce URL-sourced pids — the project data may not have loaded yet.
+  const pidFromUserAction = useRef(false);
+  const setSelectedPid = (pid) => {
+    pidFromUserAction.current = true;
+    setSelectedPidRaw(pid);
+    if (pid) {
+      window.history.pushState({}, "", `/si/projects/${pid}`);
+    } else {
+      window.history.pushState({}, "", "/si");
+    }
+  };
+  // Keep URL in sync if the project disappears (deleted while open).
+  useEffect(() => {
+    if (!selectedPid) return;
+    const m = window.location.pathname.match(/^\/si\/projects\/([^/]+)\/?$/);
+    if (!m || m[1] !== selectedPid) {
+      window.history.pushState({}, "", `/si/projects/${selectedPid}`);
+    }
+  }, [selectedPid]);
+  // Sync React state when the browser Back/Forward buttons change the URL.
+  useEffect(() => {
+    const onPop = () => {
+      const m = window.location.pathname.match(/^\/si\/projects\/([^/]+)\/?$/);
+      setSelectedPidRaw(m ? m[1] : null);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
   // The project drill-in is intentionally always light, regardless of the
   // tab the user clicked through from (Dashboard / Timeline / Kanban). The
   // tab's own theme resumes the moment they go back.
@@ -5637,12 +6010,15 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
   const [search, setSearch]           = useState("");
   const [filterSi, setFilterSi]       = useState("");
   const [filterStage, setFilterStage] = useState("");
+  const [hideOnHold, setHideOnHold]   = useState(true);
+  const [hideLive, setHideLive]       = useState(true);
   const [expandedRows, setExpandedRows] = useState({});
   // Global preview-modal state. Components below set this when the user
   // clicks a file or inspection image; rendered once at the bottom.
   const [previewFile, setPreviewFile] = useState(null);
   const [syncing, setSyncing]         = useState(false);
   const [syncMsg, setSyncMsg]         = useState("");
+  const [aiOpen, setAiOpen]           = useState(false);
 
   const syncWithHubspot = async () => {
     setSyncing(true); setSyncMsg("");
@@ -5670,6 +6046,7 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
           })
       );
       setSyncMsg(n != null ? `Synced ${n} project${n === 1 ? "" : "s"} ✓` : "Sync complete ✓");
+      setSyncVersion(v => v + 1);
       setTimeout(() => setSyncMsg(""), 6000);
     } catch (e) {
       setSyncMsg(`Sync failed: ${e?.message || e}`);
@@ -5692,11 +6069,13 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
     if (q && !siMatchesQuery(p, q)) return false;
     if (filterSi && p.si_name !== filterSi) return false;
     if (filterStage && effectiveStage(p) !== filterStage) return false;
+    if (hideOnHold && p.is_blocked) return false;
+    if (hideLive && effectiveStage(p) === "Live") return false;
     return true;
   });
   const allSiNames = Array.from(new Set(allProjects.map(p => p.si_name).filter(Boolean))).sort();
-  const hasActiveFilter = !!(q || filterSi || filterStage);
-  const clearFilters = () => { setSearch(""); setFilterSi(""); setFilterStage(""); };
+  const hasActiveFilter = !!(q || filterSi || filterStage || hideOnHold || hideLive);
+  const clearFilters = () => { setSearch(""); setFilterSi(""); setFilterStage(""); setHideOnHold(false); setHideLive(false); };
 
   useEffect(() => { setSiFullscreen?.(true); return () => setSiFullscreen?.(false); }, [setSiFullscreen]);
 
@@ -5720,29 +6099,46 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
     if (!candidates.length) return;
     (async () => {
       for (const hp of candidates) {
-        // Check auto-stub first — if it already exists, nothing to do
         const autoPid = `hs_${hp.hubspotId || hp.id}`;
-        if (siProjects[autoPid]) continue;
+        const hsStage = HUBSPOT_TO_SI_STAGE[normalizeSiStage(hp.siStage)] || "SIRD";
+        const hsStageDates = hp.hubspotStageDates || {};
+
+        // Helper: build a patch of all HubSpot-driven scalar fields that differ.
+        const hsPatch = (existing) => {
+          const merged = buildStageDatesFromHubspot(hsStageDates, existing.stage_dates || {});
+          const p = {};
+          if (existing.current_stage !== hsStage)                             p.current_stage    = hsStage;
+          if (JSON.stringify(merged) !== JSON.stringify(existing.stage_dates || {})) p.stage_dates = merged;
+          if (existing.name !== (hp.name || ""))                              p.name             = hp.name || "";
+          if (existing.si_name !== (extractSiName(hp.name) || ""))           p.si_name          = extractSiName(hp.name) || "";
+          if (existing.customer !== (hp.customer || ""))                      p.customer         = hp.customer || "";
+          if (existing.factory_location !== (hp.deployLocation || ""))       p.factory_location = hp.deployLocation || "";
+          if (existing.hubspot_id !== (hp.hubspotId || null))                p.hubspot_id       = hp.hubspotId || null;
+          return p;
+        };
+
+        // If auto-stub already exists, sync all HubSpot-driven fields.
+        if (siProjects[autoPid]) {
+          const patch = hsPatch(siProjects[autoPid]);
+          if (Object.keys(patch).length) await update(ref(db, `appState/siProjects/${autoPid}`), patch);
+          continue;
+        }
+
         // Prefer hubspot_id match over fuzzy name matching to avoid
         // false positives (e.g. "Aivres P3" matching "P3 — NOVA")
         const byHsId = hp.hubspotId
           ? allProjects.find(p => p.hubspot_id === hp.hubspotId)
           : null;
         const linked = byHsId || findLinkedSiProject(hp, allProjects);
-        const hsStageDates = hp.hubspotStageDates || {};
         if (linked) {
-          // Existing manual project — non-destructively merge any HubSpot
-          // stage dates we have but the user hasn't filled in yet.
-          const merged = buildStageDatesFromHubspot(hsStageDates, linked.stage_dates || {});
-          const changed = JSON.stringify(merged) !== JSON.stringify(linked.stage_dates || {});
-          if (changed) {
-            await update(ref(db, `appState/siProjects/${linked.pid}`), { stage_dates: merged });
-            logSIActivity(linked.pid, "hubspot_dates_merge", `Imported HubSpot stage dates`, actor);
+          // Existing manual project — sync name, stage, dates, and HubSpot link.
+          const patch = hsPatch(linked);
+          if (Object.keys(patch).length) {
+            await update(ref(db, `appState/siProjects/${linked.pid}`), patch);
+            logSIActivity(linked.pid, "hubspot_sync", `Synced name/stage/dates from HubSpot`, actor);
           }
           continue;
         }
-        const hsStage = normalizeSiStage(hp.siStage);
-        const stage = HUBSPOT_TO_SI_STAGE[hsStage] || "SIRD";
         const stageDates = buildStageDatesFromHubspot(hsStageDates);
         await set(ref(db, `appState/siProjects/${autoPid}`), {
           name: hp.name || "(unnamed)",
@@ -5750,7 +6146,7 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
           customer: hp.customer || "",
           cm_site: "",
           factory_location: hp.deployLocation || "",
-          current_stage: stage,
+          current_stage: hsStage,
           stage_dates: stageDates,
           stations: {},
           hubspot_id: hp.hubspotId || null,
@@ -5761,9 +6157,21 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
         });
         logSIActivity(autoPid, "auto_create_from_hubspot", `Auto-created from HubSpot project "${hp.name}"`, actor);
       }
+
+      // Remove siProject stubs for HubSpot-linked projects no longer in the SI pipeline.
+      const activeHsIds = new Set(candidates.map(hp => String(hp.hubspotId || hp.id)).filter(Boolean));
+      for (const sp of allProjects) {
+        if (sp.hubspot_id && !activeHsIds.has(String(sp.hubspot_id))) {
+          await remove(ref(db, `appState/siProjects/${sp.pid}`));
+          logSIActivity(sp.pid, "auto_remove", `Removed — no longer in HubSpot SI pipeline`, actor);
+        }
+      }
     })();
-    // Only re-run when the set of HubSpot project ids changes, not on every render
-  }, [state.projects?.length, state.siProjectsLoaded, isSIAdminUser, actor]);  // eslint-disable-line
+    // Re-run whenever the exact set of SI pipeline project IDs changes (add OR remove)
+  }, [
+    (state.projects || []).filter(p => p.status === "active" && p.hubspotPipelineId === SI_PARTNER_PIPELINE_ID).map(p => p.hubspotId || p.id).sort().join(","),
+    state.siProjectsLoaded, isSIAdminUser, actor, syncVersion,
+  ]);  // eslint-disable-line
 
   // Generic patch-by-path helper used by the drill-in subviews + Gantt
   // inline edits. Optimistically updates local state so the UI is snappy.
@@ -5797,10 +6205,19 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
   // body switches between dashboard content and the drill-in based on
   // selectedPid below.
   const drillProject = selectedPid ? siProjects[selectedPid] : null;
-  if (selectedPid && !drillProject) {
-    // Project disappeared — bounce back to list.
-    setSelectedPid(null);
-  }
+  // Bounce back to list only when the project genuinely disappears (deleted while open).
+  // Never bounce a pid that came from the initial URL — data may not have loaded yet.
+  useEffect(() => {
+    if (!pidFromUserAction.current) return;
+    if (!selectedPid || !state.siProjectsLoaded) return;
+    if (!siProjects[selectedPid]) setSelectedPid(null);
+  }, [selectedPid, state.siProjectsLoaded, siProjects]);
+  // HubSpot project record for the current drill-in (team fields, deploy location, etc.)
+  const hsProjects = state.projects || [];
+  const drillHsProject = drillProject
+    ? (Array.isArray(hsProjects) ? hsProjects : Object.values(hsProjects))
+        .find(p => String(p.hubspotId || p.hs_id || "") === String(drillProject.hubspot_id || ""))
+    : null;
 
   // When the drill-in's "Manage in <Generator>" link is clicked, we want the
   // destination tab's project picker to be pre-set to the project the user
@@ -5874,6 +6291,7 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
           {navTab("dashboard", "Dashboard")}
           {navTab("timeline",  "Timeline")}
           {navTab("kanban",    "Kanban")}
+          {navTab("meeting",   "Meeting")}
           <div style={{ position: "relative" }}>
             <button onClick={() => setManageOpen(o => !o)} onBlur={() => setTimeout(() => setManageOpen(false), 150)}
               style={{
@@ -5908,6 +6326,18 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
         <div style={{ flex: 1 }} />
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {syncMsg && <span style={{ fontFamily: SI_F, fontSize: 11, color: syncMsg.startsWith("Sync failed") ? "#DC2626" : "#16A34A" }}>{syncMsg}</span>}
+          <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            title={theme === "dark" ? "Light mode" : "Dark mode"}
+            style={{ padding: "5px 10px", border: `1px solid ${NAV_BORDER}`, borderRadius: 6, background: NAV_HOVER, color: NAV_MUTED, fontFamily: SI_F, fontSize: 14, cursor: "pointer" }}>
+            {theme === "dark" ? "☀" : "☾"}
+          </button>
+          <button onClick={() => setAiOpen(v => !v)}
+            aria-label={aiOpen ? "Close AI assistant" : "Open AI assistant"}
+            aria-expanded={aiOpen}
+            style={{ padding: "5px 12px", border: `1px solid ${aiOpen ? "#7C3AED" : NAV_BORDER}`, borderRadius: 6, background: aiOpen ? "#4C1D95" : NAV_HOVER, color: aiOpen ? "#DDD6FE" : NAV_TEXT, fontFamily: SI_F, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+            🤖 AI
+          </button>
           <button onClick={syncWithHubspot} disabled={syncing}
             style={{ padding: "5px 12px", border: `1px solid ${NAV_BORDER}`, borderRadius: 6, background: NAV_HOVER, color: NAV_TEXT, fontFamily: SI_F, fontSize: 12, fontWeight: 600, cursor: syncing ? "wait" : "pointer", opacity: syncing ? 0.7 : 1 }}>
             {syncing ? "⏳ Syncing…" : "↻ Sync with HubSpot"}
@@ -5921,8 +6351,10 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
             <SIProjectDetail
               pid={selectedPid}
               project={drillProject}
+              hubspotProject={drillHsProject}
               siProjects={siProjects}
               isSIAdminUser={isSIAdminUser}
+              isAdmin={user?.role === "admin" || !!user?.superAdmin}
               actor={actor}
               user={user}
               onBack={() => setSelectedPid(null)}
@@ -5973,6 +6405,14 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
                     <option value="">All stages</option>
                     {SI_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
+                  <button onClick={() => setHideOnHold(v => !v)}
+                    style={{ fontFamily: SI_F, fontSize: 11, padding: "5px 10px", background: hideOnHold ? "#FEF2F2" : "transparent", border: `1px solid ${hideOnHold ? "#DC2626" : "#E2E8F0"}`, borderRadius: 5, color: hideOnHold ? "#DC2626" : "#64748B", cursor: "pointer" }}>
+                    {hideOnHold ? "Showing on hold" : "Hide on hold"}
+                  </button>
+                  <button onClick={() => setHideLive(v => !v)}
+                    style={{ fontFamily: SI_F, fontSize: 11, padding: "5px 10px", background: hideLive ? "#F0FDF4" : "transparent", border: `1px solid ${hideLive ? "#16A34A" : "#E2E8F0"}`, borderRadius: 5, color: hideLive ? "#16A34A" : "#64748B", cursor: "pointer" }}>
+                    {hideLive ? "Showing live" : "Hide live"}
+                  </button>
                   {hasActiveFilter && (
                     <button onClick={clearFilters}
                       style={{ fontFamily: SI_F, fontSize: 11, padding: "5px 10px", background: "transparent", border: "1px solid #E2E8F0", borderRadius: 5, color: "#64748B", cursor: "pointer" }}>
@@ -5994,6 +6434,7 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
                         <th style={siS.th}>SI</th>
                         <th style={siS.th}>Stage</th>
                         <th style={siS.th}>What's next</th>
+                        <th style={siS.th}>Status</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -6036,10 +6477,17 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
                               ); })()}
                             </td>
                             <td style={{ ...siS.td, color: "#64748B", fontSize: 12.5 }}>{whatsNext(p)}</td>
+                            <td style={siS.td}>
+                              {(() => {
+                                const h = p.status_update?.health;
+                                if (!h) return <span style={{ color: "#94A3B8" }}>—</span>;
+                                return <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 8px", borderRadius: 999, background: HEALTH_COLORS[h] + "22", border: `1px solid ${HEALTH_COLORS[h]}55`, fontSize: 11.5, fontWeight: 700, color: HEALTH_COLORS[h] }}>{HEALTH_EMOJI[h]} {HEALTH_LABELS[h]}</span>;
+                              })()}
+                            </td>
                           </tr>
                           {isOpen && (
                             <tr>
-                              <td colSpan={5} style={{ padding: 0, borderBottom: "1px solid #E2E8F0", background: siS.cardSoft }}>
+                              <td colSpan={6} style={{ padding: 0, borderBottom: "1px solid #E2E8F0", background: siS.cardSoft }}>
                                 <div style={{ padding: "8px 14px", fontFamily: SI_F, fontSize: 12 }}>
                                   {stations.length === 0 ? (
                                     <div style={{ color: "#64748B" }}>No stations yet — open the project to add one.</div>
@@ -6089,8 +6537,9 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
           </div>
         )}
 
-        {tab === "timeline" && <SIGanttView projectList={projectList} onOpen={setSelectedPid} theme={theme} actor={actor} />}
-        {tab === "kanban"   && <SIKanbanBoard hubspotProjects={state.projects || []} siProjects={siProjects} onOpenDrillIn={setSelectedPid} setState={setState} user={user} />}
+        {tab === "timeline" && <SITabBoundary tabKey="timeline"><SIGanttView projectList={projectList} onOpen={setSelectedPid} theme={theme} setTheme={setTheme} actor={actor} /></SITabBoundary>}
+        {tab === "kanban"   && <SITabBoundary tabKey="kanban"><SIKanbanBoard allProjects={allProjects} onOpenDrillIn={setSelectedPid} setState={setState} user={user} theme={theme} setTheme={setTheme} /></SITabBoundary>}
+        {tab === "meeting"  && <SITabBoundary tabKey="meeting"><SIMeetingMode projectList={projectList} actor={actor} theme={theme} setTheme={setTheme} /></SITabBoundary>}
         {tab === "si_fleet"        && <SIFleetScorecard projectList={projectList} />}
         {tab === "si_sird_gen"     && <SIRDGeneratorView    projectList={projectList} isSIAdminUser={isSIAdminUser} user={user}  initialPid={pendingPid} onConsumeInitialPid={() => setPendingPid(null)} />}
         {tab === "si_testplan_gen" && <TestPlanGeneratorView projectList={projectList} isSIAdminUser={isSIAdminUser} user={user}  initialPid={pendingPid} onConsumeInitialPid={() => setPendingPid(null)} />}
@@ -6098,6 +6547,7 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
         </>}
       </div>
 
+      {aiOpen && <SIAIPanel projectList={allProjects} actor={actor} onClose={() => setAiOpen(false)} currentPid={selectedPid || null} currentStageDates={selectedPid ? (siProjects[selectedPid]?.stage_dates || null) : null} />}
       {showNew && <NewSIProjectModal onClose={() => setShowNew(false)} existing={siProjects} />}
       {showImport && <ImportFromFixtureTrackerModal onClose={() => setShowImport(false)} existing={siProjects} />}
       {showCsvImport && <CsvImportModal onClose={() => setShowCsvImport(false)} existing={siProjects} actor={actor} />}
@@ -6243,6 +6693,31 @@ function CsvImportModal({ onClose, existing, actor }) {
    plan or the Timeline view, not via a dropdown. */
 /* Error boundary for the drill-in so a crash shows a recoverable message
    instead of a blank/black page. */
+class SITabBoundary extends React.Component {
+  constructor(p) { super(p); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error("[SITabBoundary]", error, info); }
+  componentDidUpdate(prev) {
+    if (prev.tabKey !== this.props.tabKey) this.setState({ error: null });
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div role="alert" style={{ background: "#FFF", border: "1px solid #FCA5A5", borderRadius: 8, padding: 24, color: "#0F172A", fontFamily: SI_F }}>
+          <h2 style={{ margin: "0 0 8px", color: "#B91C1C", fontSize: 16 }}>This tab hit an unexpected error</h2>
+          <p style={{ margin: "0 0 14px", fontSize: 13, color: "#475569" }}>
+            Try switching to another tab and back, or reload the page.
+          </p>
+          <pre style={{ margin: 0, padding: 12, background: "#FEF2F2", color: "#7F1D1D", borderRadius: 6, fontFamily: "ui-monospace, monospace", fontSize: 11.5, whiteSpace: "pre-wrap", overflow: "auto", maxHeight: 200 }}>
+            {String(this.state.error?.message || this.state.error)}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 class SIDrillBoundary extends React.Component {
   constructor(p) { super(p); this.state = { error: null }; }
   static getDerivedStateFromError(error) { return { error }; }
@@ -6268,14 +6743,29 @@ class SIDrillBoundary extends React.Component {
   }
 }
 
-function SIProjectDetail({ pid, project, siProjects, isSIAdminUser, actor, user, onBack, onDelete, saveField, writeAt, updateAt, removeAt }) {
+const PROGRAM_DOCS = [
+  { key: "active_program_folder", label: "Active Program Folder" },
+  { key: "scoping_doc",           label: "Scoping Doc" },
+  { key: "fat",                   label: "FAT" },
+  { key: "sat",                   label: "SAT" },
+  { key: "dfm",                   label: "DFM" },
+  { key: "sird",                  label: "SIRD" },
+];
+
+function SIProjectDetail({ pid, project, hubspotProject, siProjects, isSIAdminUser, isAdmin, actor, onBack, onDelete, saveField, writeAt, updateAt, removeAt }) {
   const siS = useSIS();
+  const T = THEMES.light;
+  const backBtnRef = useRef(null);
+  // Move focus to Back button when this detail view mounts (drill-in navigation).
+  useEffect(() => { backBtnRef.current?.focus(); }, []);
   const stations = project.stations || {};
   const files = project.files || {};
   const stationsList = Object.entries(stations).map(([sid, s]) => ({ sid, ...(s || {}) }))
     .sort((a, b) => (a.station_number || 0) - (b.station_number || 0));
   const deployedFactories = new Set(stationsList.map(s => s.deployment_factory).filter(Boolean));
   const fatPlannedDate = project.stage_dates?.FAT?.planned_start || null;
+  // Team fields resolved from HubSpot sync (via appState/projects/{hs_id}/team).
+  const team = hubspotProject?.team || {};
 
   const addDriveLink = async () => {
     const url = prompt("Paste the Google Drive folder URL:");
@@ -6289,7 +6779,7 @@ function SIProjectDetail({ pid, project, siProjects, isSIAdminUser, actor, user,
       {/* "Back to Dashboard" strip — sits inside the shared AllSIProjectsView
           nav, so the top bar (logo + tabs + theme toggle) stays visible. */}
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-        <button onClick={onBack}
+        <button ref={backBtnRef} onClick={onBack}
           style={{ padding: "6px 14px", border: "1px solid #E2E8F0", borderRadius: 6, background: "#FFF", color: "#64748B", fontFamily: SI_F, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
           ← Back to Dashboard
         </button>
@@ -6333,30 +6823,149 @@ function SIProjectDetail({ pid, project, siProjects, isSIAdminUser, actor, user,
           ) : null}
         </div>
 
-        {/* Stations — richer table (matches fixture_tracker columns) */}
+        {/* Team panel — resolved from HubSpot sync */}
+        <div style={siS.card}>
+          <h3 style={{ ...siS.h2, fontSize: 13.5, marginBottom: 12 }}>Team</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "10px 20px" }}>
+            {[
+              { label: "TPM",              value: team?.tpm?.name || null },
+              { label: "SA",               value: team?.sa?.name },
+              { label: "FDE",              value: team?.fde?.name },
+              { label: "FAT Owner",        value: team?.fatOwner?.name },
+              { label: "SAT Owner",        value: team?.satOwner?.name },
+              { label: "CS",               value: team?.cs?.name },
+              { label: "Customer",         value: project.customer || hubspotProject?.customer },
+              { label: "Stations",         value: stationsList.length || null },
+              { label: "CM",               value: team?.contractManufacturer },
+              { label: "Deploy Location",  value: team?.deployLocation || hubspotProject?.deployLocation },
+            ].map(({ label, value }) => (
+              <div key={label}>
+                <div style={{ fontFamily: SI_F, fontSize: 10, color: "#94A3B8", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>{label}</div>
+                <div style={{ fontFamily: SI_F, fontSize: 13, color: value != null && value !== "" ? "#0F172A" : "#CBD5E1" }}>{value != null && value !== "" ? String(value) : "—"}</div>
+              </div>
+            ))}
+            <div style={{ gridColumn: "span 2" }}>
+              <div style={{ fontFamily: SI_F, fontSize: 10, color: "#94A3B8", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>SI PM</div>
+              {team?.siPm?.name || team?.siPm?.email ? (
+                <div>
+                  {team.siPm.name  && <div style={{ fontFamily: SI_F, fontSize: 13, color: "#0F172A" }}>{team.siPm.name}</div>}
+                  {team.siPm.email && <div style={{ fontFamily: SI_F, fontSize: 12, color: "#475569" }}>{team.siPm.email}</div>}
+                  {team.siPm.wechat && <div style={{ fontFamily: SI_F, fontSize: 12, color: "#475569" }}>WeChat: {team.siPm.wechat}</div>}
+                </div>
+              ) : <div style={{ fontFamily: SI_F, fontSize: 13, color: "#CBD5E1" }}>—</div>}
+            </div>
+          </div>
+        </div>
+
+        {/* Status + Overview — two-column layout.
+            Left: Status block + Timeline Gantt.
+            Right: Program Documents → Inspection → Overview fields. */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, alignItems: "start" }}>
+          {/* Left column */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <SlideStatusBlock pid={pid} project={project} T={T} actor={actor} />
+            <div style={siS.card}>
+              <h3 style={{ ...siS.h2, fontSize: 13, marginBottom: 10 }}>Timeline</h3>
+              <SIMeetingGantt project={project} T={T} />
+            </div>
+          </div>
+          {/* Right column */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {/* Program Documents — simplified: clickable name + Edit URL */}
+            <div style={siS.card}>
+              <h3 style={{ ...siS.h2, fontSize: 13.5, marginBottom: 10 }}>Program Documents</h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {PROGRAM_DOCS.map(({ key, label }) => {
+                  const docUrl = (project.documents || {})[key] || "";
+                  return (
+                    <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "1px solid #F1F5F9" }}>
+                      {docUrl ? (
+                        <a href={docUrl} target="_blank" rel="noopener"
+                          style={{ fontFamily: SI_F, fontSize: 13, color: "#2563EB", textDecoration: "none", flex: 1, fontWeight: 500 }}
+                          title={docUrl}>{label}</a>
+                      ) : (
+                        <span style={{ fontFamily: SI_F, fontSize: 13, color: "#94A3B8", flex: 1 }}>{label}</span>
+                      )}
+                      {isSIAdminUser && (
+                        <button
+                          onClick={async () => {
+                            const next = prompt(`${label} URL:`, docUrl);
+                            if (next === null) return;
+                            await update(ref(db, `appState/siProjects/${pid}/documents`), { [key]: next.trim() || null });
+                          }}
+                          aria-label={`Edit URL for ${label}`}
+                          style={{ padding: "2px 8px", border: "1px solid #CBD5E1", borderRadius: 4, background: "#FFF", color: "#475569", fontFamily: SI_F, fontSize: 10.5, cursor: "pointer", flexShrink: 0 }}>
+                          Edit URL
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* What we're inspecting */}
+            <SIInspectionSection
+              pid={pid} inspection={project.inspection || {}} isSIAdminUser={isSIAdminUser} actor={actor}
+              writeAt={writeAt} updateAt={updateAt} removeAt={removeAt} />
+
+            {/* Overview fields — SI, Customer, Stage, Contacts, Key dates, Notes */}
+            <SlideOverview pid={pid} project={project} T={T} actor={actor} />
+          </div>
+        </div>
+
+        {/* Stations */}
         <SIStationsSection
           pid={pid} stations={stations} isSIAdminUser={isSIAdminUser} actor={actor}
           deployedFactories={deployedFactories.size}
+          defaultFactory={team?.deployLocation || hubspotProject?.deployLocation || ""}
           writeAt={writeAt} updateAt={updateAt} removeAt={removeAt} />
 
-        {/* Documents — SIRD / FAT / SAT cards + DFM zones */}
-        <SIDocumentsSection
-          pid={pid} project={project} files={files} isSIAdminUser={isSIAdminUser} actor={actor}
-          writeAt={writeAt} removeAt={removeAt} />
+        {/* Documents — collapsible */}
+        <details style={{ borderRadius: 8, border: "1px solid #E2E8F0", background: "#FFF" }}>
+          <summary style={{ padding: "12px 16px", fontFamily: SI_F, fontSize: 13.5, fontWeight: 700, color: "#0F172A", cursor: "pointer", listStyle: "none", display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ color: "#94A3B8", fontSize: 11 }}>▸</span> Documents
+          </summary>
+          <div style={{ padding: "0 16px 16px" }}>
+            <SIDocumentsSection
+              pid={pid} project={project} files={files} isSIAdminUser={isSIAdminUser} actor={actor}
+              writeAt={writeAt} removeAt={removeAt} />
+          </div>
+        </details>
 
-        {/* Executed test plans (FAT + SAT) */}
-        <SIExecutedTestPlansCard pid={pid} project={project} isSIAdminUser={isSIAdminUser} actor={actor} />
+        {/* Executed test plans — collapsible */}
+        <details style={{ borderRadius: 8, border: "1px solid #E2E8F0", background: "#FFF" }}>
+          <summary style={{ padding: "12px 16px", fontFamily: SI_F, fontSize: 13.5, fontWeight: 700, color: "#0F172A", cursor: "pointer", listStyle: "none", display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ color: "#94A3B8", fontSize: 11 }}>▸</span> Executed test plans
+          </summary>
+          <div style={{ padding: "0 16px 16px" }}>
+            <SIExecutedTestPlansCard pid={pid} project={project} isSIAdminUser={isSIAdminUser} actor={actor} />
+          </div>
+        </details>
 
-        {/* Misc Documents */}
-        <SIMiscDocsCard pid={pid} files={files} isSIAdminUser={isSIAdminUser} actor={actor} />
+        {/* Coverage Doc & BOM + Misc Documents — collapsible */}
+        <details style={{ borderRadius: 8, border: "1px solid #E2E8F0", background: "#FFF" }}>
+          <summary style={{ padding: "12px 16px", fontFamily: SI_F, fontSize: 13.5, fontWeight: 700, color: "#0F172A", cursor: "pointer", listStyle: "none", display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ color: "#94A3B8", fontSize: 11 }}>▸</span> Coverage Doc &amp; BOM
+          </summary>
+          <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
+            <SIMiscDocsCard pid={pid} files={files} isSIAdminUser={isSIAdminUser} actor={actor} />
+            <SICoverageBomCard pid={pid} files={files} isSIAdminUser={isSIAdminUser} actor={actor} />
+          </div>
+        </details>
 
-        {/* Coverage Doc & BOM */}
-        <SICoverageBomCard pid={pid} files={files} isSIAdminUser={isSIAdminUser} actor={actor} />
-
-        {/* What we're inspecting */}
-        <SIInspectionSection
-          pid={pid} inspection={project.inspection || {}} isSIAdminUser={isSIAdminUser} actor={actor}
-          writeAt={writeAt} updateAt={updateAt} removeAt={removeAt} />
+        {/* Danger Zone — full admins only, pinned to bottom */}
+        {isAdmin && (
+          <div style={{ marginTop: 8, padding: 12, border: "1px solid #EF4444", borderRadius: 6, background: "#FFF" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontFamily: SI_F, fontSize: 11, color: "#EF4444", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>Danger Zone</span>
+              <button onClick={onDelete}
+                style={{ padding: "6px 14px", border: 0, borderRadius: 6, background: "#EF4444", color: "#FFF", fontFamily: SI_F, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+                🗑 Delete project
+              </button>
+            </div>
+          </div>
+        )}
       </div>
       {/* v4.7.2: AI Bot for the SI drill-in — reuses ProjectBotChat UI with isSIProject flag.
           The CF (askProjectBot) branches on siProjectId to read appState/siProjects schema. */}
@@ -6805,21 +7414,41 @@ function SIInspectionSection({ pid, inspection, isSIAdminUser, actor, writeAt, u
     }
     Object.entries(updates).forEach(([iid, t]) => updateAt(`appState/siProjects/${pid}/inspection/${iid}`, { section_title: t }));
   };
-  const onUploadImage = async (iid, file) => {
-    if (!file) return;
-    const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, "_");
-    const storagePath = `siProjectInspection/${pid}/${Date.now()}_${safeName}`;
-    const sr = sRef(storage, storagePath);
-    await uploadBytes(sr, file, { contentType: file.type || undefined });
-    const url = await getDownloadURL(sr);
-    updateAt(`appState/siProjects/${pid}/inspection/${iid}`, {
-      image_storage_path: storagePath, image_url: url, image_filename: file.name,
-    });
+  const onUploadImages = async (iid, files) => {
+    if (!files?.length) return;
+    const errors = [];
+    for (const file of Array.from(files)) {
+      try {
+        const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, "_");
+        const storagePath = `siProjectInspection/${pid}/${Date.now()}_${safeName}`;
+        const sr = sRef(storage, storagePath);
+        await uploadBytes(sr, file, { contentType: file.type || undefined });
+        const url = await getDownloadURL(sr);
+        const imgRef = push(ref(db, `appState/siProjects/${pid}/inspection/${iid}/images`));
+        await set(imgRef, { url, storagePath, filename: file.name, uploadedAt: Date.now() });
+      } catch (e) {
+        errors.push(`"${file.name}": ${e?.message || e}`);
+      }
+    }
+    if (errors.length) alert(`Upload failed for ${errors.length} file${errors.length > 1 ? "s" : ""}:\n\n${errors.join("\n")}`);
+  };
+  const onDeleteImage = async (iid, imageId, storagePath) => {
+    if (!confirm("Delete this image?")) return;
+    if (storagePath) {
+      try { await deleteObject(sRef(storage, storagePath)); } catch (_) { /* may already be gone */ }
+    }
+    removeAt(`appState/siProjects/${pid}/inspection/${iid}/images/${imageId}`);
   };
   const deleteRow = async (it) => {
     if (!confirm("Delete this row?")) return;
+    // Delete all images in the row
+    const imgs = Object.entries(it.images || {});
+    for (const [, img] of imgs) {
+      if (img.storagePath) try { await deleteObject(sRef(storage, img.storagePath)); } catch (_) {}
+    }
+    // Also handle legacy single image field
     if (it.image_storage_path) {
-      try { await deleteObject(sRef(storage, it.image_storage_path)); } catch (_) { /* */ }
+      try { await deleteObject(sRef(storage, it.image_storage_path)); } catch (_) {}
     }
     removeAt(`appState/siProjects/${pid}/inspection/${it.iid}`);
   };
@@ -6832,9 +7461,9 @@ function SIInspectionSection({ pid, inspection, isSIAdminUser, actor, writeAt, u
       <table style={{ ...siS.table, tableLayout: "fixed" }}>
         <thead>
           <tr>
-            <th style={{ ...siS.th, background: "#0F172A", color: "#FFF", width: "25%", borderBottom: "1px solid #0F172A" }}>Connectors Covered</th>
-            <th style={{ ...siS.th, background: "#0F172A", color: "#FFF", borderBottom: "1px solid #0F172A" }}>IMAGETYPE (for filename)</th>
-            <th style={{ ...siS.th, background: "#0F172A", color: "#FFF", width: 220, textAlign: "center", borderBottom: "1px solid #0F172A" }}>Reference Image</th>
+            <th style={{ ...siS.th, background: "#0F172A", color: "#FFF", width: "18%", borderBottom: "1px solid #0F172A" }}>Connectors Covered</th>
+            <th style={{ ...siS.th, background: "#0F172A", color: "#FFF", width: "22%", borderBottom: "1px solid #0F172A" }}>IMAGETYPE (for filename)</th>
+            <th style={{ ...siS.th, background: "#0F172A", color: "#FFF", textAlign: "center", borderBottom: "1px solid #0F172A" }}>Reference Image</th>
           </tr>
         </thead>
         {sections.map((sec, idx) => (
@@ -6858,7 +7487,8 @@ function SIInspectionSection({ pid, inspection, isSIAdminUser, actor, writeAt, u
             ) : sec.rows.map(it => (
               <InspectionRow key={it.iid} it={it} isSIAdminUser={isSIAdminUser}
                 onUpdate={(field, value) => updateField(it.iid, field, value)}
-                onUploadImage={(file) => onUploadImage(it.iid, file)}
+                onUploadImages={(files) => onUploadImages(it.iid, files)}
+                onDeleteImage={(imageId, storagePath) => onDeleteImage(it.iid, imageId, storagePath)}
                 onDelete={() => deleteRow(it)} />
             ))}
           </tbody>
@@ -6867,46 +7497,88 @@ function SIInspectionSection({ pid, inspection, isSIAdminUser, actor, writeAt, u
     </Section>
   );
 }
-function InspectionRow({ it, isSIAdminUser, onUpdate, onUploadImage, onDelete }) {
+function InspectionImageThumb({ imageId, url, filename, storagePath, isSIAdminUser, onDelete }) {
+  const [hovered, setHovered] = useState(false);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  return (
+    <div style={{ position: "relative" }}>
+      <img src={url} alt={filename || "image"}
+        onMouseEnter={e => { setHovered(true); setPos({ x: e.clientX, y: e.clientY }); }}
+        onMouseMove={e => setPos({ x: e.clientX, y: e.clientY })}
+        onMouseLeave={() => setHovered(false)}
+        style={{ width: "100%", height: 90, objectFit: "cover", borderRadius: 4, border: "1px solid #E2E8F0", cursor: "zoom-in", display: "block" }} />
+      {isSIAdminUser && (
+        <button onClick={() => onDelete(imageId, storagePath)} title="Remove image"
+          aria-label="Remove image"
+          style={{ position: "absolute", top: 2, right: 2, width: 16, height: 16, borderRadius: "50%", border: 0, background: "rgba(220,38,38,0.85)", color: "#FFF", fontSize: 10, cursor: "pointer", lineHeight: "16px", padding: 0, textAlign: "center" }}>×</button>
+      )}
+      {hovered && (
+        <div style={{ position: "fixed", left: Math.min(pos.x + 14, window.innerWidth - 980), top: Math.max(8, pos.y - 480), zIndex: 9000, pointerEvents: "none", boxShadow: "0 8px 32px rgba(0,0,0,0.28)", borderRadius: 8, overflow: "hidden", border: "1px solid #CBD5E1", background: "#FFF" }}>
+          <img src={url} alt={filename || "image"} style={{ display: "block", maxWidth: 960, maxHeight: 960, objectFit: "contain" }} />
+          {filename && <div style={{ padding: "4px 8px", fontFamily: SI_F, fontSize: 10, color: "#64748B", borderTop: "1px solid #F1F5F9", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 960 }}>{filename}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InspectionRow({ it, isSIAdminUser, onUpdate, onUploadImages, onDeleteImage, onDelete }) {
   const siS = useSIS();
   const fileInputRef = useRef(null);
-  const { openPreview } = useContext(SIPreviewCtx);
+  const [uploading, setUploading] = useState(false);
+
+  // Collect all images: new multi-image model + legacy single-image field.
+  const multiImages = Object.entries(it.images || {}).map(([id, img]) => ({ id, ...img }));
+  const legacyImg = it.image_url ? [{ id: "__legacy__", url: it.image_url, storagePath: it.image_storage_path, filename: it.image_filename }] : [];
+  const allImages = [...legacyImg, ...multiImages];
+
+  const handleFiles = async (e) => {
+    const files = e.target.files;
+    if (!files?.length) return;
+    setUploading(true);
+    await onUploadImages(files);
+    setUploading(false);
+    e.target.value = "";
+  };
+
   return (
     <tr>
-      <td style={{ ...siS.td, verticalAlign: "middle" }}>
+      <td style={{ ...siS.td, verticalAlign: "top", paddingTop: 8 }}>
         <input defaultValue={it.connectors_covered || ""} disabled={!isSIAdminUser}
           onBlur={e => onUpdate("connectors_covered", e.target.value.trim())}
           style={{ width: "100%", padding: "5px 8px", border: "1px solid transparent", borderRadius: 4, fontFamily: SI_F, fontSize: 13, fontWeight: 600, color: "#0F172A", background: "transparent" }} />
       </td>
-      <td style={{ ...siS.td, verticalAlign: "middle" }}>
+      <td style={{ ...siS.td, verticalAlign: "top", paddingTop: 8 }}>
         <input defaultValue={it.name || ""} disabled={!isSIAdminUser}
           onBlur={e => onUpdate("name", e.target.value.trim() || "Untitled")}
           style={{ width: "100%", padding: "5px 8px", border: "1px solid transparent", borderRadius: 4, fontFamily: SI_F, fontSize: 13, color: "#0F172A", background: "transparent" }} />
       </td>
-      <td style={{ ...siS.td, textAlign: "center", verticalAlign: "middle", position: "relative" }}>
-        {it.image_url ? (
-          <img src={it.image_url} alt={it.image_filename || it.name}
-            onClick={() => openPreview({ filename: it.image_filename || it.name || "image", downloadUrl: it.image_url, mimeType: "image/" })}
-            style={{ maxWidth: 200, maxHeight: 120, border: "1px solid #E2E8F0", borderRadius: 4, cursor: "zoom-in" }}
-            title="Click to preview full size" />
-        ) : isSIAdminUser ? (
-          <button onClick={() => fileInputRef.current?.click()}
-            style={{ background: "#F1F5F9", border: "1px dashed #CBD5E1", color: "#64748B", padding: "18px 22px", borderRadius: 6, cursor: "pointer", fontFamily: SI_F, fontSize: 12 }}>+ Add image</button>
-        ) : (
-          <span style={{ color: "#94A3B8", fontFamily: SI_F, fontSize: 12 }}>—</span>
-        )}
+      <td style={{ ...siS.td, verticalAlign: "top", paddingTop: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 6 }}>
+          {allImages.map(img => (
+            <InspectionImageThumb key={img.id} imageId={img.id} url={img.url} filename={img.filename}
+              storagePath={img.storagePath} isSIAdminUser={isSIAdminUser}
+              onDelete={img.id === "__legacy__"
+                ? () => { if (confirm("Remove this image?")) onUpdate("image_url", null); }
+                : onDeleteImage} />
+          ))}
+          {isSIAdminUser && (
+            <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
+              style={{ height: 90, background: "#F8FAFC", border: "1px dashed #CBD5E1", color: "#64748B", borderRadius: 4, cursor: uploading ? "wait" : "pointer", fontFamily: SI_F, fontSize: 11, padding: "0 8px" }}>
+              {uploading ? "…" : allImages.length ? "+ Add" : "+ Add image"}
+            </button>
+          )}
+          {!isSIAdminUser && allImages.length === 0 && (
+            <span style={{ color: "#94A3B8", fontFamily: SI_F, fontSize: 12 }}>—</span>
+          )}
+        </div>
+        <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleFiles} />
         {isSIAdminUser && (
-          <div style={{ position: "absolute", top: 4, right: 4, display: "flex", gap: 4 }}>
-            {it.image_url && (
-              <button onClick={() => fileInputRef.current?.click()} title="Replace image"
-                style={{ background: "#FFF", border: "1px solid #CBD5E1", color: "#475569", width: 22, height: 22, borderRadius: 4, cursor: "pointer", fontSize: 11, lineHeight: 1 }}>↻</button>
-            )}
+          <div style={{ marginTop: 6, textAlign: "right" }}>
             <button onClick={onDelete} title="Delete row"
-              style={{ background: "#FFF", border: "1px solid #FECACA", color: "#DC2626", width: 22, height: 22, borderRadius: 4, cursor: "pointer", fontSize: 13, lineHeight: 1 }}>×</button>
+              style={{ background: "transparent", border: 0, color: "#DC2626", fontFamily: SI_F, fontSize: 11, cursor: "pointer", textDecoration: "underline" }}>delete row</button>
           </div>
         )}
-        <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }}
-          onChange={e => { onUploadImage(e.target.files?.[0]); e.target.value = ""; }} />
       </td>
     </tr>
   );
@@ -6980,7 +7652,7 @@ function FieldBool({ label, value, onSave, editable }) {
 }
 
 /* ── Stations section ────────────────────────────────────────────── */
-function SIStationsSection({ pid, stations, isSIAdminUser, actor, deployedFactories, writeAt, updateAt, removeAt }) {
+function SIStationsSection({ pid, stations, isSIAdminUser, actor, deployedFactories, defaultFactory, writeAt, updateAt, removeAt }) {
   const siS = useSIS();
   const list = Object.entries(stations).map(([sid, s]) => ({ sid, ...(s || {}) }))
     .sort((a, b) => (a.station_number || 0) - (b.station_number || 0));
@@ -6994,7 +7666,7 @@ function SIStationsSection({ pid, stations, isSIAdminUser, actor, deployedFactor
       name: `Station ${nextNum}`,
       count: 1,
       customer: null,
-      deployment_factory: null,
+      deployment_factory: defaultFactory || null,
       notes: null,
       fat_result: "pending",
       sat_result: "pending",
@@ -7454,9 +8126,11 @@ function deriveCurrentStage(stageDates, fallback = "SIRD") {
   return "Live";
 }
 
-/* Effective stage for a project — derives from stage_dates if any stage has
-   actual data, otherwise falls back to the stored current_stage field. */
+/* Effective stage for a project.
+   HubSpot-linked projects: current_stage is authoritative (set by HubSpot sync).
+   Manual projects: derive from stage_dates if any actual data is present. */
 function effectiveStage(p) {
+  if (p?.hubspot_id) return p?.current_stage || "SIRD";
   const sd = p?.stage_dates || {};
   const hasAnyActual = SI_STAGES.some(s => (sd[s] || {}).actual_start || (sd[s] || {}).actual_end);
   return hasAnyActual ? deriveCurrentStage(sd, p?.current_stage) : (p?.current_stage || "SIRD");
@@ -7550,6 +8224,21 @@ function SIDashboardBottomGrid({ projectList, onOpen }) {
     </div>
   );
   const completedPill = <span style={{ marginLeft: 6, background: "#D1FAE5", color: "#047857", padding: "1px 7px", borderRadius: 999, fontSize: 10.5, fontWeight: 700 }}>COMPLETED</span>;
+  // Open action items — collect from all projects, sort soonest due_date first.
+  const openActionItems = [];
+  for (const p of projectList) {
+    for (const [k, a] of Object.entries(p.status_update?.action_items || {})) {
+      if (!a || a.done) continue;
+      openActionItems.push({ ...a, _key: k, _pid: p.pid, _projectName: p.name || p.pid });
+    }
+  }
+  openActionItems.sort((a, b) => {
+    if (!a.due_date && !b.due_date) return 0;
+    if (!a.due_date) return 1;
+    if (!b.due_date) return -1;
+    return a.due_date.localeCompare(b.due_date);
+  });
+  const isOverdue = (d) => { if (!d) return false; const dt = new Date(d); dt.setHours(0,0,0,0); return dt < today; };
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14 }}>
       {panel("FAT — ongoing & upcoming (28d)", fatRows, p => (
@@ -7580,7 +8269,33 @@ function SIDashboardBottomGrid({ projectList, onOpen }) {
         </li>
       ))}
       <div style={{ gridColumn: "1 / -1" }}>
-        <SIRecentActivityGlobal projectList={projectList} />
+        <div style={siS.card}>
+          <h2 style={{ ...siS.h2, fontSize: 15, marginBottom: 10 }}>
+            Open action items {openActionItems.length > 0 && <span style={{ fontWeight: 400, color: "#64748B", fontSize: 12 }}>({openActionItems.length})</span>}
+          </h2>
+          {openActionItems.length === 0
+            ? <div style={{ color: "#64748B", fontFamily: SI_F, fontSize: 12 }}>No open action items.</div>
+            : <ul style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
+                {openActionItems.map(a => (
+                  <li key={`${a._pid}-${a._key}`} style={{ fontFamily: SI_F, fontSize: 12.5, marginBottom: 7, display: "flex", alignItems: "baseline", gap: 6 }}>
+                    <span style={{ color: "#94A3B8", fontSize: 11 }}>▸</span>
+                    <span>
+                      <button onClick={() => onOpen(a._pid)} style={{ background: "none", border: 0, padding: 0, color: "#2563EB", textDecoration: "underline", cursor: "pointer", fontFamily: SI_F, fontSize: 12.5 }}>
+                        {a._projectName}
+                      </button>
+                      {" — "}{a.text || ""}
+                      {a.due_date && (
+                        <span style={{ marginLeft: 8, fontWeight: 600, color: isOverdue(a.due_date) ? "#DC2626" : "#64748B", fontSize: 11.5 }}>
+                          {isOverdue(a.due_date) ? "Overdue · " : "Due "}{a.due_date}
+                        </span>
+                      )}
+                      {a.dri && <span style={{ marginLeft: 6, color: "#94A3B8", fontSize: 11.5 }}>· {a.dri}</span>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+          }
+        </div>
       </div>
     </div>
   );
@@ -7688,7 +8403,7 @@ function SIDashboardWidgets({ projectList, onOpen }) {
 }
 
 /* ── Timeline Gantt (top-level) ───────────────────────────────────── */
-function SIGanttView({ projectList, onOpen, theme, actor }) {
+function SIGanttView({ projectList, onOpen, theme, setTheme, actor }) {
   const siS = useSIS();
   // Default 12-month window centered on today.
   const todayYM = useMemo(() => { const t = new Date(); return { y: t.getFullYear(), m: t.getMonth() }; }, []);
@@ -7795,7 +8510,7 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
       e.stopPropagation();
       setEditPopover({ pid: p.pid, stage, project: p, anchor: e.currentTarget.getBoundingClientRect() });
     };
-    const showP = showPlanned && lp != null && rp != null && rp > lp;
+    const showP = showPlanned && lp != null && rp != null && rp >= lp;
     const showA = showActual  && la != null && ra != null && ra >= la;
     const containsAnyDate = showP || showA;
     // Compact mode — used inside the collapsed project row.
@@ -7808,7 +8523,7 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
             <div
               onMouseEnter={e => showTip(e, stage, "planned", d)}
               onMouseMove={moveTip} onMouseLeave={hideTip}
-              style={{ position: "absolute", left: `${lp}%`, width: `${rp - lp}%`, top: 4, height: 15, background: SI_STAGE_COLORS[stage], opacity: 0.45, borderRadius: 3, display: "flex", alignItems: "center", padding: "0 4px", overflow: "hidden" }}>
+              style={{ position: "absolute", left: `${lp}%`, width: `${Math.max(0.5, rp - lp)}%`, minWidth: 4, top: 4, height: 15, background: SI_STAGE_COLORS[stage], border: "1.5px dashed rgba(255,255,255,0.55)", borderRadius: 3, display: "flex", alignItems: "center", padding: "0 4px", overflow: "hidden" }}>
               <span style={{ color: "#FFF", fontFamily: SI_F, fontSize: 9.5, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{stage}</span>
             </div>
           )}
@@ -7832,15 +8547,14 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
         </button>
       );
     }
-    // Sub-row bars — fixture_tracker uses a single 14px-tall band centered in the 28px sub-row;
-    // planned and actual overlap at the same position with planned fainter (opacity 0.45).
+    // Sub-row bars — planned bars use full color with a dashed border; actual bars are solid.
     return (
       <React.Fragment key={stage}>
         {showP && (
           <div onClick={openEdit}
             onMouseEnter={e => showTip(e, stage, "planned", d)}
             onMouseMove={moveTip} onMouseLeave={hideTip}
-            style={{ position: "absolute", left: `${lp}%`, width: `${rp - lp}%`, top: 7, height: 14, background: SI_STAGE_COLORS[stage], opacity: 0.45, borderRadius: 3, cursor: "pointer", display: "flex", alignItems: "center", padding: "0 5px", overflow: "hidden" }}>
+            style={{ position: "absolute", left: `${lp}%`, width: `${Math.max(0.5, rp - lp)}%`, minWidth: 4, top: 7, height: 14, background: SI_STAGE_COLORS[stage], border: "1.5px dashed rgba(255,255,255,0.55)", borderRadius: 3, cursor: "pointer", display: "flex", alignItems: "center", padding: "0 5px", overflow: "hidden" }}>
             <span style={{ color: "#FFF", fontFamily: SI_F, fontSize: 10, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{stage}</span>
           </div>
         )}
@@ -7878,7 +8592,22 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
       }}>{label}</button>
   );
 
-  const LABEL_W = 200;
+  const [labelW, setLabelW] = useState(260);
+
+  const onResizeLabelStart = (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = labelW;
+    const onMove = (ev) => setLabelW(Math.max(140, Math.min(560, startW + ev.clientX - startX)));
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+    };
+    document.body.style.cursor = "col-resize";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
 
   return (
     <div style={{ background: TL_PAGE, color: TL_TEXT, margin: "-24px -32px -80px", padding: "16px 24px 80px", minHeight: "calc(100vh - 56px)" }}>
@@ -7899,6 +8628,12 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
         <button onClick={() => setVendorUploadOpen(true)}
           style={{ padding: "5px 12px", border: "1px solid #2563EB", borderRadius: 6, background: "#2563EB", color: "#FFF", fontFamily: SI_F, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
           📥 Upload vendor file
+        </button>
+        <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          style={{ padding: "5px 10px", border: `1px solid ${TL_BORDER}`, borderRadius: 6, background: "transparent", color: TL_MUTED, fontFamily: SI_F, fontSize: 14, cursor: "pointer" }}>
+          {theme === "dark" ? "☀" : "☾"}
         </button>
         <div style={{ flex: 1 }} />
         {/* Pan & zoom controls */}
@@ -7929,7 +8664,13 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
         <>
           {/* Month header */}
           <div style={{ display: "flex", position: "sticky", top: 0, background: TL_PAGE, zIndex: 2, paddingBottom: 4, borderBottom: `1px solid ${TL_BORDER}` }}>
-            <div style={{ width: LABEL_W, flexShrink: 0 }} />
+            <div style={{ width: labelW, flexShrink: 0, position: "relative" }}>
+              <div onMouseDown={onResizeLabelStart}
+                title="Drag to resize"
+                style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 6, cursor: "col-resize", zIndex: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div style={{ width: 2, height: 16, borderRadius: 1, background: TL_BORDER }} />
+              </div>
+            </div>
             <div style={{ flex: 1, position: "relative", height: 22 }}>
               {months.map((m, i) => (
                 <div key={i} style={{ position: "absolute", left: `${(i / months.length) * 100}%`, width: `${100 / months.length}%`, fontFamily: SI_F, fontSize: 11, color: TL_MUTED, textAlign: "center", borderLeft: i === 0 ? 0 : `1px dotted ${TL_BORDER}`, fontWeight: 700 }}>
@@ -7948,7 +8689,7 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
               {groupBy !== "none" && (
                 <div onClick={() => setCollapsedGroups(c => ({ ...c, [g.key]: !c[g.key] }))}
                   style={{ display: "flex", alignItems: "center", height: 32, cursor: "pointer", borderBottom: `1px solid ${TL_BORDER}` }}>
-                  <div style={{ width: LABEL_W, flexShrink: 0, fontFamily: SI_F, fontSize: 12, fontWeight: 700, color: TL_TEXT, display: "flex", alignItems: "center", gap: 4, paddingLeft: 4 }}>
+                  <div style={{ width: labelW, flexShrink: 0, fontFamily: SI_F, fontSize: 12, fontWeight: 700, color: TL_TEXT, display: "flex", alignItems: "center", gap: 4, paddingLeft: 4 }}>
                     <span style={{ color: TL_MUTED, width: 12, fontSize: 10 }}>{collapsedGroups[g.key] ? "▸" : "▾"}</span>
                     <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textTransform: "uppercase", letterSpacing: 0.3 }}>{g.key}</span>
                     <span style={{ background: TL_HOVER, color: TL_MUTED, padding: "1px 7px", borderRadius: 999, fontSize: 10.5, fontWeight: 700 }}>{g.projects.length}</span>
@@ -7964,7 +8705,7 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
                 <React.Fragment key={p.pid}>
                   {/* Project name row — 38px, clickable chevron toggles per-project collapse */}
                   <div style={{ display: "flex", alignItems: "center", height: 38, borderBottom: `1px solid ${TL_BORDER}` }}>
-                    <div style={{ width: LABEL_W, flexShrink: 0, fontFamily: SI_F, fontSize: 12.5, color: TL_TEXT, display: "flex", alignItems: "center", gap: 6, paddingLeft: groupBy === "none" ? 4 : 22 }}>
+                    <div style={{ width: labelW, flexShrink: 0, fontFamily: SI_F, fontSize: 12.5, color: TL_TEXT, display: "flex", alignItems: "center", gap: 6, paddingLeft: groupBy === "none" ? 4 : 22 }}>
                       <span onClick={() => setExpandedProjects(c => ({ ...c, [p.pid]: !c[p.pid] }))}
                         style={{ color: TL_MUTED, width: 14, fontSize: 11, cursor: "pointer", userSelect: "none", textAlign: "center" }}
                         title={projCollapsed ? "Expand stages" : "Collapse stages"}>
@@ -7972,7 +8713,10 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
                       </span>
                       <div style={{ flex: 1, overflow: "hidden", cursor: "pointer" }}
                         onClick={() => setExpandedProjects(c => ({ ...c, [p.pid]: !c[p.pid] }))}>
-                        <div style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
+                        <div style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: 5 }}>
+                          <span title={HEALTH_LABELS[p.status_update?.health] || "On Track"} aria-label={HEALTH_LABELS[p.status_update?.health] || "On Track"} style={{ width: 7, height: 7, borderRadius: "50%", background: HEALTH_COLORS[p.status_update?.health] || "#CBD5E1", flexShrink: 0 }} />
+                          {p.name}
+                        </div>
                         {p.is_blocked && <div style={{ fontSize: 10, color: "#EF4444", fontWeight: 700, lineHeight: 1, marginTop: 2 }}>on hold</div>}
                       </div>
                       <button onClick={(e) => { e.stopPropagation(); setSlideOutPid(p.pid); }} title="Open detail"
@@ -7992,7 +8736,7 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
                     const d = p.stage_dates?.[stage] || null;
                     return (
                       <div key={stage} style={{ display: "flex", alignItems: "center", height: 28, borderBottom: `1px solid ${TL_BORDER}` }}>
-                        <div style={{ width: LABEL_W, flexShrink: 0, fontFamily: SI_F, fontSize: 11.5, color: TL_MUTED, paddingLeft: (groupBy === "none" ? 24 : 42), display: "flex", alignItems: "center", gap: 6 }}>
+                        <div style={{ width: labelW, flexShrink: 0, fontFamily: SI_F, fontSize: 11.5, color: TL_MUTED, paddingLeft: (groupBy === "none" ? 24 : 42), display: "flex", alignItems: "center", gap: 6 }}>
                           <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: SI_STAGE_COLORS[stage], flexShrink: 0 }}></span>
                           {stage}
                         </div>
@@ -8052,6 +8796,332 @@ function SIGanttView({ projectList, onOpen, theme, actor }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ── AI Assistant Panel ───────────────────────────────────────────── */
+
+const PANEL_MIME = {
+  pdf: "application/pdf",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xls: "application/vnd.ms-excel",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  doc: "application/msword",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  csv: "text/csv",
+  txt: "text/plain",
+};
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(",")[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function PanelImportCard({ msg, projectList, onApply }) {
+  const [checked, setChecked] = React.useState(() => {
+    const init = {};
+    (msg.changes || []).forEach((_, i) => { init[`c_${i}`] = true; });
+    (msg.sub_stages || []).forEach((_, i) => { init[`s_${i}`] = true; });
+    return init;
+  });
+  const [applyPid, setApplyPid] = React.useState(msg.suggested_pid || "");
+
+  const totalItems = (msg.changes?.length || 0) + (msg.sub_stages?.length || 0);
+  const selChanges = (msg.changes || []).filter((_, i) => checked[`c_${i}`]);
+  const selSubs = (msg.sub_stages || []).filter((_, i) => checked[`s_${i}`]);
+
+  const badge = (label) => (
+    <span style={{ background: SI_STAGE_COLORS[label] || "#475569", color: "#FFF", padding: "1px 7px", borderRadius: 999, fontSize: 10, fontWeight: 700, marginRight: 4 }}>{label}</span>
+  );
+
+  return (
+    <div style={{ fontSize: 12.5, fontFamily: SI_F }}>
+      {msg.answer && <p style={{ margin: "0 0 10px", color: "#CBD5E1", lineHeight: 1.55 }}>{msg.answer}</p>}
+
+      {msg.changes?.length > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Stage Date Changes ({msg.changes.length})</div>
+          {msg.changes.map((c, i) => (
+            <label key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "5px 0", borderTop: i === 0 ? 0 : "1px solid #1E293B", cursor: "pointer" }}>
+              <input type="checkbox" checked={!!checked[`c_${i}`]} onChange={e => setChecked(prev => ({ ...prev, [`c_${i}`]: e.target.checked }))} style={{ marginTop: 2, flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 4 }}>
+                  {badge(c.stage)}
+                  <span style={{ color: "#94A3B8" }}>{c.field.replace(/_/g, " ")}</span>
+                  <span style={{ color: "#F8FAFC", fontWeight: 700 }}>{c.new_value}</span>
+                </div>
+                {c.evidence && <div style={{ color: "#64748B", fontSize: 10.5, marginTop: 2, fontStyle: "italic" }}>"{c.evidence}"</div>}
+              </div>
+            </label>
+          ))}
+        </div>
+      )}
+
+      {msg.sub_stages?.length > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: "#94A3B8", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>New Sub-stages ({msg.sub_stages.length})</div>
+          {msg.sub_stages.map((s, i) => (
+            <label key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "5px 0", borderTop: i === 0 ? 0 : "1px solid #1E293B", cursor: "pointer" }}>
+              <input type="checkbox" checked={!!checked[`s_${i}`]} onChange={e => setChecked(prev => ({ ...prev, [`s_${i}`]: e.target.checked }))} style={{ marginTop: 2, flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 4 }}>
+                  <span style={{ color: "#F8FAFC", fontWeight: 600 }}>{s.name}</span>
+                  <span style={{ color: "#64748B", fontSize: 11 }}>under</span>
+                  {badge(s.parent_stage)}
+                </div>
+                {(s.planned_start || s.planned_end) && (
+                  <div style={{ color: "#64748B", fontSize: 10.5, marginTop: 2 }}>{s.planned_start || "?"} → {s.planned_end || "?"}</div>
+                )}
+                {s.evidence && <div style={{ color: "#64748B", fontSize: 10.5, fontStyle: "italic" }}>"{s.evidence}"</div>}
+              </div>
+            </label>
+          ))}
+        </div>
+      )}
+
+      {totalItems === 0 && (
+        <div style={{ color: "#64748B", fontSize: 12 }}>No changes or sub-stages proposed from this file.</div>
+      )}
+
+      {!msg.applied && totalItems > 0 && (
+        <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <select value={applyPid} onChange={e => setApplyPid(e.target.value)}
+            style={{ padding: "5px 8px", border: "1px solid #334155", borderRadius: 6, background: "#0F172A", color: applyPid ? "#F8FAFC" : "#64748B", fontFamily: SI_F, fontSize: 11.5, cursor: "pointer", flex: 1, minWidth: 0 }}>
+            <option value="">— Select project —</option>
+            {(projectList || []).map(p => <option key={p.pid} value={p.pid}>{p.name}</option>)}
+          </select>
+          <button
+            disabled={(selChanges.length === 0 && selSubs.length === 0) || !applyPid}
+            onClick={() => onApply(selChanges, selSubs, applyPid)}
+            style={{ padding: "6px 14px", border: 0, borderRadius: 6, background: "#2563EB", color: "#FFF", fontFamily: SI_F, fontSize: 12.5, fontWeight: 700, cursor: "pointer", flexShrink: 0, opacity: ((selChanges.length === 0 && selSubs.length === 0) || !applyPid) ? 0.4 : 1 }}>
+            Apply selected
+          </button>
+        </div>
+      )}
+      {msg.applied && (
+        <div style={{ color: "#22C55E", fontSize: 12, fontWeight: 700, marginTop: 4 }}>✓ Applied to project</div>
+      )}
+    </div>
+  );
+}
+
+const AI_CHAT_KEY = "dp_ai_si_chat";
+const AI_CHAT_TTL = 3 * 60 * 60 * 1000; // 3 hours
+
+function SIAIPanel({ projectList, actor, onClose, currentPid, currentStageDates }) {
+  const [messages, setMessages] = useState(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(AI_CHAT_KEY) || "[]");
+      const cutoff = Date.now() - AI_CHAT_TTL;
+      return stored.filter(m => (m.ts || 0) > cutoff);
+    } catch { return []; }
+  });
+  const [input, setInput] = useState("");
+  const [pendingFile, setPendingFile] = useState(null); // { file, ext }
+  const [loading, setLoading] = useState(false);
+  const sendingRef = useRef(false); // synchronous guard against double-send
+  const fileInputRef = useRef(null);
+  const msgEndRef = useRef(null);
+
+  useEffect(() => { msgEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
+
+  // Persist chat to localStorage on every change.
+  useEffect(() => {
+    try { localStorage.setItem(AI_CHAT_KEY, JSON.stringify(messages)); } catch {}
+  }, [messages]);
+
+  const addMsg = (msg) => setMessages(prev => [...prev, { id: `${Date.now()}-${Math.random()}`, ts: Date.now(), ...msg }]);
+  const markApplied = (id) => setMessages(prev => prev.map(m => m.id === id ? { ...m, applied: true } : m));
+
+  const projectsSummary = projectList.map(p => `- ${p.name} (pid: ${p.pid})`).join("\n");
+
+  const callPanel = async (payload) => {
+    const fn = httpsCallable(functions, "aiSITimelinePanel");
+    const res = await fn({ ...payload, projectsSummary, stages: SI_STAGES, currentPid: currentPid || null, currentStageDates: currentStageDates || null });
+    return res.data;
+  };
+
+  const onFile = (file) => {
+    if (!file) return;
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    if (!PANEL_MIME[ext]) {
+      addMsg({ role: "assistant", type: "error", content: `Unsupported file type: .${ext}. Supported: PDF, XLSX, DOCX, PNG, JPG, WebP, CSV, TXT.` });
+      return;
+    }
+    setPendingFile({ file, ext });
+  };
+
+  const handleSend = async () => {
+    const q = input.trim();
+    if ((!q && !pendingFile) || loading || sendingRef.current) return;
+    sendingRef.current = true;
+
+    const userLabel = [pendingFile ? `📎 ${pendingFile.file.name}` : "", q].filter(Boolean).join(" — ");
+    addMsg({ role: "user", type: "text", content: userLabel });
+    setInput("");
+    setPendingFile(null);
+    setLoading(true);
+
+    try {
+      let payload = {};
+      if (pendingFile) {
+        const fileBase64 = await fileToBase64(pendingFile.file);
+        const mimeType = pendingFile.file.type || PANEL_MIME[pendingFile.ext] || "application/octet-stream";
+        payload = { fileBase64, mimeType, fileName: pendingFile.file.name };
+      }
+      if (q) payload.question = q;
+
+      const data = await callPanel(payload);
+
+      if (data.auto_apply && data.suggested_pid && data.db_updates && Object.keys(data.db_updates).length > 0) {
+        // Execute all db_updates immediately — paths are relative to the project root.
+        await update(ref(db, `appState/siProjects/${data.suggested_pid}`), data.db_updates);
+        addMsg({ role: "assistant", type: "text", content: `✓ ${data.answer || "Done."}` });
+      } else {
+        const hasItems = data.changes?.length || data.sub_stages?.length;
+        addMsg({ role: "assistant", type: hasItems ? "import" : "text", content: data.answer || "Done.", ...data });
+      }
+    } catch (e) {
+      const msg = e?.message && e.message !== "internal"
+        ? e.message
+        : (e?.code ? `Function error (${e.code}) — the AI function may not be deployed yet. Run: firebase deploy --only functions` : String(e));
+      addMsg({ role: "assistant", type: "error", content: msg });
+    }
+    setLoading(false);
+    sendingRef.current = false;
+  };
+
+  const applyChanges = async (msgId, selChanges, selSubs, pid) => {
+    if (!pid) return;
+    setLoading(true);
+    try {
+      for (const c of selChanges) {
+        if (!c.stage || !c.field || !c.new_value) continue;
+        await update(ref(db, `appState/siProjects/${pid}/stage_dates/${c.stage}`), { [c.field]: c.new_value });
+        logSIActivity(pid, "ai_timeline_import", `AI: ${c.stage} ${c.field} → ${c.new_value} (${(c.evidence || "").slice(0, 40)})`, actor);
+      }
+      for (const s of selSubs) {
+        const k = push(ref(db, `appState/siProjects/${pid}/sub_stages`)).key;
+        await set(ref(db, `appState/siProjects/${pid}/sub_stages/${k}`), {
+          name: s.name, parent_stage: s.parent_stage || "Build",
+          planned_start: s.planned_start || null, planned_end: s.planned_end || null,
+          actual_start: null, actual_end: null, created_at: Date.now(),
+        });
+      }
+      markApplied(msgId);
+    } catch (e) {
+      addMsg({ role: "assistant", type: "error", content: `Apply failed: ${e?.message || String(e)}` });
+    }
+    setLoading(false);
+  };
+
+  const P = { bg: "#0F172A", border: "#1E293B", muted: "#64748B", text: "#F8FAFC", soft: "#1E293B" };
+
+  return (
+    <div style={{
+      position: "fixed", right: 0, top: 56, bottom: 0, width: 360,
+      background: P.bg, borderLeft: `1px solid ${P.border}`,
+      display: "flex", flexDirection: "column", zIndex: 88,
+      fontFamily: SI_F, boxShadow: "-4px 0 20px rgba(0,0,0,0.4)",
+    }}>
+      {/* Header */}
+      <div style={{ padding: "10px 12px", borderBottom: `1px solid ${P.border}`, display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        <span style={{ fontSize: 15, fontWeight: 700, color: P.text, flex: 1 }}>🤖 AI Assistant</span>
+        <button onClick={onClose}
+          style={{ background: "transparent", border: 0, color: P.muted, fontSize: 18, cursor: "pointer", lineHeight: 1, padding: "0 2px" }}>×</button>
+      </div>
+
+      {/* Messages */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "12px 12px 4px" }}>
+        {messages.length === 0 && (
+          <div style={{ color: P.muted, fontSize: 12.5, lineHeight: 1.7, marginTop: 8 }}>
+            <div style={{ fontWeight: 700, color: "#94A3B8", marginBottom: 8 }}>What you can do:</div>
+            <div style={{ marginBottom: 6 }}>📎 <strong>Upload</strong> a vendor schedule (PDF, Excel, Word, image) to auto-fill stage dates</div>
+            <div style={{ marginBottom: 6 }}>💬 <strong>Ask</strong> anything about the selected project's timeline</div>
+            <div>✅ <strong>Review</strong> proposed changes before applying them</div>
+          </div>
+        )}
+
+        {messages.map(msg => {
+          const isUser = msg.role === "user";
+          if (msg.type === "import") {
+            return (
+              <div key={msg.id} style={{ marginBottom: 12 }}>
+                <div style={{ background: "#1E293B", border: `1px solid ${P.border}`, borderRadius: 8, padding: "10px 12px" }}>
+                  <PanelImportCard msg={msg} projectList={projectList} onApply={(sc, ss, pid) => applyChanges(msg.id, sc, ss, pid)} />
+                </div>
+              </div>
+            );
+          }
+          return (
+            <div key={msg.id} style={{ marginBottom: 10, display: "flex", justifyContent: isUser ? "flex-end" : "flex-start" }}>
+              <div style={{
+                maxWidth: "85%", padding: "8px 11px", borderRadius: isUser ? "14px 14px 4px 14px" : "14px 14px 14px 4px",
+                background: isUser ? "#2563EB" : (msg.type === "error" ? "#7F1D1D" : "#1E293B"),
+                color: msg.type === "error" ? "#FEE2E2" : P.text,
+                fontSize: 12.5, lineHeight: 1.55, whiteSpace: "pre-wrap", wordBreak: "break-word",
+              }}>
+                {msg.content}
+              </div>
+            </div>
+          );
+        })}
+
+        {loading && (
+          <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 10 }}>
+            <div style={{ background: P.soft, borderRadius: "14px 14px 14px 4px", padding: "8px 14px", color: P.muted, fontSize: 12.5 }}>
+              Thinking…
+            </div>
+          </div>
+        )}
+        <div ref={msgEndRef} />
+      </div>
+
+      {/* Input area */}
+      <div style={{ padding: "10px 12px", borderTop: `1px solid ${P.border}`, flexShrink: 0 }}>
+        {pendingFile && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, background: "#1E3A5F", border: "1px solid #2563EB", borderRadius: 8, padding: "5px 10px" }}>
+            <span style={{ fontSize: 13 }}>📎</span>
+            <span style={{ flex: 1, fontSize: 12, color: "#BFDBFE", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pendingFile.file.name}</span>
+            <button onClick={() => setPendingFile(null)}
+              style={{ background: "transparent", border: 0, color: "#64748B", fontSize: 16, cursor: "pointer", lineHeight: 1, padding: 0 }}>×</button>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
+          <button onClick={() => fileInputRef.current?.click()} disabled={loading} title="Attach file"
+            style={{ padding: "7px 10px", border: `1px solid ${P.border}`, borderRadius: 8, background: P.soft, color: P.muted, fontSize: 15, cursor: loading ? "not-allowed" : "pointer", lineHeight: 1, flexShrink: 0 }}>
+            📎
+          </button>
+          <input ref={fileInputRef} type="file"
+            accept=".pdf,.xlsx,.xls,.docx,.doc,.png,.jpg,.jpeg,.webp,.csv,.txt"
+            style={{ display: "none" }}
+            onChange={e => { onFile(e.target.files?.[0]); e.target.value = ""; }} />
+          <textarea
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+            placeholder={pendingFile ? "Add a prompt (optional)…" : "Ask about this project… (Enter to send)"}
+            rows={2}
+            disabled={loading}
+            style={{
+              flex: 1, padding: "7px 10px", border: `1px solid ${P.border}`, borderRadius: 8,
+              background: P.soft, color: P.text, fontFamily: SI_F, fontSize: 12.5,
+              resize: "none", lineHeight: 1.45, outline: "none",
+            }} />
+          <button onClick={handleSend} disabled={loading || (!input.trim() && !pendingFile)}
+            style={{ padding: "7px 12px", border: 0, borderRadius: 8, background: "#2563EB", color: "#FFF", fontFamily: SI_F, fontSize: 12.5, fontWeight: 700, cursor: (loading || (!input.trim() && !pendingFile)) ? "not-allowed" : "pointer", opacity: (loading || (!input.trim() && !pendingFile)) ? 0.5 : 1, flexShrink: 0 }}>
+            Send
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -8124,7 +9194,7 @@ function VendorFileUploadModal({ projectList, actor, onClose }) {
         style={{ background: "#1E293B", border: "1px solid #334155", borderRadius: 10, padding: 20, width: "min(720px, 94vw)", maxHeight: "85vh", display: "flex", flexDirection: "column", color: "#F8FAFC" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
           <h3 style={{ margin: 0, flex: 1, fontFamily: SI_F, fontSize: 16, fontWeight: 700 }}>📥 Upload vendor schedule</h3>
-          <button onClick={onClose} style={{ background: "transparent", border: 0, color: "#94A3B8", fontSize: 20, cursor: "pointer", lineHeight: 1 }}>×</button>
+          <button onClick={onClose} aria-label="Close AI assistant" style={{ background: "transparent", border: 0, color: "#94A3B8", fontSize: 20, cursor: "pointer", lineHeight: 1 }}>×</button>
         </div>
 
         {mode === "idle" && (
@@ -8322,7 +9392,7 @@ function SIStageBarEditor({ info, onClose, actor }) {
             {project.name}
           </h3>
           <span style={{ background: SI_STAGE_COLORS[stage], color: "#FFF", padding: "2px 10px", borderRadius: 999, fontFamily: SI_F, fontSize: 11, fontWeight: 700 }}>{stage}</span>
-          <button onClick={onClose}
+          <button onClick={onClose} aria-label="Close stage date editor"
             style={{ background: "transparent", border: 0, color: "#94A3B8", fontSize: 18, cursor: "pointer", lineHeight: 1, padding: 2 }}>×</button>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 16px" }}>
@@ -8365,6 +9435,185 @@ function SIStageBarEditor({ info, onClose, actor }) {
 /* ── Slide-out drill panel used by the Timeline's "↗ Open detail" button.
    Four tabs: Overview / Stage Dates / Sub-stages / Activity. Backed by
    the same RTDB paths the main drill-in uses. */
+function SlideStatusBlock({ pid, project, T, actor }) {
+  const su = project.status_update || {};
+  const [health, setHealthLocal] = useState(su.health || "on_track");
+  const [summary, setSummary]    = useState(su.summary || "");
+  const [nextMil, setNextMil]    = useState(su.next_milestone || "");
+  const [newBlocker, setNewBlocker]       = useState("");
+  const [newBlockerDri, setNewBlockerDri] = useState("");
+  const [newAction, setNewAction]         = useState("");
+  const [newActionDri, setNewActionDri]   = useState("");
+  const [newActionDue, setNewActionDue]   = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendMsg, setSendMsg] = useState("");
+
+  const suRef    = ref(db, `appState/siProjects/${pid}/status_update`);
+  const stamp    = { updated_at: Date.now(), updated_by: actor || "" };
+
+  const saveHealth = async (h) => { setHealthLocal(h); await update(suRef, { health: h, ...stamp }); };
+  const saveSummary = async () => { await update(suRef, { summary, ...stamp }); };
+  const saveNextMil = async () => { await update(suRef, { next_milestone: nextMil, ...stamp }); };
+
+  const blockers = Object.entries(su.blockers || {}).map(([k, v]) => ({ _key: k, ...(v || {}) }));
+  const actions  = Object.entries(su.action_items || {}).map(([k, v]) => ({ _key: k, ...(v || {}) }));
+
+  const addBlocker = async () => {
+    if (!newBlocker.trim()) return;
+    const k = push(ref(db, `appState/siProjects/${pid}/status_update/blockers`)).key;
+    await set(ref(db, `appState/siProjects/${pid}/status_update/blockers/${k}`),
+      { text: newBlocker.trim(), dri: newBlockerDri.trim(), resolved: false, created_at: Date.now() });
+    await update(suRef, stamp);
+    setNewBlocker(""); setNewBlockerDri("");
+  };
+  const resolveBlocker = async (key) => {
+    await update(ref(db, `appState/siProjects/${pid}/status_update/blockers/${key}`), { resolved: true });
+    await update(suRef, stamp);
+  };
+  const deleteBlocker = async (key) => {
+    if (!window.confirm("Delete this blocker? This cannot be undone.")) return;
+    await remove(ref(db, `appState/siProjects/${pid}/status_update/blockers/${key}`));
+    await update(suRef, stamp);
+  };
+
+  const addAction = async () => {
+    if (!newAction.trim()) return;
+    const k = push(ref(db, `appState/siProjects/${pid}/status_update/action_items`)).key;
+    await set(ref(db, `appState/siProjects/${pid}/status_update/action_items/${k}`),
+      { text: newAction.trim(), dri: newActionDri.trim(), due_date: newActionDue, done: false, created_at: Date.now() });
+    await update(suRef, stamp);
+    setNewAction(""); setNewActionDri(""); setNewActionDue("");
+  };
+  const toggleAction = async (key, cur) => {
+    await update(ref(db, `appState/siProjects/${pid}/status_update/action_items/${key}`), { done: !cur });
+    await update(suRef, stamp);
+  };
+  const deleteAction = async (key) => {
+    if (!window.confirm("Delete this action item? This cannot be undone.")) return;
+    await remove(ref(db, `appState/siProjects/${pid}/status_update/action_items/${key}`));
+    await update(suRef, stamp);
+  };
+
+  const sendToSlack = async () => {
+    setSending(true); setSendMsg("");
+    try {
+      const fn = httpsCallable(functions, "sendSIStatusUpdate");
+      await fn({ pid });
+      setSendMsg("Sent ✓");
+    } catch (e) { setSendMsg(`Failed: ${e?.message || String(e)}`); }
+    setSending(false);
+    setTimeout(() => setSendMsg(""), 6000);
+  };
+
+  const inputS  = _slideInput(T);
+  const labelS  = _slideLabel(T);
+  const secLabel = { ...labelS, marginTop: 14, marginBottom: 6 };
+
+  return (
+    <div>
+      {/* Health toggle */}
+      <label style={labelS}>Health</label>
+      <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+        {["on_track", "at_risk", "blocked"].map(h => (
+          <button key={h} onClick={() => saveHealth(h)}
+            style={{ flex: 1, padding: "7px 0", border: `1.5px solid ${health === h ? HEALTH_COLORS[h] : T.cardBorder}`, borderRadius: 6, background: health === h ? HEALTH_COLORS[h] + "33" : T.cardSoft, color: health === h ? HEALTH_COLORS[h] : T.textMuted, fontFamily: SI_F, fontSize: 11.5, fontWeight: 700, cursor: "pointer", outline: health === h ? `1px solid ${HEALTH_COLORS[h]}` : "none" }}>
+            {HEALTH_EMOJI[h]} {HEALTH_LABELS[h]}
+          </button>
+        ))}
+      </div>
+
+      {/* Summary */}
+      <label style={labelS}>Status summary</label>
+      <textarea style={{ ...inputS, minHeight: 72, resize: "vertical", marginBottom: 10 }}
+        value={summary} onChange={e => setSummary(e.target.value)} onBlur={saveSummary}
+        placeholder="2–3 sentences: current state, recent progress, what's next." />
+
+      {/* Next milestone */}
+      <label style={labelS}>Next milestone</label>
+      <input style={{ ...inputS, marginBottom: 14 }} value={nextMil} onChange={e => setNextMil(e.target.value)} onBlur={saveNextMil}
+        placeholder="What must happen before the next stage?" />
+
+      {/* Blockers */}
+      <label style={secLabel}>Blockers</label>
+      {blockers.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 8 }}>
+          {blockers.map(b => (
+            <div key={b._key} style={{ display: "flex", flexDirection: "column", padding: "7px 10px", borderRadius: 6, background: b.resolved ? T.cardSoft : HEALTH_COLORS.blocked + "14", border: `1px solid ${b.resolved ? T.cardBorder : HEALTH_COLORS.blocked + "44"}`, opacity: b.resolved ? 0.5 : 1 }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                <span style={{ flex: 1, fontFamily: SI_F, fontSize: 12.5, color: T.text, textDecoration: b.resolved ? "line-through" : "none", lineHeight: 1.45 }}>
+                  {b.text}{b.dri && <span style={{ marginLeft: 7, fontSize: 11, color: T.textMuted }}>DRI: {b.dri}</span>}
+                </span>
+                {!b.resolved && (
+                  <button onClick={() => resolveBlocker(b._key)}
+                    style={{ background: "transparent", border: `1px solid #22C55E`, borderRadius: 4, color: "#22C55E", fontFamily: SI_F, fontSize: 10.5, fontWeight: 700, padding: "2px 7px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                    Resolve
+                  </button>
+                )}
+              </div>
+              <button onClick={() => deleteBlocker(b._key)}
+                aria-label={`Delete blocker: ${b.text}`}
+                style={{ alignSelf: "flex-end", marginTop: 5, background: "transparent", border: 0, color: T.textLow, fontFamily: SI_F, fontSize: 10.5, cursor: "pointer", padding: 0, textDecoration: "underline" }}>
+                delete
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+        <input style={{ ...inputS, flex: 1 }} value={newBlocker} onChange={e => setNewBlocker(e.target.value)} placeholder="Describe the blocker…"
+          onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addBlocker(); } }} />
+        <input style={{ ...inputS, width: 90 }} value={newBlockerDri} onChange={e => setNewBlockerDri(e.target.value)} placeholder="DRI" />
+        <button onClick={addBlocker} style={{ padding: "7px 12px", border: 0, borderRadius: 6, background: HEALTH_COLORS.blocked, color: "#FFF", fontFamily: SI_F, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Add</button>
+      </div>
+
+      {/* Action items */}
+      <label style={secLabel}>Action items</label>
+      {actions.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 8 }}>
+          {actions.map(a => (
+            <div key={a._key} style={{ display: "flex", flexDirection: "column", padding: "7px 10px", borderRadius: 6, background: T.cardSoft, border: `1px solid ${T.cardBorder}`, opacity: a.done ? 0.5 : 1 }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 7 }}>
+                <input type="checkbox" checked={!!a.done} onChange={() => toggleAction(a._key, a.done)}
+                  aria-label={`Mark "${a.text}" as ${a.done ? "incomplete" : "complete"}`}
+                  style={{ marginTop: 3, cursor: "pointer", accentColor: "#2563EB", flexShrink: 0 }} />
+                <span style={{ flex: 1, fontFamily: SI_F, fontSize: 12.5, color: T.text, textDecoration: a.done ? "line-through" : "none", lineHeight: 1.45 }}>
+                  {a.text}
+                  {a.dri && <span style={{ marginLeft: 7, fontSize: 11, color: T.textMuted }}>DRI: {a.dri}</span>}
+                  {a.due_date && <span style={{ marginLeft: 7, fontSize: 11, color: T.textMuted }}>Due: {a.due_date}</span>}
+                </span>
+              </div>
+              <button onClick={() => deleteAction(a._key)}
+                aria-label={`Delete action: ${a.text}`}
+                style={{ alignSelf: "flex-end", marginTop: 5, background: "transparent", border: 0, color: T.textLow, fontFamily: SI_F, fontSize: 10.5, cursor: "pointer", padding: 0, textDecoration: "underline" }}>
+                delete
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
+        <input style={{ ...inputS, flex: 1, minWidth: 130 }} value={newAction} onChange={e => setNewAction(e.target.value)} placeholder="Action item…"
+          onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addAction(); } }} />
+        <input style={{ ...inputS, width: 82 }} value={newActionDri} onChange={e => setNewActionDri(e.target.value)} placeholder="DRI" />
+        <input type="date" style={{ ...inputS, width: 128 }} value={newActionDue} onChange={e => setNewActionDue(e.target.value)} />
+        <button onClick={addAction} style={{ padding: "7px 12px", border: 0, borderRadius: 6, background: "#2563EB", color: "#FFF", fontFamily: SI_F, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Add</button>
+      </div>
+
+      {/* Footer */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, borderTop: `1px solid ${T.cardBorder}`, paddingTop: 12 }}>
+        <span style={{ flex: 1, fontFamily: SI_F, fontSize: 11.5, color: T.textMuted }}>
+          {su.updated_at ? `Updated ${timeAgo(su.updated_at)}${su.updated_by ? ` by ${su.updated_by}` : ""}` : "Not yet updated"}
+        </span>
+        {sendMsg && <span style={{ fontFamily: SI_F, fontSize: 11.5, color: sendMsg.includes("Failed") ? "#EF4444" : "#22C55E" }}>{sendMsg}</span>}
+        <button onClick={sendToSlack} disabled={sending}
+          style={{ padding: "6px 12px", border: `1px solid ${T.cardBorder}`, borderRadius: 6, background: T.cardSoft, color: T.text, fontFamily: SI_F, fontSize: 12, fontWeight: 600, cursor: sending ? "wait" : "pointer", opacity: sending ? 0.6 : 1 }}>
+          {sending ? "Sending…" : "Send to Slack"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SIProjectSlideOut({ pid, project, onClose, theme, actor }) {
   const [tab, setTab] = useState("overview");
   const T = THEMES[theme] || THEMES.dark;
@@ -8394,19 +9643,21 @@ function SIProjectSlideOut({ pid, project, onClose, theme, actor }) {
             style={{ padding: "5px 12px", border: `1px solid #EF4444`, borderRadius: 6, background: "transparent", color: "#EF4444", fontFamily: SI_F, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
             {isBlocked ? "▶ Resume" : "❚❚ Mark on hold"}
           </button>
-          <button onClick={onClose}
+          <button onClick={onClose} aria-label="Close panel"
             style={{ background: "transparent", border: 0, color: T.textMuted, fontSize: 20, cursor: "pointer", lineHeight: 1, padding: 4 }}>×</button>
         </div>
         <div style={{ display: "flex", gap: 16 }}>
           {tabBtn("overview", "Overview")}
           {tabBtn("sub",      "Sub-stages")}
           {tabBtn("activity", "Activity")}
+          {tabBtn("status",   "Status")}
         </div>
       </div>
       <div style={{ padding: "16px 18px" }}>
         {tab === "overview" && <SlideOverview pid={pid} project={project} T={T} actor={actor} />}
         {tab === "sub"      && <SlideSubStages pid={pid} project={project} T={T} />}
         {tab === "activity" && <SlideActivity pid={pid} T={T} />}
+        {tab === "status"   && <SlideStatusBlock pid={pid} project={project} T={T} actor={actor} />}
       </div>
     </div>
   );
@@ -8453,7 +9704,6 @@ function SlideOverview({ pid, project, T, actor }) {
   };
   return (
     <>
-      <SlideField label="Name *" T={T}><input style={_slideInput(T)} value={form.name} onChange={e => set("name", e.target.value)} onBlur={blurSave("name")} /></SlideField>
       <SlideField label="SI *"   T={T}><input style={_slideInput(T)} value={form.si_name} onChange={e => set("si_name", e.target.value)} onBlur={blurSave("si_name")} /></SlideField>
       <SlideField label="Customer" T={T}><input style={_slideInput(T)} value={form.customer} onChange={e => set("customer", e.target.value)} onBlur={blurSave("customer")} /></SlideField>
       <SlideField label="CM Site"  T={T}><input style={_slideInput(T)} value={form.cm_site} onChange={e => set("cm_site", e.target.value)} onBlur={blurSave("cm_site")} /></SlideField>
@@ -8479,21 +9729,13 @@ function SlideOverview({ pid, project, T, actor }) {
       </details>
       <SlideField label="Notes" T={T}><textarea style={{ ..._slideInput(T), minHeight: 70, resize: "vertical" }} value={form.notes} onChange={e => set("notes", e.target.value)} onBlur={blurSave("notes")} /></SlideField>
 
-      {/* Stage Dates — always visible in Overview, above Danger Zone */}
-      <div style={{ borderTop: `1px solid ${T.cardBorder}`, marginTop: 16, paddingTop: 14, marginBottom: 16 }}>
-        <div style={{ fontFamily: SI_F, fontSize: 11, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.7, fontWeight: 700, marginBottom: 10 }}>Stage Dates</div>
+      {/* Stage Dates */}
+      <details style={{ borderTop: `1px solid ${T.cardBorder}`, marginTop: 16, paddingTop: 14, marginBottom: 12 }}>
+        <summary style={{ fontFamily: SI_F, fontSize: 13, fontWeight: 700, color: T.text, cursor: "pointer", marginBottom: 8 }}>Stage Dates</summary>
         <div style={{ overflowX: "auto" }}>
           <SlideStageDates pid={pid} project={project} T={T} actor={actor} />
         </div>
-      </div>
-
-      <div style={{ padding: 12, border: `1px solid #EF4444`, borderRadius: 6 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontFamily: SI_F, fontSize: 11, color: "#EF4444", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>Danger Zone</span>
-          <button onClick={del}
-            style={{ padding: "6px 14px", border: 0, borderRadius: 6, background: "#EF4444", color: "#FFF", fontFamily: SI_F, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>🗑 Delete project</button>
-        </div>
-      </div>
+      </details>
     </>
   );
 }
@@ -8714,28 +9956,31 @@ function findLinkedSiProject(hubspotProject, siProjectsArr) {
     const byAutoPid = siProjectsArr.find(p => p.pid === autoPid);
     if (byAutoPid) return byAutoPid;
   }
-  // 2. Name-pattern fallbacks for manually-created records without hubspot_id.
-  // Strip leading [SI][...] tags to get the "core" name, then only match a
-  // P-number if it appears at the very start — prevents "Aivres - Milipitas P3"
-  // from matching "P3 — NOVA" when "P3" is mid-name (plant/phase, not project #).
+  // 2. Name-pattern fallbacks — ONLY for orphan manual records (no hubspot_id).
+  // Projects that already have a hubspot_id are definitively linked; keyword
+  // matching across them causes false positives when multiple projects share
+  // the same SI vendor (e.g. two NewPower deals, two Anda P3s).
+  const orphans = siProjectsArr.filter(p => !p.hubspot_id);
+  if (!orphans.length) return null;
+
   const name = (hubspotProject.name || "").toLowerCase();
   if (!name) return null;
   const coreName = name.replace(/^(\[si\]\s*\[[^\]]*\]\s*|\[[^\]]*\]\s*)+/gi, "").trim();
   const pMatch = coreName.match(/^p(\d+)\b/i);
   if (pMatch) {
     const pNum = parseInt(pMatch[1], 10);
-    const hit = siProjectsArr.find(p => {
+    const hit = orphans.find(p => {
       const pn = (p.name || "").toLowerCase().match(/^p(\d+)\b/i);
       return pn && parseInt(pn[1], 10) === pNum;
     });
     if (hit) return hit;
   }
   if (/fundip|z-?height/i.test(name)) {
-    const hit = siProjectsArr.find(p => /fundip|z-?height/i.test(p.name || ""));
+    const hit = orphans.find(p => /fundip|z-?height/i.test(p.name || ""));
     if (hit) return hit;
   }
   if (/new\s*power/i.test(name)) {
-    const hit = siProjectsArr.find(p => /new\s*power/i.test(p.name || "") || /new\s*power/i.test(p.si_name || ""));
+    const hit = orphans.find(p => /new\s*power/i.test(p.name || "") || /new\s*power/i.test(p.si_name || ""));
     if (hit) return hit;
   }
   return null;
@@ -8760,34 +10005,23 @@ const SI_STAGE_TO_HUBSPOT_ID = {
 };
 const NEW_PROJECT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;  // 14 days
 
-function SIKanbanBoard({ hubspotProjects, siProjects, onOpenDrillIn, setState, user }) {
+function SIKanbanBoard({ allProjects, onOpenDrillIn, setState, user, theme, setTheme }) {
   const siS = useSIS();
-  // v4.3.x — drag-drop HubSpot stage writeback (mirrors non-SI Kanban in ProjectsOverviewView)
   const canDrag = isInst(user);
   const [dragging, setDragging] = useState(null); // { projId, fromStage, hubspotId }
-  const [dropTarget, setDropTarget] = useState(null); // canonical SI_STAGES key
-  const [stageWriting, setStageWriting] = useState({}); // { [projId]: true }
+  const [dropTarget, setDropTarget] = useState(null);
+  const [stageWriting, setStageWriting] = useState({});
   const [stageError, setStageError] = useState(null);
-  // Materialize the manual siProjects collection as an array so we can
-  // correlate each HubSpot card to a manually-maintained project.
-  const siProjectsArr = useMemo(() => Object.entries(siProjects || {})
-    .map(([pid, p]) => ({ pid, ...(p || {}) })), [siProjects]);
-  // Filter to the SI Partner Deployment pipeline, active only.
-  const list = (hubspotProjects || []).filter(p =>
-    p.status === "active" && p.hubspotPipelineId === SI_PARTNER_PIPELINE_ID
-  );
   const now = Date.now();
   const isNew = (p) => {
-    const raw = p.createdAt || p.created_at || p.createDate || p.updatedAt;
-    if (!raw) return false;
-    const t = typeof raw === "number" ? raw : Date.parse(raw);
+    const t = p.created_at;
     return Number.isFinite(t) && (now - t) <= NEW_PROJECT_WINDOW_MS;
   };
+  const list = allProjects || [];
   const byStage = {};
   for (const s of SI_STAGES) byStage[s] = [];
   for (const p of list) {
-    const hsStage = normalizeSiStage(p.siStage);                  // lowercase id
-    const stage = HUBSPOT_TO_SI_STAGE[hsStage] || "SIRD";          // canonical
+    const stage = p.current_stage || "SIRD";
     if (byStage[stage]) byStage[stage].push(p);
   }
   return (
@@ -8796,11 +10030,19 @@ function SIKanbanBoard({ hubspotProjects, siProjects, onOpenDrillIn, setState, u
         <span style={{ width: 8, height: 8, borderRadius: "50%", background: canDrag ? "#16A34A" : "#6366F1", flexShrink: 0 }} />
         <span style={{ flex: 1 }}>
           {canDrag ? (
-            <><strong style={{ color: siS.text }}>Drag cards to update HubSpot stage.</strong> {list.length} project{list.length === 1 ? "" : "s"} in the SI Partner Deployment pipeline.</>
+            <><strong style={{ color: siS.text }}>Drag cards to update stage.</strong> {list.length} project{list.length === 1 ? "" : "s"} in the SI tracker.</>
           ) : (
-            <><strong style={{ color: siS.text }}>Read-only</strong> — pulled from HubSpot. {list.length} project{list.length === 1 ? "" : "s"} in the SI Partner Deployment pipeline.</>
+            <><strong style={{ color: siS.text }}>Read-only.</strong> {list.length} project{list.length === 1 ? "" : "s"} in the SI tracker.</>
           )}
         </span>
+        {setTheme && (
+          <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            style={{ padding: "4px 9px", border: `1px solid ${siS.cardBorder}`, borderRadius: 6, background: "transparent", color: siS.textMuted, fontFamily: SI_F, fontSize: 14, cursor: "pointer", flexShrink: 0 }}>
+            {theme === "dark" ? "☀" : "☾"}
+          </button>
+        )}
       </div>
       {stageError && (
         <div style={{ ...siS.card, padding: "10px 14px", borderColor: "#DC2626", background: "#FEF2F2", color: "#B91C1C", fontFamily: SI_F, fontSize: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
@@ -8824,21 +10066,18 @@ function SIKanbanBoard({ hubspotProjects, siProjects, onOpenDrillIn, setState, u
                 if (!dragging || dragging.fromStage === stage) { setDragging(null); return; }
                 const { projId, hubspotId, fromStage } = dragging;
                 setDragging(null);
-                const newHubspotStageId = SI_STAGE_TO_HUBSPOT_ID[stage]; // undefined for "In Transit"
-                const newSiStageKey = stage.toLowerCase().replace(/\s+/g, ""); // "In Transit" → "intransit"
-                // Optimistic local update: write the canonical siStage so the card moves immediately.
-                setState(prev => ({
+                const newHubspotStageId = SI_STAGE_TO_HUBSPOT_ID[stage];
+                // Optimistic update: move card immediately in siProjects state.
+                const patchSiStage = (s) => setState(prev => ({
                   ...prev,
-                  projects: (prev.projects || []).map(p => p.id === projId
-                    ? { ...p, siStage: newSiStageKey, ...(newHubspotStageId ? { hubspotStageId: newHubspotStageId } : {}) }
-                    : p),
+                  siProjects: { ...(prev.siProjects || {}), [projId]: { ...(prev.siProjects?.[projId] || {}), current_stage: s } },
                 }));
-                if (!newHubspotStageId) {
-                  // "In Transit" — app-only stage, no HubSpot writeback
-                  return;
-                }
+                patchSiStage(stage);
+                // Always persist to Firebase so Timeline stays in sync.
+                update(ref(db, `appState/siProjects/${projId}`), { current_stage: stage }).catch(() => {});
+                if (!newHubspotStageId) return; // "In Transit" — app-only stage
                 if (!hubspotId) {
-                  setStageError("This project has no HubSpot ID — saved locally only.");
+                  setStageError("This project has no HubSpot ID — stage saved locally only.");
                   return;
                 }
                 setStageWriting(w => ({ ...w, [projId]: true }));
@@ -8846,13 +10085,8 @@ function SIKanbanBoard({ hubspotProjects, siProjects, onOpenDrillIn, setState, u
                 try {
                   await httpsCallable(functions, "writeStageToHubspot")({ hubspotId, stageId: newHubspotStageId });
                 } catch(err) {
-                  // Revert
-                  setState(prev => ({
-                    ...prev,
-                    projects: (prev.projects || []).map(p => p.id === projId
-                      ? { ...p, siStage: fromStage.toLowerCase().replace(/\s+/g, "") }
-                      : p),
-                  }));
+                  patchSiStage(fromStage);
+                  update(ref(db, `appState/siProjects/${projId}`), { current_stage: fromStage }).catch(() => {});
                   setStageError(`Stage update failed: ${err.message || String(err)}`);
                 }
                 setStageWriting(w => { const n = { ...w }; delete n[projId]; return n; });
@@ -8865,17 +10099,18 @@ function SIKanbanBoard({ hubspotProjects, siProjects, onOpenDrillIn, setState, u
               </div>
               <div style={{ padding: 8, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
                 {byStage[stage].map(p => {
-                  const url = hubspotProjectUrl(p);
+                  const url = p.hubspot_id
+                    ? `https://${HUBSPOT_HOST}/contacts/${HUBSPOT_PORTAL_ID}/record/${HUBSPOT_OBJECT_TYPE}/${p.hubspot_id}`
+                    : null;
                   const fresh = isNew(p);
-                  const linked = findLinkedSiProject(p, siProjectsArr);
-                  const openDrill = () => { if (linked && onOpenDrillIn) onOpenDrillIn(linked.pid); };
-                  const isWriting = !!stageWriting[p.id];
+                  const stationCount = typeof p.stations === "number" ? p.stations : null;
+                  const isWriting = !!stageWriting[p.pid];
                   return (
-                    <div key={p.id}
+                    <div key={p.pid}
                       draggable={canDrag}
-                      onDragStart={canDrag ? () => setDragging({ projId: p.id, fromStage: stage, hubspotId: p.hubspotId }) : undefined}
+                      onDragStart={canDrag ? () => setDragging({ projId: p.pid, fromStage: stage, hubspotId: p.hubspot_id }) : undefined}
                       onDragEnd={canDrag ? () => { setDragging(null); setDropTarget(null); } : undefined}
-                      style={{ background: isWriting ? "#F0FDF4" : siS.cardSoft, border: `1px solid ${dragging?.projId === p.id ? "#16A34A" : siS.cardBorder}`, borderRadius: 6, padding: "8px 10px", fontFamily: SI_F, display: "flex", flexDirection: "column", gap: 4, cursor: canDrag ? "grab" : "default", opacity: isWriting ? 0.65 : 1, transition: "opacity .12s" }}>
+                      style={{ background: isWriting ? "#F0FDF4" : siS.cardSoft, border: `1px solid ${dragging?.projId === p.pid ? "#16A34A" : siS.cardBorder}`, borderLeft: `3px solid ${HEALTH_COLORS[p.status_update?.health] || siS.cardBorder}`, borderRadius: 6, padding: "8px 10px", fontFamily: SI_F, display: "flex", flexDirection: "column", gap: 4, cursor: canDrag ? "grab" : "default", opacity: isWriting ? 0.65 : 1, transition: "opacity .12s" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: siS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
                         {fresh && (
@@ -8883,21 +10118,13 @@ function SIKanbanBoard({ hubspotProjects, siProjects, onOpenDrillIn, setState, u
                         )}
                       </div>
                       <div style={{ fontSize: 11, color: siS.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {p.customer || "—"}{p.stations ? ` · ${p.stations} stn` : ""}
+                        {p.customer || "—"}{stationCount ? ` · ${stationCount} stn` : ""}
                       </div>
                       <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
-                        {linked ? (
-                          <button onClick={openDrill}
-                            title={`Open drill-in for ${linked.name}`}
-                            style={{ flex: 1, padding: "3px 6px", border: `1px solid ${siS.link}`, borderRadius: 4, background: "transparent", color: siS.link, fontFamily: SI_F, fontSize: 10.5, fontWeight: 600, cursor: "pointer" }}>
-                            → Open detail
-                          </button>
-                        ) : (
-                          <span title="No linked project in this app yet — it'll be created on the next sync"
-                            style={{ flex: 1, padding: "3px 6px", border: `1px dashed ${siS.cardBorder}`, borderRadius: 4, color: siS.textMuted, fontFamily: SI_F, fontSize: 10.5, fontWeight: 600, textAlign: "center" }}>
-                            Not linked
-                          </span>
-                        )}
+                        <button onClick={() => onOpenDrillIn && onOpenDrillIn(p.pid)}
+                          style={{ flex: 1, padding: "3px 6px", border: `1px solid ${siS.link}`, borderRadius: 4, background: "transparent", color: siS.link, fontFamily: SI_F, fontSize: 10.5, fontWeight: 600, cursor: "pointer" }}>
+                          → Open detail
+                        </button>
                         {url && (
                           <a href={url} target="_blank" rel="noopener" title="Open in HubSpot"
                             style={{ padding: "3px 8px", border: `1px solid ${siS.cardBorder}`, borderRadius: 4, color: siS.textMuted, fontFamily: SI_F, fontSize: 10.5, fontWeight: 600, textDecoration: "none" }}>
@@ -9184,7 +10411,7 @@ function SIFleetScorecard({ projectList }) {
               <span style={{ fontFamily: SI_F, fontSize: 12, color: siS.textMuted }}>
                 SCORE <strong style={{ color: siS.link }}>{r.score}</strong> · {r.active} ACTIVE · {r.live} LIVE · {r.total} TOTAL
               </span>
-              <button onClick={() => setOpenSi(null)} style={{ background: "transparent", border: 0, color: siS.textMuted, fontSize: 18, cursor: "pointer", lineHeight: 1, padding: 2 }}>×</button>
+              <button onClick={() => setOpenSi(null)} aria-label="Close SI scorecard" style={{ background: "transparent", border: 0, color: siS.textMuted, fontSize: 18, cursor: "pointer", lineHeight: 1, padding: 2 }}>×</button>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 18 }}>
               {/* Chart */}
@@ -9446,7 +10673,7 @@ function FilePreviewModal({ file, onClose }) {
               ↗ Open in new tab
             </a>
           )}
-          <button onClick={onClose}
+          <button onClick={onClose} aria-label="Close preview"
             style={{ background: "transparent", border: 0, color: "#64748B", fontSize: 20, cursor: "pointer", lineHeight: 1 }}>×</button>
         </header>
         <div style={{ flex: 1, overflow: "auto", background: isImage ? "#0F172A" : "#F8FAFC", display: "flex", alignItems: "center", justifyContent: "center", padding: isImage ? 0 : 16 }}>
@@ -11942,6 +13169,8 @@ export default function App() {
   const [user, setUser] = useState(null);
   const VALID_VIEWS = new Set(["dashboard", "project_details", "commercial", "training", "chat", "projects_overview", "all_si_projects", "admin", "manage"]);
   const [view, setView] = useState(() => {
+    // If the URL is a standalone project page, open the SI tracker directly.
+    if (window.location.pathname.match(/^\/si\/projects\/[^/]+\/?$/)) return "all_si_projects";
     const saved = localStorage.getItem("dp_last_view");
     return (saved && VALID_VIEWS.has(saved)) ? saved : "project_details";
   });
@@ -12012,12 +13241,12 @@ export default function App() {
       unsubs.push(onValue(ref(db, "appState/docData"), (s) => { setState(prev => ({ ...prev, docData: s.val() || {} })); }, (e) => console.error(e)));
       unsubs.push(onValue(ref(db, "appState/siTracker"), (s) => {
         setState(prev => ({ ...prev, siTracker: s.val() || {} }));
-      }));
+      }, (e) => console.error("[siTracker] load failed:", e)));
       // SI Projects (manually-created via the All SI Projects page; not
       // synced from HubSpot). Stored as a map of {pid: projectRecord}.
       unsubs.push(onValue(ref(db, "appState/siProjects"), (s) => {
         setState(prev => ({ ...prev, siProjects: s.val() || {}, siProjectsLoaded: true }));
-      }));
+      }, (e) => console.error("[siProjects] load failed:", e)));
     } else {
       // External users — listen only to assigned projects/docData. Parent reads are blocked by rules.
       const assignedIds = user.projects || [];

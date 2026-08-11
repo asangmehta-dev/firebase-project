@@ -67,6 +67,35 @@ You have full admin access. Once you sign up at the app with your `@instrumental
 
 ---
 
+# UX Standards
+
+> Full guide: [UX_STANDARDS.md](UX_STANDARDS.md)
+
+Apply these standards to all UI work in this project. The SI Deployment Portal is an **internal tool** (small CX team, desktop-primary) — treat it as **prototype tier** for `[SCALE]` items. All `[MUST]` items are still non-negotiable; skipping any requires explicit user sign-off noted in the completion summary.
+
+**Current known gaps (do not regress; fix opportunistically):**
+- No responsive breakpoints — inline px styles throughout; mobile layout is not supported (accepted limitation: desktop-only team)
+- Firebase write operations do not disable buttons while pending (duplicate submission risk)
+- No loading indicators while Firebase data is fetching
+- Slide-out open/close does not trap or restore focus
+
+**Fixed (do not revert):**
+- Light theme muted text colors bumped to `#475569` / `#64748B` — WCAG AA compliant
+- All theme toggle buttons have `aria-label` + `title`; AI button has `aria-label` + `aria-expanded`
+- `SITabBoundary` error boundary wraps Timeline, Kanban, Meeting tabs; `SIDrillBoundary` wraps drill-in
+- Focus moves to "← Back to Dashboard" button on drill-in navigation
+- `*:focus-visible` global focus ring added in `index.html`
+- `prefers-reduced-motion` global suppression added in `index.html`
+- All 7 unguarded delete functions have `window.confirm()` guard
+- Blocker and action item delete buttons restructured: small underlined "delete" text at bottom-right of each card (hard to accidentally click); confirm required
+- `aria-label` added to all close `×` buttons in modals and panels
+- `aria-label` added to delete buttons with only `title` attribute
+- Health status dot gets `title` + `aria-label` from `HEALTH_LABELS`
+- `siTracker` + `siProjects` `onValue` subscriptions now have error callbacks
+- `aria-current="page"` added to all main nav buttons; `aria-expanded` on sub-nav toggle
+
+---
+
 # QA & Regression Prevention Rules
 
 > Full guide: [QA_GUIDE.md](QA_GUIDE.md)
