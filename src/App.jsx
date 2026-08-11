@@ -2684,6 +2684,87 @@ function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state,
     reader.readAsArrayBuffer(file);
   };
 
+  // v4.7.3: customer-facing checklist export. One sheet per checklist category (e.g.
+  // Internal Checklist, External Checklist, MES Integration Checklist). Milestones become merged
+  // section headers; items below with columns for owner, target date, completed date, status,
+  // completed by, notes. Freeze pane + column widths + auto-filter for a clean deliverable.
+  const handleChecklistExport = () => {
+    const checklistCats = cats.filter(c => c.type === "checklist" && (c.milestones || []).length > 0);
+    if (checklistCats.length === 0) {
+      alert("No checklists found for this project.");
+      return;
+    }
+    const wb = XLSX.utils.book_new();
+    const HEADERS = ["#", "Task", "Status", "Owner", "Target Date", "Completed Date", "Completed By", "Notes"];
+    const COL_WIDTHS = [{ wch: 5 }, { wch: 60 }, { wch: 14 }, { wch: 22 }, { wch: 14 }, { wch: 14 }, { wch: 22 }, { wch: 40 }];
+
+    for (const cat of checklistCats) {
+      const aoa = [];
+      // Title row: category name + completion summary
+      const allItems = (cat.milestones || []).flatMap(ms => ms.checklist || []);
+      const activeItems = allItems.filter(ck => !ck.na);
+      const doneCount = activeItems.filter(ck => ck.checked).length;
+      const pct = activeItems.length > 0 ? Math.round((doneCount / activeItems.length) * 100) : 0;
+      aoa.push([`${cat.name}`]);
+      aoa.push([`Project: ${project?.name || "—"}  |  Completion: ${doneCount} / ${activeItems.length} (${pct}%)  |  Exported: ${new Date().toISOString().slice(0, 10)}`]);
+      aoa.push([]); // spacer
+      aoa.push(HEADERS);
+
+      const merges = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: HEADERS.length - 1 } }, // title
+        { s: { r: 1, c: 0 }, e: { r: 1, c: HEADERS.length - 1 } }, // summary
+      ];
+
+      let rowIdx = 4; // 0-3 used by title/summary/spacer/headers
+      let itemNum = 1;
+
+      for (const ms of (cat.milestones || [])) {
+        const items = ms.checklist || [];
+        if (items.length === 0) continue;
+
+        const msActive = items.filter(ck => !ck.na);
+        const msDone = msActive.filter(ck => ck.checked).length;
+        const msLabel = `${ms.name || "Section"}  —  ${msDone}/${msActive.length} complete${ms.description ? "  ·  " + ms.description : ""}`;
+
+        // Merged milestone header row across all columns
+        aoa.push([msLabel]);
+        merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: HEADERS.length - 1 } });
+        rowIdx++;
+
+        for (const ck of items) {
+          const status = ck.na ? "N/A" : ck.checked ? "✅ Complete" : "⏳ Pending";
+          aoa.push([
+            itemNum++,
+            ck.label || "",
+            status,
+            ck.ownership || "",
+            ck.projectedDate || "",
+            ck.checkedAt ? String(ck.checkedAt).slice(0, 10) : (ck.actualDate || ""),
+            ck.checkedBy || "",
+            ck.notes || "",
+          ]);
+          rowIdx++;
+        }
+
+        // Blank spacer between sections
+        aoa.push([]);
+        rowIdx++;
+      }
+
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws["!cols"] = COL_WIDTHS;
+      ws["!freeze"] = { ySplit: 4 }; // rows 0-3 frozen at top
+      ws["!merges"] = merges;
+      ws["!autofilter"] = { ref: `A4:${String.fromCharCode(65 + HEADERS.length - 1)}${rowIdx}` };
+
+      XLSX.utils.book_append_sheet(wb, ws, cat.name.slice(0, 31));
+    }
+
+    const projectName = (project?.name || "project").replace(/[^a-z0-9]/gi, "_").slice(0, 30);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `${projectName}_checklists_${dateStr}.xlsx`);
+  };
+
   const handleGlobalExport = () => {
     const tableCats = cats.filter(c => c.type === "table");
     if (tableCats.length === 0) return;
@@ -2745,7 +2826,12 @@ function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state,
             <button onClick={handleGlobalExport}
               style={{ ...S.btnAddItem, background: "#EFF6FF", color: "#1D4ED8", border: "1px solid #BFDBFE", fontSize: 11 }}
               title="Export all table tabs to a single .xlsx file">
-              📤 Export to Spreadsheet
+              📤 Export Tables
+            </button>
+            <button onClick={handleChecklistExport}
+              style={{ ...S.btnAddItem, background: "#FEF3C7", color: "#B45309", border: "1px solid #FDE68A", fontSize: 11 }}
+              title="Export all checklists to a customer-facing .xlsx (one sheet per checklist, milestone sections merged)">
+              📋 Export Checklists
             </button>
             {canEdit && isUserFolder && onDelFolder && (
               <button style={{ ...S.btnDel, fontSize: 11, padding: "4px 10px" }} onClick={() => onDelFolder(activeCat.id)}>Delete Folder</button>
