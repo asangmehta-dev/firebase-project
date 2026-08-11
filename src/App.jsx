@@ -5,7 +5,7 @@ import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { ref, onValue, set, push, remove, update, get } from "firebase/database";
 import { httpsCallable } from "firebase/functions";
 import { ref as sRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
-import { Document as DocxDocument, Packer as DocxPacker, Paragraph as DocxParagraph, TextRun as DocxTextRun, HeadingLevel as DocxHeadingLevel } from "docx";
+import { Document as DocxDocument, Packer as DocxPacker, Paragraph as DocxParagraph, TextRun as DocxTextRun, HeadingLevel as DocxHeadingLevel, Table as DocxTable, TableRow as DocxTableRow, TableCell as DocxTableCell, WidthType as DocxWidthType, AlignmentType as DocxAlignmentType, BorderStyle as DocxBorderStyle } from "docx";
 import { PIPELINES, STAGES, PIPELINE_LIST } from "./hubspotConfig";
 
 /* ═══ DB HELPERS ═══ */
@@ -2765,6 +2765,140 @@ function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state,
     XLSX.writeFile(wb, `${projectName}_checklists_${dateStr}.xlsx`);
   };
 
+  // v4.7.3: same customer-facing export as .docx (opens as Google Doc when uploaded to Drive).
+  // Structure: Title → per-checklist Heading 1 → per-milestone Heading 2 → table of items.
+  const handleChecklistExportDocx = async () => {
+    const checklistCats = cats.filter(c => c.type === "checklist" && (c.milestones || []).length > 0);
+    if (checklistCats.length === 0) {
+      alert("No checklists found for this project.");
+      return;
+    }
+
+    // Style helpers
+    const HEADER_BG = "1E293B"; // dark navy
+    const MILESTONE_BG = "F1F5F9"; // slate-100
+    const HEADERS = ["#", "Task", "Status", "Owner", "Target", "Completed", "Notes"];
+    // Column widths as percentages of table width (must sum to 100)
+    const COL_PCT = [4, 42, 12, 14, 10, 10, 8];
+
+    const mkCell = (text, opts = {}) => new DocxTableCell({
+      width: opts.widthPct != null ? { size: opts.widthPct, type: DocxWidthType.PERCENTAGE } : undefined,
+      shading: opts.bg ? { fill: opts.bg } : undefined,
+      columnSpan: opts.span,
+      children: [new DocxParagraph({
+        alignment: opts.center ? DocxAlignmentType.CENTER : DocxAlignmentType.LEFT,
+        children: [new DocxTextRun({
+          text: String(text ?? ""),
+          bold: !!opts.bold,
+          color: opts.color,
+          size: opts.size, // half-points
+        })],
+      })],
+    });
+
+    const mkHeaderRow = () => new DocxTableRow({
+      tableHeader: true,
+      children: HEADERS.map((h, i) => mkCell(h, {
+        bold: true, color: "FFFFFF", bg: HEADER_BG, widthPct: COL_PCT[i], center: i === 0 || i === 2,
+      })),
+    });
+
+    const mkMilestoneRow = (label) => new DocxTableRow({
+      children: [mkCell(label, { bold: true, bg: MILESTONE_BG, span: HEADERS.length })],
+    });
+
+    const children = [];
+
+    // Doc title + subtitle
+    const totalItems = checklistCats.flatMap(c => (c.milestones || []).flatMap(ms => ms.checklist || []));
+    const totalActive = totalItems.filter(ck => !ck.na);
+    const totalDone = totalActive.filter(ck => ck.checked).length;
+    const overallPct = totalActive.length > 0 ? Math.round((totalDone / totalActive.length) * 100) : 0;
+
+    children.push(new DocxParagraph({
+      heading: DocxHeadingLevel.TITLE,
+      children: [new DocxTextRun({ text: `${project?.name || "Project"} — Deployment Checklists` })],
+    }));
+    children.push(new DocxParagraph({
+      spacing: { after: 240 },
+      children: [new DocxTextRun({
+        text: `Exported ${new Date().toISOString().slice(0, 10)}  ·  Overall: ${totalDone} / ${totalActive.length} complete (${overallPct}%)`,
+        italics: true, color: "64748B",
+      })],
+    }));
+
+    for (const cat of checklistCats) {
+      const catItems = (cat.milestones || []).flatMap(ms => ms.checklist || []);
+      const catActive = catItems.filter(ck => !ck.na);
+      const catDone = catActive.filter(ck => ck.checked).length;
+      const catPct = catActive.length > 0 ? Math.round((catDone / catActive.length) * 100) : 0;
+
+      children.push(new DocxParagraph({
+        heading: DocxHeadingLevel.HEADING_1,
+        spacing: { before: 400, after: 120 },
+        children: [new DocxTextRun({ text: cat.name })],
+      }));
+      children.push(new DocxParagraph({
+        spacing: { after: 200 },
+        children: [new DocxTextRun({
+          text: `${catDone} / ${catActive.length} complete (${catPct}%)`,
+          italics: true, color: "64748B",
+        })],
+      }));
+
+      let itemNum = 1;
+
+      for (const ms of (cat.milestones || [])) {
+        const items = ms.checklist || [];
+        if (items.length === 0) continue;
+
+        const msActive = items.filter(ck => !ck.na);
+        const msDone = msActive.filter(ck => ck.checked).length;
+
+        children.push(new DocxParagraph({
+          heading: DocxHeadingLevel.HEADING_2,
+          spacing: { before: 300, after: 60 },
+          children: [new DocxTextRun({ text: `${ms.name || "Section"}  —  ${msDone}/${msActive.length} complete` })],
+        }));
+        if (ms.description) {
+          children.push(new DocxParagraph({
+            spacing: { after: 120 },
+            children: [new DocxTextRun({ text: ms.description, italics: true, color: "64748B" })],
+          }));
+        }
+
+        // Table for this milestone's items
+        const rows = [mkHeaderRow()];
+        for (const ck of items) {
+          const status = ck.na ? "N/A" : ck.checked ? "✅ Complete" : "⏳ Pending";
+          rows.push(new DocxTableRow({
+            children: [
+              mkCell(String(itemNum++), { widthPct: COL_PCT[0], center: true }),
+              mkCell(ck.label || "", { widthPct: COL_PCT[1] }),
+              mkCell(status, { widthPct: COL_PCT[2], center: true }),
+              mkCell(ck.ownership || "", { widthPct: COL_PCT[3] }),
+              mkCell(ck.projectedDate || "", { widthPct: COL_PCT[4] }),
+              mkCell(ck.checkedAt ? String(ck.checkedAt).slice(0, 10) : (ck.actualDate || ""), { widthPct: COL_PCT[5] }),
+              mkCell(ck.notes || "", { widthPct: COL_PCT[6] }),
+            ],
+          }));
+        }
+        children.push(new DocxTable({
+          width: { size: 100, type: DocxWidthType.PERCENTAGE },
+          rows,
+        }));
+        // Spacer paragraph after table
+        children.push(new DocxParagraph({ children: [new DocxTextRun({ text: "" })] }));
+      }
+    }
+
+    const doc = new DocxDocument({ sections: [{ properties: {}, children }] });
+    const blob = await DocxPacker.toBlob(doc);
+    const projectName = (project?.name || "project").replace(/[^a-z0-9]/gi, "_").slice(0, 30);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    _triggerDownload(blob, `${projectName}_checklists_${dateStr}.docx`);
+  };
+
   const handleGlobalExport = () => {
     const tableCats = cats.filter(c => c.type === "table");
     if (tableCats.length === 0) return;
@@ -2831,7 +2965,12 @@ function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state,
             <button onClick={handleChecklistExport}
               style={{ ...S.btnAddItem, background: "#FEF3C7", color: "#B45309", border: "1px solid #FDE68A", fontSize: 11 }}
               title="Export all checklists to a customer-facing .xlsx (one sheet per checklist, milestone sections merged)">
-              📋 Export Checklists
+              📋 Export Checklists (Excel)
+            </button>
+            <button onClick={handleChecklistExportDocx}
+              style={{ ...S.btnAddItem, background: "#EDE9FE", color: "#6D28D9", border: "1px solid #DDD6FE", fontSize: 11 }}
+              title="Export all checklists to a Word / Google Doc file (.docx — upload to Google Drive to open as Google Doc)">
+              📄 Export Checklists (Doc)
             </button>
             {canEdit && isUserFolder && onDelFolder && (
               <button style={{ ...S.btnDel, fontSize: 11, padding: "4px 10px" }} onClick={() => onDelFolder(activeCat.id)}>Delete Folder</button>
