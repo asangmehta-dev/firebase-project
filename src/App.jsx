@@ -6752,7 +6752,7 @@ const PROGRAM_DOCS = [
   { key: "sird",                  label: "SIRD" },
 ];
 
-function SIProjectDetail({ pid, project, hubspotProject, siProjects, isSIAdminUser, isAdmin, actor, onBack, onDelete, saveField, writeAt, updateAt, removeAt }) {
+function SIProjectDetail({ pid, project, hubspotProject, siProjects, isSIAdminUser, isAdmin, actor, user, onBack, onDelete, saveField, writeAt, updateAt, removeAt }) {
   const siS = useSIS();
   const T = THEMES.light;
   const backBtnRef = useRef(null);
