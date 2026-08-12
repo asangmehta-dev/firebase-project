@@ -2609,6 +2609,10 @@ function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state,
   const isUserFolder = activeCat && !standardCatIds?.has(activeCat.id) && activeCat.type !== "checklist" && activeCat.type !== "program" && activeCat.type !== "table";
 
   const [globalImportStatus, setGlobalImportStatus] = useState("");
+  // v4.7.5: state for the checklist export selection modal
+  const [checklistExportOpen, setChecklistExportOpen] = useState(false);
+  const [checklistExportFormat, setChecklistExportFormat] = useState("docx"); // "xlsx" | "docx"
+  const [checklistExportSelected, setChecklistExportSelected] = useState(null); // Set<id> | null (null = default all)
   const globalFileInputRef = useRef(null);
 
   const handleGlobalImport = (e) => {
@@ -2697,14 +2701,15 @@ function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state,
     reader.readAsArrayBuffer(file);
   };
 
-  // v4.7.3: customer-facing checklist export. One sheet per checklist category (e.g.
-  // Internal Checklist, External Checklist, MES Integration Checklist). Milestones become merged
-  // section headers; items below with columns for owner, target date, completed date, status,
-  // completed by, notes. Freeze pane + column widths + auto-filter for a clean deliverable.
-  const handleChecklistExport = () => {
-    const checklistCats = cats.filter(c => c.type === "checklist" && (c.milestones || []).length > 0);
+  // v4.7.3: customer-facing checklist export as .xlsx. v4.7.5: accepts a filter of category IDs.
+  const handleChecklistExport = (selectedIds) => {
+    const checklistCats = cats.filter(c =>
+      c.type === "checklist" &&
+      (c.milestones || []).length > 0 &&
+      (!selectedIds || selectedIds.includes(c.id))
+    );
     if (checklistCats.length === 0) {
-      alert("No checklists found for this project.");
+      alert("No checklists selected.");
       return;
     }
     const wb = XLSX.utils.book_new();
@@ -2778,51 +2783,67 @@ function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state,
     XLSX.writeFile(wb, `${projectName}_checklists_${dateStr}.xlsx`);
   };
 
-  // v4.7.3: same customer-facing export as .docx (opens as Google Doc when uploaded to Drive).
-  // Structure: Title → per-checklist Heading 1 → per-milestone Heading 2 → table of items.
-  const handleChecklistExportDocx = async () => {
-    const checklistCats = cats.filter(c => c.type === "checklist" && (c.milestones || []).length > 0);
+  // v4.7.3: customer-facing checklist export as .docx. v4.7.5: rebuilt formatting — proper borders,
+  // no emojis (they render badly in Word), alternating row shading, cleaner section headers.
+  // Accepts a filter of category IDs (from the export selection modal).
+  const handleChecklistExportDocx = async (selectedIds) => {
+    const checklistCats = cats.filter(c =>
+      c.type === "checklist" &&
+      (c.milestones || []).length > 0 &&
+      (!selectedIds || selectedIds.includes(c.id))
+    );
     if (checklistCats.length === 0) {
-      alert("No checklists found for this project.");
+      alert("No checklists selected.");
       return;
     }
 
-    // Style helpers
-    const HEADER_BG = "1E293B"; // dark navy
-    const MILESTONE_BG = "F1F5F9"; // slate-100
+    // Style tokens
+    const HEADER_BG = "1E293B";        // dark navy
+    const HEADER_FG = "FFFFFF";
+    const MILESTONE_BG = "E2E8F0";     // slate-200 (darker than v4.7.4 for stronger separation)
+    const ROW_ALT_BG = "F8FAFC";       // slate-50 for zebra stripes
+    const BORDER_COLOR = "CBD5E1";     // slate-300
+    const MUTED = "64748B";            // slate-500
     const HEADERS = ["#", "Task", "Status", "Owner", "Target", "Completed", "Notes"];
-    // Column widths as percentages of table width (must sum to 100)
-    const COL_PCT = [4, 42, 12, 14, 10, 10, 8];
+    // Column widths as percentages (must sum to 100)
+    const COL_PCT = [4, 40, 12, 14, 10, 10, 10];
+
+    // Standard cell borders on all sides — Word/Docs need explicit borders or table appears frameless
+    const cellBorders = {
+      top:    { style: DocxBorderStyle.SINGLE, size: 4, color: BORDER_COLOR },
+      bottom: { style: DocxBorderStyle.SINGLE, size: 4, color: BORDER_COLOR },
+      left:   { style: DocxBorderStyle.SINGLE, size: 4, color: BORDER_COLOR },
+      right:  { style: DocxBorderStyle.SINGLE, size: 4, color: BORDER_COLOR },
+    };
 
     const mkCell = (text, opts = {}) => new DocxTableCell({
       width: opts.widthPct != null ? { size: opts.widthPct, type: DocxWidthType.PERCENTAGE } : undefined,
       shading: opts.bg ? { fill: opts.bg } : undefined,
       columnSpan: opts.span,
+      margins: { top: 100, bottom: 100, left: 120, right: 120 }, // twentieths of a point
+      borders: cellBorders,
       children: [new DocxParagraph({
         alignment: opts.center ? DocxAlignmentType.CENTER : DocxAlignmentType.LEFT,
-        children: [new DocxTextRun({
+        children: (Array.isArray(opts.runs) ? opts.runs : [new DocxTextRun({
           text: String(text ?? ""),
           bold: !!opts.bold,
           color: opts.color,
-          size: opts.size, // half-points
-        })],
+          size: opts.size || 20, // half-points; 20 = 10pt
+          font: "Calibri",
+        })]),
       })],
     });
 
     const mkHeaderRow = () => new DocxTableRow({
       tableHeader: true,
       children: HEADERS.map((h, i) => mkCell(h, {
-        bold: true, color: "FFFFFF", bg: HEADER_BG, widthPct: COL_PCT[i], center: i === 0 || i === 2,
+        bold: true, color: HEADER_FG, bg: HEADER_BG, widthPct: COL_PCT[i], center: i === 0 || i === 2, size: 20,
       })),
-    });
-
-    const mkMilestoneRow = (label) => new DocxTableRow({
-      children: [mkCell(label, { bold: true, bg: MILESTONE_BG, span: HEADERS.length })],
     });
 
     const children = [];
 
-    // Doc title + subtitle
+    // === Document header ===
     const totalItems = checklistCats.flatMap(c => (c.milestones || []).flatMap(ms => ms.checklist || []));
     const totalActive = totalItems.filter(ck => !ck.na);
     const totalDone = totalActive.filter(ck => ck.checked).length;
@@ -2830,14 +2851,20 @@ function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state,
 
     children.push(new DocxParagraph({
       heading: DocxHeadingLevel.TITLE,
-      children: [new DocxTextRun({ text: `${project?.name || "Project"} — Deployment Checklists` })],
+      spacing: { after: 60 },
+      children: [new DocxTextRun({ text: `${project?.name || "Project"}`, size: 48, font: "Calibri", bold: true })],
     }));
     children.push(new DocxParagraph({
-      spacing: { after: 240 },
-      children: [new DocxTextRun({
-        text: `Exported ${new Date().toISOString().slice(0, 10)}  ·  Overall: ${totalDone} / ${totalActive.length} complete (${overallPct}%)`,
-        italics: true, color: "64748B",
-      })],
+      spacing: { after: 60 },
+      children: [new DocxTextRun({ text: "Deployment Checklists", size: 28, font: "Calibri", color: MUTED })],
+    }));
+    children.push(new DocxParagraph({
+      spacing: { after: 360 },
+      children: [
+        new DocxTextRun({ text: `Exported ${new Date().toISOString().slice(0, 10)}`, size: 18, font: "Calibri", color: MUTED }),
+        new DocxTextRun({ text: `    ·    `, size: 18, font: "Calibri", color: MUTED }),
+        new DocxTextRun({ text: `Overall completion: ${totalDone} / ${totalActive.length} (${overallPct}%)`, size: 18, font: "Calibri", color: MUTED, bold: true }),
+      ],
     }));
 
     for (const cat of checklistCats) {
@@ -2848,14 +2875,14 @@ function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state,
 
       children.push(new DocxParagraph({
         heading: DocxHeadingLevel.HEADING_1,
-        spacing: { before: 400, after: 120 },
-        children: [new DocxTextRun({ text: cat.name })],
+        spacing: { before: 480, after: 60 },
+        children: [new DocxTextRun({ text: cat.name, size: 32, font: "Calibri", bold: true, color: "0F172A" })],
       }));
       children.push(new DocxParagraph({
-        spacing: { after: 200 },
+        spacing: { after: 240 },
         children: [new DocxTextRun({
-          text: `${catDone} / ${catActive.length} complete (${catPct}%)`,
-          italics: true, color: "64748B",
+          text: `${catDone} of ${catActive.length} items complete (${catPct}%)`,
+          size: 18, font: "Calibri", color: MUTED, italics: true,
         })],
       }));
 
@@ -2868,44 +2895,59 @@ function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state,
         const msActive = items.filter(ck => !ck.na);
         const msDone = msActive.filter(ck => ck.checked).length;
 
+        // Milestone header — stronger visual block
         children.push(new DocxParagraph({
           heading: DocxHeadingLevel.HEADING_2,
           spacing: { before: 300, after: 60 },
-          children: [new DocxTextRun({ text: `${ms.name || "Section"}  —  ${msDone}/${msActive.length} complete` })],
+          children: [
+            new DocxTextRun({ text: ms.name || "Section", size: 22, font: "Calibri", bold: true, color: "0F172A" }),
+            new DocxTextRun({ text: `    ${msDone} of ${msActive.length} complete`, size: 18, font: "Calibri", color: MUTED, italics: true }),
+          ],
         }));
         if (ms.description) {
           children.push(new DocxParagraph({
             spacing: { after: 120 },
-            children: [new DocxTextRun({ text: ms.description, italics: true, color: "64748B" })],
+            children: [new DocxTextRun({ text: ms.description, size: 18, font: "Calibri", color: MUTED, italics: true })],
           }));
         }
 
-        // Table for this milestone's items
+        // Table with alternating row shading
         const rows = [mkHeaderRow()];
-        for (const ck of items) {
-          const status = ck.na ? "N/A" : ck.checked ? "✅ Complete" : "⏳ Pending";
+        items.forEach((ck, i) => {
+          const zebra = i % 2 === 1 ? ROW_ALT_BG : undefined;
+          const status = ck.na ? "N/A" : ck.checked ? "Complete" : "Pending";
+          const statusColor = ck.na ? MUTED : ck.checked ? "059669" : "B45309"; // green/amber
           rows.push(new DocxTableRow({
             children: [
-              mkCell(String(itemNum++), { widthPct: COL_PCT[0], center: true }),
-              mkCell(ck.label || "", { widthPct: COL_PCT[1] }),
-              mkCell(status, { widthPct: COL_PCT[2], center: true }),
-              mkCell(ck.ownership || "", { widthPct: COL_PCT[3] }),
-              mkCell(ck.projectedDate || "", { widthPct: COL_PCT[4] }),
-              mkCell(ck.checkedAt ? String(ck.checkedAt).slice(0, 10) : (ck.actualDate || ""), { widthPct: COL_PCT[5] }),
-              mkCell(ck.notes || "", { widthPct: COL_PCT[6] }),
+              mkCell(String(itemNum++), { widthPct: COL_PCT[0], center: true, bg: zebra, color: MUTED }),
+              mkCell(ck.label || "", { widthPct: COL_PCT[1], bg: zebra }),
+              mkCell("", {
+                widthPct: COL_PCT[2], center: true, bg: zebra,
+                runs: [new DocxTextRun({ text: status, size: 20, font: "Calibri", bold: true, color: statusColor })],
+              }),
+              mkCell(ck.ownership || "—", { widthPct: COL_PCT[3], bg: zebra, color: ck.ownership ? undefined : MUTED }),
+              mkCell(ck.projectedDate || "—", { widthPct: COL_PCT[4], bg: zebra, color: ck.projectedDate ? undefined : MUTED }),
+              mkCell(
+                ck.checkedAt ? String(ck.checkedAt).slice(0, 10) : (ck.actualDate || "—"),
+                { widthPct: COL_PCT[5], bg: zebra, color: (ck.checkedAt || ck.actualDate) ? undefined : MUTED }
+              ),
+              mkCell(ck.notes || "", { widthPct: COL_PCT[6], bg: zebra }),
             ],
           }));
-        }
+        });
         children.push(new DocxTable({
           width: { size: 100, type: DocxWidthType.PERCENTAGE },
           rows,
         }));
-        // Spacer paragraph after table
-        children.push(new DocxParagraph({ children: [new DocxTextRun({ text: "" })] }));
+        // Spacer
+        children.push(new DocxParagraph({ spacing: { after: 120 }, children: [new DocxTextRun({ text: "" })] }));
       }
     }
 
-    const doc = new DocxDocument({ sections: [{ properties: {}, children }] });
+    const doc = new DocxDocument({ sections: [{
+      properties: { page: { margin: { top: 720, bottom: 720, left: 720, right: 720 } } }, // 0.5" margins
+      children,
+    }]});
     const blob = await DocxPacker.toBlob(doc);
     const projectName = (project?.name || "project").replace(/[^a-z0-9]/gi, "_").slice(0, 30);
     const dateStr = new Date().toISOString().slice(0, 10);
@@ -2975,15 +3017,10 @@ function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state,
               title="Export all table tabs to a single .xlsx file">
               📤 Export Tables
             </button>
-            <button onClick={handleChecklistExport}
+            <button onClick={() => setChecklistExportOpen(true)}
               style={{ ...S.btnAddItem, background: "#FEF3C7", color: "#B45309", border: "1px solid #FDE68A", fontSize: 11 }}
-              title="Export all checklists to a customer-facing .xlsx (one sheet per checklist, milestone sections merged)">
-              📋 Export Checklists (Excel)
-            </button>
-            <button onClick={handleChecklistExportDocx}
-              style={{ ...S.btnAddItem, background: "#EDE9FE", color: "#6D28D9", border: "1px solid #DDD6FE", fontSize: 11 }}
-              title="Export all checklists to a Word / Google Doc file (.docx — upload to Google Drive to open as Google Doc)">
-              📄 Export Checklists (Doc)
+              title="Choose format + which checklists to export (customer-facing)">
+              📋 Export Checklists…
             </button>
             {canEdit && isUserFolder && onDelFolder && (
               <button style={{ ...S.btnDel, fontSize: 11, padding: "4px 10px" }} onClick={() => onDelFolder(activeCat.id)}>Delete Folder</button>
@@ -2991,6 +3028,96 @@ function ProjectTabsView({ cats, updateCats, user, canEdit, pid, project, state,
           </div>
         </div>
       )}
+      {/* v4.7.5: Checklist export selection modal */}
+      {checklistExportOpen && (() => {
+        const availableCats = cats.filter(c => c.type === "checklist" && (c.milestones || []).length > 0);
+        const isSelected = (id) => checklistExportSelected === null ? true : checklistExportSelected.has(id);
+        const toggle = (id) => {
+          const next = new Set(checklistExportSelected === null ? availableCats.map(c => c.id) : Array.from(checklistExportSelected));
+          if (next.has(id)) next.delete(id); else next.add(id);
+          setChecklistExportSelected(next);
+        };
+        const selectedIds = checklistExportSelected === null ? availableCats.map(c => c.id) : Array.from(checklistExportSelected).filter(id => availableCats.some(c => c.id === id));
+        const canGo = selectedIds.length > 0;
+        const doExport = async () => {
+          setChecklistExportOpen(false);
+          try {
+            if (checklistExportFormat === "xlsx") handleChecklistExport(selectedIds);
+            else await handleChecklistExportDocx(selectedIds);
+          } catch (e) {
+            console.error("[export]", e);
+            alert("Export failed: " + (e.message || String(e)));
+          }
+        };
+        return (
+          <div onClick={() => setChecklistExportOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.55)", zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#FFF", borderRadius: 12, boxShadow: "0 20px 60px rgba(0,0,0,.3)", width: "100%", maxWidth: 440, padding: 24, fontFamily: F }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontSize: 17, fontWeight: 700, color: "#0F172A" }}>Export Checklists</div>
+                  <div style={{ fontSize: 12, color: "#64748B", marginTop: 3 }}>Choose format + which checklists to include</div>
+                </div>
+                <button onClick={() => setChecklistExportOpen(false)} style={{ border: "none", background: "none", fontSize: 20, color: "#94A3B8", cursor: "pointer", padding: 0, lineHeight: 1 }}>✕</button>
+              </div>
+
+              {/* Format picker */}
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>Format</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {[
+                    { id: "docx", label: "📄 Word / Google Doc", ext: ".docx" },
+                    { id: "xlsx", label: "📊 Excel / Google Sheet", ext: ".xlsx" },
+                  ].map(opt => (
+                    <button key={opt.id} onClick={() => setChecklistExportFormat(opt.id)}
+                      style={{
+                        flex: 1, padding: "10px 12px", borderRadius: 8, cursor: "pointer",
+                        border: `2px solid ${checklistExportFormat === opt.id ? "#B45309" : "#E2E8F0"}`,
+                        background: checklistExportFormat === opt.id ? "#FEF3C7" : "#FFF",
+                        color: checklistExportFormat === opt.id ? "#B45309" : "#475569",
+                        fontFamily: F, fontSize: 13, fontWeight: 600, textAlign: "left",
+                      }}>
+                      <div>{opt.label}</div>
+                      <div style={{ fontSize: 11, opacity: 0.75, marginTop: 2, fontWeight: 400 }}>{opt.ext}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Checklist selection */}
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>Include</div>
+                {availableCats.length === 0 ? (
+                  <div style={{ fontSize: 13, color: "#94A3B8", fontStyle: "italic" }}>No checklists on this project.</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {availableCats.map(c => {
+                      const items = (c.milestones || []).flatMap(ms => ms.checklist || []);
+                      const active = items.filter(ck => !ck.na);
+                      const done = active.filter(ck => ck.checked).length;
+                      const pct = active.length > 0 ? Math.round((done / active.length) * 100) : 0;
+                      const on = isSelected(c.id);
+                      return (
+                        <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 8, cursor: "pointer", border: `1px solid ${on ? "#BBF7D0" : "#E2E8F0"}`, background: on ? "#F0FDF4" : "#FFF" }}>
+                          <input type="checkbox" checked={on} onChange={() => toggle(c.id)} style={{ accentColor: "#00C9A7", width: 16, height: 16, cursor: "pointer" }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: "#0F172A" }}>{c.name}</div>
+                            <div style={{ fontSize: 11, color: "#64748B" }}>{done} / {active.length} complete ({pct}%)</div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button onClick={() => setChecklistExportOpen(false)} style={{ padding: "9px 16px", borderRadius: 8, border: "1px solid #E2E8F0", background: "#FFF", color: "#475569", fontFamily: F, fontSize: 13, cursor: "pointer" }}>Cancel</button>
+                <button onClick={doExport} disabled={!canGo} style={{ padding: "9px 18px", borderRadius: 8, border: "none", background: canGo ? "#00C9A7" : "#CBD5E1", color: "#FFF", fontFamily: F, fontSize: 13, fontWeight: 600, cursor: canGo ? "pointer" : "not-allowed" }}>Export</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {globalImportStatus && (
         <div style={{ fontSize: 12, color: globalImportStatus.startsWith("✓") ? "#15803D" : "#DC2626", fontFamily: F, marginBottom: 8, padding: "6px 10px", background: globalImportStatus.startsWith("✓") ? "#F0FDF4" : "#FEF2F2", borderRadius: 6, border: `1px solid ${globalImportStatus.startsWith("✓") ? "#BBF7D0" : "#FECACA"}` }}>
           {globalImportStatus}

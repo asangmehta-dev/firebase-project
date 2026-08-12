@@ -625,7 +625,11 @@ function buildHardwareFromKits(projectKitIds, kitProps, componentsByKit, existin
     for (const comp of components) {
       hsItems.push({
         id: comp.id,
-        type: normalizeCategory(comp.category),
+        // v4.7.5: HubSpot's category_master field is empty on most fleet assets, so fall back
+        // to the association label ("camera 2", "Lens 3", "Computer", …) which the labeled-typeId
+        // capture in fetchComponentsForKits reliably provides. Previously ALL components ended up
+        // as type "Other" which broke the pd_station_kits slot mapping downstream.
+        type: normalizeCategory(comp.category || comp.associationLabel),
         serial: comp.serial,
         model: comp.model || "",
         kitSN,
@@ -651,34 +655,43 @@ function buildHardwareFromKits(projectKitIds, kitProps, componentsByKit, existin
 // keys — the merge step in runSync is what guarantees other fields stay intact.
 function buildStationKitsRowsFromKits(projectKitIds, kitProps, componentsByKit) {
   const rows = {};
+  // v4.7.5: HubSpot returns labels in inconsistent casing ("camera 2" vs "Camera 1" vs "Camera_1_sn").
+  // Normalize to lowercase-alphanumeric-only for lookup so a labeled-1 component matches whether
+  // HubSpot returned "Camera 1", "camera 1", "camera_1", etc.
+  const normKey = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
   for (const kitId of projectKitIds || []) {
     const props = kitProps[kitId] || {};
     const components = componentsByKit[kitId] || [];
     const byLabel = {};
     for (const c of components) {
-      if (c.associationLabel) byLabel[c.associationLabel] = c;
+      if (c.associationLabel) {
+        const k = normKey(c.associationLabel);
+        // First component per label wins (matches HubSpot's "one component per slot" convention).
+        if (!byLabel[k]) byLabel[k] = c;
+      }
     }
-    const cameraLabels = ["Camera 1", "camera 2", "camera 3", "camera 4", "Camera 5"];
-    const lensLabels   = ["Lens 1", "Lens 2", "Lens 3", "Lens 4", "Lens 5"];
-    const cameraCount = cameraLabels.filter(l => byLabel[l]).length;
+    // Normalized slot keys — all lowercase-alphanumeric.
+    const CAMERA_SLOTS = ["camera1", "camera2", "camera3", "camera4", "camera5"];
+    const LENS_SLOTS   = ["lens1", "lens2", "lens3", "lens4", "lens5"];
+    const cameraCount = CAMERA_SLOTS.filter(l => byLabel[l]).length;
     rows[String(kitId)] = {
       _kitHubspotId:        String(kitId),
       fixture_name:         props.station_kit_sn || "",
       station_name:         props.name           || "",
-      computer_sn:          byLabel["Computer"]?.serial            || "",
-      computer_service_tag: byLabel["Computer"]?.productServiceTag || "",
-      mac_address:          byLabel["Computer"]?.macAddress        || "",
-      camera_1_sn:          byLabel["Camera 1"]?.serial            || "",
-      lens_1_sn:            byLabel["Lens 1"]?.serial              || "",
-      barcode_scanner_sn:   byLabel["Barcode Scanner"]?.serial     || "",
-      monitor_sn:           byLabel["Monitor"]?.serial             || "",
-      led_controller_sn:    byLabel["LED Light Controller"]?.serial|| "",
+      computer_sn:          byLabel["computer"]?.serial            || "",
+      computer_service_tag: byLabel["computer"]?.productServiceTag || "",
+      mac_address:          byLabel["computer"]?.macAddress        || "",
+      camera_1_sn:          byLabel["camera1"]?.serial             || "",
+      lens_1_sn:            byLabel["lens1"]?.serial               || "",
+      barcode_scanner_sn:   byLabel["barcodescanner"]?.serial      || "",
+      monitor_sn:           byLabel["monitor"]?.serial             || "",
+      led_controller_sn:    byLabel["ledlightcontroller"]?.serial  || "",
       cameras_present:      cameraCount > 0,
       no_cameras:           cameraCount || "",
-      lenses_present:       lensLabels.some(l => byLabel[l]),
-      barcode_scanner:      !!byLabel["Barcode Scanner"],
-      monitor:              !!byLabel["Monitor"],
-      leds:                 !!byLabel["LED Light Controller"],
+      lenses_present:       LENS_SLOTS.some(l => byLabel[l]),
+      barcode_scanner:      !!byLabel["barcodescanner"],
+      monitor:              !!byLabel["monitor"],
+      leds:                 !!byLabel["ledlightcontroller"],
     };
   }
   return rows;
