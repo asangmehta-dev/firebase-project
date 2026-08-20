@@ -1249,9 +1249,13 @@ async function runSync(token, commit, syncCtx) {
       const stationTypes = await discoverStationObjectTypes(token);
       if (stationTypes) {
         const { kitTypeId, componentTypeId } = stationTypes;
-        const activeIncoming = incoming.filter(p => p.status === "active");
-        const projectHsIds = activeIncoming.map(p => p.hubspotId).filter(Boolean);
-        console.log(`[stationKits] filtering to active projects: ${activeIncoming.length} of ${incoming.length} (skipping ${incoming.length - activeIncoming.length} closed)`);
+        // v4.7.7: sync station kits for ALL projects (active + closed). Reverses the v4.6.0
+        // filter — closed projects still get fleet asset SN updates when ops adds hardware
+        // post-deployment. Adds negligible API load (batch reads are cheap; only projects
+        // with kit associations are hit anyway) and eliminates the "why aren't completed
+        // projects updating" foot-gun.
+        const projectHsIds = incoming.map(p => p.hubspotId).filter(Boolean);
+        console.log(`[stationKits] syncing all ${incoming.length} project(s) (active + closed)`);
         const { byProject, kitProps } = await fetchKitsForProjects(token, projectHsIds, kitTypeId);
         kitsByProject = byProject; // save for shipments traversal
         const allKitIds = [...new Set(Object.values(byProject).flat())];
@@ -1295,9 +1299,23 @@ async function runSync(token, commit, syncCtx) {
 
           const pdSnap = await db.ref(`appState/docData/${pid}/projectDetails`).once("value");
           const pdRaw = pdSnap.val();
-          const pdArr = Array.isArray(pdRaw) ? pdRaw : (pdRaw && typeof pdRaw === "object" ? Object.values(pdRaw) : []);
-          const skCatIdx = pdArr.findIndex(c => c?.id === "pd_station_kits");
-          if (skCatIdx === -1) continue; // skip projects whose schema doesn't have the table yet
+          let pdArr = Array.isArray(pdRaw) ? pdRaw : (pdRaw && typeof pdRaw === "object" ? Object.values(pdRaw) : []);
+          let skCatIdx = pdArr.findIndex(c => c?.id === "pd_station_kits");
+          // v4.7.7: auto-create pd_station_kits if missing (matches pd_cad + pd_meeting_notes pattern).
+          // Many legacy projects and mid-lifecycle projects were silently skipped here before because
+          // they were created before pd_station_kits was in the standard template, resulting in
+          // fleet-asset SNs syncing to _hardwareTracking but never appearing in the Station Kits table.
+          if (skCatIdx === -1) {
+            const tmpl = TABLE_TEMPLATES.find(t => t.id === "pd_station_kits");
+            if (tmpl) {
+              pdArr = [...pdArr, JSON.parse(JSON.stringify(tmpl))];
+              skCatIdx = pdArr.length - 1;
+              console.log(`[stationKits] ${pid}: auto-created missing pd_station_kits table`);
+            } else {
+              console.warn(`[stationKits] ${pid}: pd_station_kits template not found in TABLE_TEMPLATES — skipping`);
+              continue;
+            }
+          }
 
           const skCat = pdArr[skCatIdx];
           const existingRows = Array.isArray(skCat.rows) ? skCat.rows : [];
@@ -1327,6 +1345,39 @@ async function runSync(token, commit, syncCtx) {
         if (Object.keys(stationKitsUpdates).length > 0) {
           await db.ref().update(stationKitsUpdates);
           console.log(`[stationKits] synced pd_station_kits for ${Object.keys(stationKitsUpdates).length} projects`);
+        }
+
+        // v4.7.7: Coverage report so we can see at a glance whether missing SNs are a sync issue
+        // (0 rows syncing) or a HubSpot-data issue (rows syncing but slots empty because HubSpot
+        // has no category__c and no association labels on the fleet assets).
+        try {
+          let projectsWithKits = 0;
+          let rowsTotal = 0, rowsAnySN = 0, rowsComputer = 0, rowsCamera = 0, rowsLens = 0;
+          const projectsWithEmptySlots = [];
+          for (const [pidKey, path] of Object.entries(stationKitsUpdates)) {
+            const rows = ((path && path.find && path.find(c => c?.id === "pd_station_kits")?.rows) || []).filter(r => r?._kitHubspotId);
+            if (rows.length === 0) continue;
+            projectsWithKits++;
+            let hadAnySN = false;
+            for (const r of rows) {
+              rowsTotal++;
+              const hasComputer = !!r.computer_sn;
+              const hasCamera   = !!r.camera_1_sn;
+              const hasLens     = !!r.lens_1_sn;
+              if (hasComputer) rowsComputer++;
+              if (hasCamera)   rowsCamera++;
+              if (hasLens)     rowsLens++;
+              if (hasComputer || hasCamera || hasLens) { rowsAnySN++; hadAnySN = true; }
+            }
+            if (!hadAnySN) {
+              const pid = pidKey.replace(/^appState\/docData\//, "").replace(/\/projectDetails$/, "");
+              projectsWithEmptySlots.push(pid);
+            }
+          }
+          const emptyList = projectsWithEmptySlots.slice(0, 10).join(", ") + (projectsWithEmptySlots.length > 10 ? `, ... (${projectsWithEmptySlots.length - 10} more)` : "");
+          console.log(`[stationKits] COVERAGE: ${projectsWithKits} project(s) synced; ${rowsTotal} kit row(s); computer_sn:${rowsComputer}/${rowsTotal} camera_1_sn:${rowsCamera}/${rowsTotal} lens_1_sn:${rowsLens}/${rowsTotal}; ${projectsWithEmptySlots.length} project(s) had kits but ALL slots empty (HubSpot data gap): ${emptyList || "none"}`);
+        } catch (covErr) {
+          console.warn("[stationKits] coverage report failed (non-fatal):", covErr.message);
         }
       } else {
         console.log("[stationKits] object types not found in schema — skipping hardware sync");
