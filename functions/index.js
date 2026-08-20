@@ -580,7 +580,7 @@ async function fetchComponentsForKits(token, kitTypeId, componentTypeId, kitIds)
       const res = await fetchWithTimeout(`https://api.hubapi.com/crm/v3/objects/${componentTypeId}/batch/read`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ inputs: batch.map(id => ({ id })), properties: ["asset_sn", "name", "category_master", "category", "model_number", "model", "product_sn_service_tag", "mac_address__c"] }),
+        body: JSON.stringify({ inputs: batch.map(id => ({ id })), properties: ["asset_sn", "name", "category__c", "asset_category_new", "category_master", "category", "model__c", "model_number", "model", "product_sn_service_tag", "mac_address__c"] }),
       });
       if (!res.ok) return;
       const data = await res.json();
@@ -600,8 +600,11 @@ async function fetchComponentsForKits(token, kitTypeId, componentTypeId, kitIds)
         fleetAssetHsId: assetId,
         associationLabel: label, // exact HubSpot label string, e.g. "Camera 1" — null if unlabeled
         serial: p.asset_sn || p.name || assetId,
-        category: p.category_master || p.category || "",
-        model: p.model_number || p.model || "",
+        // v4.7.6: category__c is HubSpot's actual "Category (Master)" property.
+        // Previously we tried category_master and category — both don't exist as API names.
+        // Falls back through legacy names + asset_category_new for backwards compat.
+        category: p.category__c || p.asset_category_new || p.category_master || p.category || "",
+        model: p.model__c || p.model_number || p.model || "",
         // v4.5.2: extra computer-specific props used by pd_station_kits row builder
         productServiceTag: p.product_sn_service_tag || "",
         macAddress: p.mac_address__c || "",
@@ -670,28 +673,47 @@ function buildStationKitsRowsFromKits(projectKitIds, kitProps, componentsByKit) 
         if (!byLabel[k]) byLabel[k] = c;
       }
     }
+    // v4.7.6: Category-based fallback for kits WITHOUT labeled associations.
+    // Groups components by normalized type (from category__c on fleet asset). When a project's
+    // ops team hasn't labeled the kit ↔ fleet asset associations in HubSpot, we can still slot
+    // by category. Downside: only slot 1 filled for multi-component kits without labels.
+    const byCategory = { camera: [], lens: [], computer: [], monitor: [], barcode: [], led: [] };
+    for (const c of components) {
+      const t = normalizeCategory(c.category); // "Camera", "Lens", "Station Computer", "LED Controller", ...
+      if (t === "Camera") byCategory.camera.push(c);
+      else if (t === "Lens") byCategory.lens.push(c);
+      else if (t === "Station Computer") byCategory.computer.push(c);
+      else if (t === "Monitor") byCategory.monitor.push(c);
+      else if (t === "Barcode Scanner") byCategory.barcode.push(c);
+      else if (t === "LED Controller") byCategory.led.push(c);
+    }
+    // Prefer labeled; fall back to first-of-category
+    const pick = (labelKey, catBucket) => byLabel[labelKey] || byCategory[catBucket][0];
     // Normalized slot keys — all lowercase-alphanumeric.
     const CAMERA_SLOTS = ["camera1", "camera2", "camera3", "camera4", "camera5"];
     const LENS_SLOTS   = ["lens1", "lens2", "lens3", "lens4", "lens5"];
-    const cameraCount = CAMERA_SLOTS.filter(l => byLabel[l]).length;
+    const labeledCameras = CAMERA_SLOTS.filter(l => byLabel[l]).length;
+    const cameraCount = labeledCameras || byCategory.camera.length;
+    const anyLens = LENS_SLOTS.some(l => byLabel[l]) || byCategory.lens.length > 0;
+    const computerPick = pick("computer", "computer");
     rows[String(kitId)] = {
       _kitHubspotId:        String(kitId),
       fixture_name:         props.station_kit_sn || "",
       station_name:         props.name           || "",
-      computer_sn:          byLabel["computer"]?.serial            || "",
-      computer_service_tag: byLabel["computer"]?.productServiceTag || "",
-      mac_address:          byLabel["computer"]?.macAddress        || "",
-      camera_1_sn:          byLabel["camera1"]?.serial             || "",
-      lens_1_sn:            byLabel["lens1"]?.serial               || "",
-      barcode_scanner_sn:   byLabel["barcodescanner"]?.serial      || "",
-      monitor_sn:           byLabel["monitor"]?.serial             || "",
-      led_controller_sn:    byLabel["ledlightcontroller"]?.serial  || "",
+      computer_sn:          computerPick?.serial            || "",
+      computer_service_tag: computerPick?.productServiceTag || "",
+      mac_address:          computerPick?.macAddress        || "",
+      camera_1_sn:          pick("camera1", "camera")?.serial            || "",
+      lens_1_sn:            pick("lens1", "lens")?.serial                || "",
+      barcode_scanner_sn:   pick("barcodescanner", "barcode")?.serial    || "",
+      monitor_sn:           pick("monitor", "monitor")?.serial           || "",
+      led_controller_sn:    pick("ledlightcontroller", "led")?.serial    || "",
       cameras_present:      cameraCount > 0,
       no_cameras:           cameraCount || "",
-      lenses_present:       LENS_SLOTS.some(l => byLabel[l]),
-      barcode_scanner:      !!byLabel["barcodescanner"],
-      monitor:              !!byLabel["monitor"],
-      leds:                 !!byLabel["ledlightcontroller"],
+      lenses_present:       anyLens,
+      barcode_scanner:      !!pick("barcodescanner", "barcode"),
+      monitor:              !!pick("monitor", "monitor"),
+      leds:                 !!pick("ledlightcontroller", "led"),
     };
   }
   return rows;
