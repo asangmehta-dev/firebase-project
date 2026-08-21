@@ -17,6 +17,75 @@ async function fetchWithTimeout(url, options = {}) {
   }
 }
 
+/* ═══ v4.7.8: RESILIENT HUBSPOT FETCH ═══ */
+// Why this exists: the station-kits sync fired every batch read at once via unbounded
+// Promise.all (~40 concurrent batch reads on the fleet-asset step alone) and every call
+// site swallowed failures with a bare `if (!res.ok) return;`. Measured result on the
+// 2026-08-20 run: 1,503 of 4,965 fleet-asset property reads (30%) came back empty, so
+// `serial: p.asset_sn || p.name || assetId` fell through and wrote HubSpot OBJECT IDs
+// into RTDB as if they were serial numbers, across 243 of 308 projects. Re-reading the
+// same 900 asset IDs afterwards returned 200 + serial + category for all 900 — i.e. the
+// data was always there, we just dropped the responses and never logged it.
+const HS_RETRY_ATTEMPTS = 4;      // 1 initial + 3 retries
+const HS_RETRY_BASE_MS = 500;     // exponential: 500ms, 1s, 2s
+const HS_BATCH_CONCURRENCY = 6;   // was effectively unbounded
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Retries transient failures (429, 5xx, timeout/abort) with exponential backoff, honors
+// Retry-After, and LOGS every give-up so a degraded run is greppable instead of invisible.
+// Returns null when the request definitively failed — callers must treat null as "unknown",
+// never as "no data".
+async function hubspotFetch(url, options = {}, label = "hubspot") {
+  let lastErr = "unknown";
+  for (let attempt = 1; attempt <= HS_RETRY_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetchWithTimeout(url, options);
+      if (res.ok) return res;
+      // 429 and 5xx are worth retrying; every other 4xx is a permanent request problem.
+      if (res.status !== 429 && res.status < 500) {
+        const body = await res.text().catch(() => "");
+        console.warn(`[hubspotFetch] ${label}: non-retryable HTTP ${res.status} — ${body.slice(0, 200)}`);
+        return null;
+      }
+      lastErr = `HTTP ${res.status}`;
+      const retryAfterSec = Number(res.headers.get("retry-after")) || 0;
+      const waitMs = retryAfterSec > 0 ? retryAfterSec * 1000 : HS_RETRY_BASE_MS * Math.pow(2, attempt - 1);
+      if (attempt < HS_RETRY_ATTEMPTS) {
+        console.log(`[hubspotFetch] ${label}: HTTP ${res.status} — retry ${attempt}/${HS_RETRY_ATTEMPTS - 1} in ${waitMs}ms`);
+        await sleep(waitMs);
+      }
+    } catch (e) {
+      lastErr = e.message || String(e);
+      const waitMs = HS_RETRY_BASE_MS * Math.pow(2, attempt - 1);
+      if (attempt < HS_RETRY_ATTEMPTS) {
+        console.log(`[hubspotFetch] ${label}: ${lastErr} — retry ${attempt}/${HS_RETRY_ATTEMPTS - 1} in ${waitMs}ms`);
+        await sleep(waitMs);
+      }
+    }
+  }
+  console.error(`[hubspotFetch] ${label}: GAVE UP after ${HS_RETRY_ATTEMPTS} attempt(s) — last error: ${lastErr}`);
+  return null;
+}
+
+// Bounded-concurrency map — replaces Promise.all over every batch at once.
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    for (;;) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+// A HubSpot object ID written where a serial number belongs — the v4.7.8 corruption
+// fingerprint. Real serials are alphanumeric ("INST01014"); object IDs are 9+ digits.
+const looksLikeHubspotObjectId = (s) => /^[0-9]{9,}$/.test(String(s || "").trim());
+
 admin.initializeApp();
 const db = admin.database();
 
@@ -478,49 +547,63 @@ async function fetchKitsForProjects(token, projectHsIds, kitTypeId) {
 
   const projBatches = [];
   for (let i = 0; i < projectHsIds.length; i += BATCH) projBatches.push(projectHsIds.slice(i, i + BATCH));
-  await Promise.all(projBatches.map(async (batch) => {
+  // v4.7.8: retry + bounded concurrency (was unbounded Promise.all with silent failure).
+  let projBatchesFailed = 0;
+  await mapLimit(projBatches, HS_BATCH_CONCURRENCY, async (batch) => {
     try {
-      const res = await fetchWithTimeout(
+      const res = await hubspotFetch(
         `https://api.hubapi.com/crm/v4/associations/${OBJECT_TYPE}/${kitTypeId}/batch/read`,
         {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({ inputs: batch.map(id => ({ id: String(id) })) }),
-        }
+        },
+        `project→kit assoc (${batch.length} projects)`
       );
-      if (!res.ok) { console.warn("[stationKits] project→kit assoc batch error:", res.status); return; }
+      if (!res) { projBatchesFailed++; return; }
       const data = await res.json();
       for (const result of (data.results || [])) {
         byProject[String(result.from.id)] = (result.to || []).map(t => String(t.toObjectId));
       }
     } catch (e) {
+      projBatchesFailed++;
       console.warn("[stationKits] project→kit assoc batch failed:", e.message);
     }
-  }));
+  });
+  if (projBatchesFailed > 0) {
+    console.error(`[stationKits] ${projBatchesFailed} project→kit assoc batch(es) failed permanently — those projects appear kit-less this run`);
+  }
 
   const allKitIds = [...new Set(Object.values(byProject).flat())];
   const kitProps = {};
   const kitBatches = [];
   for (let i = 0; i < allKitIds.length; i += BATCH) kitBatches.push(allKitIds.slice(i, i + BATCH));
-  await Promise.all(kitBatches.map(async (batch) => {
+  let kitPropBatchesFailed = 0;
+  const failedKitPropIds = new Set(); // kits whose props we could NOT read — merge must not blank their names
+  await mapLimit(kitBatches, HS_BATCH_CONCURRENCY, async (batch) => {
     try {
-      const res = await fetchWithTimeout(`https://api.hubapi.com/crm/v3/objects/${kitTypeId}/batch/read`, {
+      const res = await hubspotFetch(`https://api.hubapi.com/crm/v3/objects/${kitTypeId}/batch/read`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           inputs: batch.map(id => ({ id })),
           properties: ["station_kit_sn", "name", "computer_sn", "status", "station_type"],
         }),
-      });
-      if (!res.ok) return;
+      }, `kit props (${batch.length} kits)`);
+      if (!res) { kitPropBatchesFailed++; batch.forEach(id => failedKitPropIds.add(String(id))); return; }
       const data = await res.json();
       for (const obj of (data.results || [])) kitProps[obj.id] = obj.properties || {};
     } catch (e) {
+      kitPropBatchesFailed++;
+      batch.forEach(id => failedKitPropIds.add(String(id)));
       console.warn("[stationKits] kit props batch failed:", e.message);
     }
-  }));
+  });
+  if (kitPropBatchesFailed > 0) {
+    console.error(`[stationKits] ${kitPropBatchesFailed} kit-props batch(es) failed permanently — ${failedKitPropIds.size} kit(s) keep their existing fixture_name/station_name this run`);
+  }
 
-  return { byProject, kitProps };
+  return { byProject, kitProps, failedKitPropIds };
 }
 
 // Batch-fetch Station Components (Fleet Assets) for a list of kit IDs.
@@ -538,19 +621,22 @@ async function fetchComponentsForKits(token, kitTypeId, componentTypeId, kitIds)
   const assocBatches = [];
   for (let i = 0; i < kitIds.length; i += BATCH) assocBatches.push(kitIds.slice(i, i + BATCH));
   let firstBatchLogged = false;
-  await Promise.all(assocBatches.map(async (batch) => {
+  let assocBatchesFailed = 0, assocKitsLost = 0;
+  await mapLimit(assocBatches, HS_BATCH_CONCURRENCY, async (batch) => {
     try {
-      const res = await fetchWithTimeout(`https://api.hubapi.com/crm/v4/associations/${kitTypeId}/${componentTypeId}/batch/read`, {
+      const res = await hubspotFetch(`https://api.hubapi.com/crm/v4/associations/${kitTypeId}/${componentTypeId}/batch/read`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ inputs: batch.map(id => ({ id })) }),
-      });
+      }, `kit→component assoc (${batch.length} kits)`);
+      // v4.7.8: null means the request failed after retries. Previously a bare `return` here
+      // made the kits in this batch look like they had zero components at all.
+      if (!res) { assocBatchesFailed++; assocKitsLost += batch.length; return; }
       const rawText = await res.text();
       if (!firstBatchLogged) {
         firstBatchLogged = true;
         console.log(`[stationKits] assoc batch status=${res.status}, sample response:`, rawText.slice(0, 400));
       }
-      if (!res.ok) return;
       const data = JSON.parse(rawText);
       for (const result of (data.results || [])) {
         const kitId = String(result.from.id);
@@ -566,50 +652,72 @@ async function fetchComponentsForKits(token, kitTypeId, componentTypeId, kitIds)
         if (list.length) assocsByKit[kitId] = list;
       }
     } catch (e) {
+      assocBatchesFailed++;
+      assocKitsLost += batch.length;
       console.warn("[stationKits] assoc batch failed:", e.message);
     }
-  }));
+  });
+  if (assocBatchesFailed > 0) {
+    console.error(`[stationKits] ${assocBatchesFailed} kit→component assoc batch(es) failed permanently — up to ${assocKitsLost} kit(s) have unknown components this run`);
+  }
 
-  // Step 2: batch-read component properties (parallel)
+  // Step 2: batch-read component properties (bounded concurrency + retry)
   const allCompIds = [...new Set(Object.values(assocsByKit).flatMap(arr => arr.map(a => a.assetId)))];
   const compProps = {};
   const compBatches = [];
   for (let i = 0; i < allCompIds.length; i += BATCH) compBatches.push(allCompIds.slice(i, i + BATCH));
-  await Promise.all(compBatches.map(async (batch) => {
+  let propBatchesFailed = 0;
+  await mapLimit(compBatches, HS_BATCH_CONCURRENCY, async (batch) => {
     try {
-      const res = await fetchWithTimeout(`https://api.hubapi.com/crm/v3/objects/${componentTypeId}/batch/read`, {
+      const res = await hubspotFetch(`https://api.hubapi.com/crm/v3/objects/${componentTypeId}/batch/read`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ inputs: batch.map(id => ({ id })), properties: ["asset_sn", "name", "category__c", "asset_category_new", "category_master", "category", "model__c", "model_number", "model", "product_sn_service_tag", "mac_address__c"] }),
-      });
-      if (!res.ok) return;
+      }, `fleet asset props (${batch.length} assets)`);
+      // v4.7.8: this is the exact line that silently corrupted 1,503 items. A failed batch
+      // must leave compProps EMPTY for those ids so step 3 marks them unresolved — it must
+      // never let the assetId fall through into the serial field.
+      if (!res) { propBatchesFailed++; return; }
       const data = await res.json();
       for (const obj of (data.results || [])) compProps[obj.id] = obj.properties || {};
     } catch (e) {
+      propBatchesFailed++;
       console.warn("[stationKits] component batch read failed:", e.message);
     }
-  }));
+  });
+  if (propBatchesFailed > 0) {
+    console.error(`[stationKits] ${propBatchesFailed} fleet-asset property batch(es) failed permanently — affected assets are marked unresolved, NOT written with placeholder serials`);
+  }
 
   // Step 3: build final map kitId → components array
   const result = {};
   for (const [kitId, assocs] of Object.entries(assocsByKit)) {
     result[kitId] = assocs.map(({ assetId, label }) => {
-      const p = compProps[assetId] || {};
+      const p = compProps[assetId];
+      // v4.7.8: `unresolved` = we never got this asset's properties back. Consumers must
+      // skip it or reuse the previously-synced value; they must NOT write a placeholder.
+      const unresolved = !p;
+      const props = p || {};
       return {
         id: `hs_comp_${assetId}`,
         fleetAssetHsId: assetId,
         associationLabel: label, // exact HubSpot label string, e.g. "Camera 1" — null if unlabeled
-        serial: p.asset_sn || p.name || assetId,
+        unresolved,
+        // v4.7.8: was `p.asset_sn || p.name || assetId` — the assetId fallback is what wrote
+        // HubSpot object IDs into RTDB as serial numbers on every dropped batch response.
+        serial: props.asset_sn || props.name || "",
         // v4.7.6: category__c is HubSpot's actual "Category (Master)" property.
         // Previously we tried category_master and category — both don't exist as API names.
         // Falls back through legacy names + asset_category_new for backwards compat.
-        category: p.category__c || p.asset_category_new || p.category_master || p.category || "",
-        model: p.model__c || p.model_number || p.model || "",
+        category: props.category__c || props.asset_category_new || props.category_master || props.category || "",
+        model: props.model__c || props.model_number || props.model || "",
         // v4.5.2: extra computer-specific props used by pd_station_kits row builder
-        productServiceTag: p.product_sn_service_tag || "",
-        macAddress: p.mac_address__c || "",
+        productServiceTag: props.product_sn_service_tag || "",
+        macAddress: props.mac_address__c || "",
       };
-    }).filter(c => c.serial);
+      // Keep unresolved entries in the list so callers can tell "failed to read" apart from
+      // "not associated" — resolved-but-serial-less assets are still dropped as before.
+    }).filter(c => c.serial || c.unresolved);
   }
   return result;
 }
@@ -620,12 +728,28 @@ async function fetchComponentsForKits(token, kitTypeId, componentTypeId, kitIds)
 // so the UI can render slot-aware labels and writeback CFs have the IDs they need.
 function buildHardwareFromKits(projectKitIds, kitProps, componentsByKit, existingHW) {
   const manualItems = (existingHW || []).filter(h => h.source !== "hubspot");
+  // v4.7.8: index the previously-synced HubSpot items by fleet asset ID so a failed property
+  // read this run can reuse the last known-good serial instead of overwriting it. Items whose
+  // stored serial is itself the object-ID corruption are NOT reusable — those must be refetched.
+  const prevByAssetId = {};
+  for (const h of (existingHW || [])) {
+    if (h && h.source === "hubspot" && h._fleetAssetHubspotId && !looksLikeHubspotObjectId(h.serial)) {
+      prevByAssetId[String(h._fleetAssetHubspotId)] = h;
+    }
+  }
   const hsItems = [];
   for (const kitId of (projectKitIds || [])) {
     const props = kitProps[kitId] || {};
     const kitSN = props.station_kit_sn || props.name || kitId;
     const components = componentsByKit[kitId] || [];
     for (const comp of components) {
+      if (comp.unresolved) {
+        // Property read failed after retries. Carry the previous good row forward if we have
+        // one; otherwise skip entirely — a missing row is honest, a fabricated serial is not.
+        const prev = prevByAssetId[String(comp.fleetAssetHsId)];
+        if (prev) hsItems.push({ ...prev, kitSN, _staleFromFailedSync: true });
+        continue;
+      }
       hsItems.push({
         id: comp.id,
         // v4.7.5: HubSpot's category_master field is empty on most fleet assets, so fall back
@@ -664,7 +788,9 @@ function buildStationKitsRowsFromKits(projectKitIds, kitProps, componentsByKit) 
   const normKey = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
   for (const kitId of projectKitIds || []) {
     const props = kitProps[kitId] || {};
-    const components = componentsByKit[kitId] || [];
+    // v4.7.8: unresolved components have no serial and no category — including them would
+    // occupy a slot with an empty value and hide a real component behind it.
+    const components = (componentsByKit[kitId] || []).filter(c => !c.unresolved);
     const byLabel = {};
     for (const c of components) {
       if (c.associationLabel) {
@@ -1256,13 +1382,20 @@ async function runSync(token, commit, syncCtx) {
         // projects updating" foot-gun.
         const projectHsIds = incoming.map(p => p.hubspotId).filter(Boolean);
         console.log(`[stationKits] syncing all ${incoming.length} project(s) (active + closed)`);
-        const { byProject, kitProps } = await fetchKitsForProjects(token, projectHsIds, kitTypeId);
+        const { byProject, kitProps, failedKitPropIds } = await fetchKitsForProjects(token, projectHsIds, kitTypeId);
         kitsByProject = byProject; // save for shipments traversal
         const allKitIds = [...new Set(Object.values(byProject).flat())];
         console.log(`[stationKits] projects with kits: ${Object.keys(byProject).length}, total unique kit IDs: ${allKitIds.length}`);
         const componentsByKit = await fetchComponentsForKits(token, kitTypeId, componentTypeId, allKitIds);
         const totalComponents = Object.values(componentsByKit).reduce((s, a) => s + a.length, 0);
         console.log(`[stationKits] total components found: ${totalComponents}`, totalComponents > 0 ? "sample:" : "(none)", totalComponents > 0 ? JSON.stringify(Object.values(componentsByKit)[0]?.[0]) : "");
+        // v4.7.8: separate "we failed to read it" from "HubSpot has nothing there". Without this
+        // split the v4.7.7 coverage line blamed HubSpot for our own dropped batch responses.
+        const unresolvedComponents = Object.values(componentsByKit).flat().filter(c => c.unresolved).length;
+        const kitsWithNoComponents = allKitIds.filter(k => (componentsByKit[k] || []).length === 0).length;
+        if (unresolvedComponents > 0) {
+          console.error(`[stationKits] DEGRADED RUN: ${unresolvedComponents} of ${totalComponents} component(s) had unreadable properties — their slots were left untouched rather than blanked. Re-run the sync to fill them.`);
+        }
 
         // Read only _hardwareTracking for projects that have kits (parallel targeted reads)
         const existingHWByPid = {};
@@ -1326,7 +1459,17 @@ async function runSync(token, commit, syncCtx) {
             if (!nr) return r;
             matchedKitIds.add(r._kitHubspotId);
             const merged = { ...r };
-            for (const k of HUBSPOT_DRIVEN_SK_KEYS) merged[k] = nr[k];
+            // v4.7.8: if any of this kit's components failed to read this run, the computed row
+            // is incomplete — don't let it blank out a slot that already holds a good value.
+            // When everything resolved, merge normally so genuine HubSpot removals still apply.
+            const degraded = (componentsByKit[r._kitHubspotId] || []).some(c => c.unresolved)
+              || (failedKitPropIds && failedKitPropIds.has(String(r._kitHubspotId)));
+            for (const k of HUBSPOT_DRIVEN_SK_KEYS) {
+              const v = nr[k];
+              const isBlank = v === "" || v === false || v === null || v === undefined;
+              if (degraded && isBlank && r[k]) continue; // keep last known-good
+              merged[k] = v;
+            }
             return merged;
           });
           // Append rows for kits that don't have a corresponding row yet
@@ -1375,7 +1518,12 @@ async function runSync(token, commit, syncCtx) {
             }
           }
           const emptyList = projectsWithEmptySlots.slice(0, 10).join(", ") + (projectsWithEmptySlots.length > 10 ? `, ... (${projectsWithEmptySlots.length - 10} more)` : "");
-          console.log(`[stationKits] COVERAGE: ${projectsWithKits} project(s) synced; ${rowsTotal} kit row(s); computer_sn:${rowsComputer}/${rowsTotal} camera_1_sn:${rowsCamera}/${rowsTotal} lens_1_sn:${rowsLens}/${rowsTotal}; ${projectsWithEmptySlots.length} project(s) had kits but ALL slots empty (HubSpot data gap): ${emptyList || "none"}`);
+          // v4.7.8: the empty-slot list is a SYMPTOM list, not a diagnosis. It previously said
+          // "(HubSpot data gap)" — which was wrong for 3 of the 10 projects it named on
+          // 2026-08-20; those were our own dropped batch reads. Cause now reported separately:
+          //   unresolved > 0        → our fetch failed, re-run the sync
+          //   kitsWithNoComponents  → HubSpot genuinely has no fleet assets on that kit (ops task)
+          console.log(`[stationKits] COVERAGE: ${projectsWithKits} project(s) synced; ${rowsTotal} kit row(s); computer_sn:${rowsComputer}/${rowsTotal} camera_1_sn:${rowsCamera}/${rowsTotal} lens_1_sn:${rowsLens}/${rowsTotal}; unresolved_components:${unresolvedComponents}/${totalComponents} (our fetch failed); kits_with_no_fleet_assets:${kitsWithNoComponents}/${allKitIds.length} (nothing associated in HubSpot); ${projectsWithEmptySlots.length} project(s) have kits but no SN in any slot: ${emptyList || "none"}`);
         } catch (covErr) {
           console.warn("[stationKits] coverage report failed (non-fatal):", covErr.message);
         }
