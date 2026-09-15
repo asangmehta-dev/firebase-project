@@ -4323,11 +4323,6 @@ function SIKanbanView({ projects, state, setState }) {
         &nbsp;{siProjects.length} SI project{siProjects.length !== 1 ? "s" : ""} tracked.
       </p>
 
-      {/* SI Process link */}
-      <a href="https://script.google.com/a/macros/instrumental.com/s/AKfycbxOAtRNRm2_-XIPPK1fPKW-O55uVtMhMZSDcdZiR4xRqRBmtYgqURhAZ8MPg3RVsvNG/exec" target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, background: "#FFF", color: "#3B82F6", fontSize: 12, fontWeight: 600, textDecoration: "none", fontFamily: F, marginBottom: 14 }}>
-        SI Process, RACI & Principles ↗
-      </a>
-
       <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 8 }}>
         {SI_PIPELINE_STAGES.map(stage => {
           const stageProjects = siProjects.filter(p => getStage(p) === stage.id);
@@ -6471,10 +6466,6 @@ function AllSIProjectsView({ user, state, setState, setView, setProject, setSiFu
               </div>
             )}
           </div>
-          <a href="https://script.google.com/a/macros/instrumental.com/s/AKfycbxOAtRNRm2_-XIPPK1fPKW-O55uVtMhMZSDcdZiR4xRqRBmtYgqURhAZ8MPg3RVsvNG/exec" target="_blank" rel="noopener noreferrer"
-            style={{ padding: "6px 14px", border: "1px solid transparent", borderRadius: 6, background: "transparent", color: NAV_MUTED, fontFamily: SI_F, fontSize: 13, fontWeight: 600, cursor: "pointer", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>
-            SI Process, RACI & Principles ↗
-          </a>
         </div>
         <div style={{ flex: 1 }} />
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
